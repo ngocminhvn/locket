@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -201,17 +200,10 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     var progress by remember { mutableStateOf<Float?>(null) }
     var downloaded by remember { mutableStateOf<File?>(null) }
     var showCameraSettings by remember { mutableStateOf(false) }
-    ProfileSettingsRow(
-        icon = { Icon(Icons.Default.CameraAlt, null, tint = Color(0xFFCCCCCC)) },
-        title = "Cài đặt Camera",
-        trailing = { Icon(Icons.Default.ChevronRight, null, tint = LocketTextDim) },
-        onClick = { showCameraSettings = true }
-    )
-    if (showCameraSettings) CameraSettingsDialog { showCameraSettings = false }
-
-    ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Phiên bản ứng dụng", version)
-    ModRow({ Icon(Icons.Default.SystemUpdate, null, tint = Color.White) }, "Kiểm tra cập nhật",
-        if (busy) "Đang kiểm tra..." else null, enabled = !busy && progress == null) {
+    // Keep version/update and GitHub as the first two Mod Center rows.
+    ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Phiên bản ứng dụng",
+        if (busy) "$version · Đang kiểm tra..." else version,
+        enabled = !busy && progress == null) {
         busy = true
         scope.launch {
             try {
@@ -228,6 +220,14 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO))) }
         catch (e: Exception) { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
     }
+
+    ProfileSettingsRow(
+        icon = { Icon(Icons.Default.CameraAlt, null, tint = Color(0xFFCCCCCC)) },
+        title = "Cài đặt Camera",
+        trailing = { Icon(Icons.Default.ChevronRight, null, tint = LocketTextDim) },
+        onClick = { showCameraSettings = true }
+    )
+    if (showCameraSettings) CameraSettingsDialog { showCameraSettings = false }
 
     // Nut tat "Hien luot xem" (chip luot xem tren moment cua minh,
     // Batch 7a). Mac dinh bat; tat thi an chip.
