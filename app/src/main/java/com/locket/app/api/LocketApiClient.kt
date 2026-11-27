@@ -1711,13 +1711,13 @@ class LocketApiClient(
                 val latestMsg = fields?.getAsJsonObject("latest_message")
                     ?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
                 val lastMsg = if (latestMsg != null) extractString(latestMsg, "body") else ""
-                val lastMsgSeconds = if (latestMsg != null) {
-                    extractTimestampMs(latestMsg, "created_at")?.let { it / 1000 }
+                val lastMsgAtMs = if (latestMsg != null) {
+                    extractTimestampMs(latestMsg, "created_at")
                 } else null
                 val latestSender = if (latestMsg != null) extractString(latestMsg, "sender") else ""
                 val latestThumb = if (latestMsg != null) extractString(latestMsg, "thumbnail_url") else ""
                 val fallbackMsg = extractString(fields, "last_message")
-                val fallbackSeconds = extractTimestampMs(fields, "last_message_date")?.let { it / 1000 }
+                val fallbackAtMs = extractTimestampMs(fields, "last_message_date")
 
                 // Preview that, theo thu tu uu tien:
                 // 1. body that cua tin cuoi; 2. "Da gui khoanh khac" CHI khi tin cuoi
@@ -1730,8 +1730,8 @@ class LocketApiClient(
                     fallbackMsg.isNotBlank() -> fallbackMsg
                     else -> ""
                 }
-                val finalSeconds = lastMsgSeconds ?: fallbackSeconds
-                val timeAgo = finalSeconds?.let { formatTimeAgo(it) } ?: ""
+                val lastMessageAtMs = lastMsgAtMs ?: fallbackAtMs
+                val timeAgo = lastMessageAtMs?.let { formatTimeAgo(it / 1000) } ?: ""
 
                 // Chua doc: chi khi is_read == false ro rang
                 val isRead = extractBool(fields, "is_read")
@@ -1743,7 +1743,8 @@ class LocketApiClient(
                         friend = Friend(uid = otherUid, username = otherUid, displayName = ""),
                         lastMessage = finalMsg,
                         timeAgo = timeAgo,
-                        unreadCount = unread
+                        unreadCount = unread,
+                        lastMessageAtMs = lastMessageAtMs
                     )
                 )
             }
@@ -1767,7 +1768,7 @@ class LocketApiClient(
                 }
             }
 
-            Result.success(resolved)
+            Result.success(resolved.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id }))
         } catch (e: Exception) {
             Result.failure(e)
         }

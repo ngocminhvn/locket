@@ -71,7 +71,8 @@ data class ConversationEntity(
     val friendAvatarUrl: String = "",
     val lastMessage: String = "",
     val timeAgo: String = "",
-    val unreadCount: Int = 0
+    val unreadCount: Int = 0,
+    val lastMessageAtMs: Long? = null
 )
 
 /**
@@ -151,7 +152,8 @@ fun Conversation.toEntity() = ConversationEntity(
     friendAvatarUrl = friend.avatarUrl,
     lastMessage = lastMessage,
     timeAgo = timeAgo,
-    unreadCount = unreadCount
+    unreadCount = unreadCount,
+    lastMessageAtMs = lastMessageAtMs
 )
 
 fun ConversationEntity.toModel() = Conversation(
@@ -164,7 +166,8 @@ fun ConversationEntity.toModel() = Conversation(
     ),
     lastMessage = lastMessage,
     timeAgo = timeAgo,
-    unreadCount = unreadCount
+    unreadCount = unreadCount,
+    lastMessageAtMs = lastMessageAtMs
 )
 
 fun ChatMessage.toEntity() = ChatMessageEntity(
@@ -240,7 +243,7 @@ interface LocketDao {
     @Query("SELECT * FROM friends ORDER BY displayName COLLATE NOCASE ASC")
     fun observeFriends(): Flow<List<FriendEntity>>
 
-    @Query("SELECT * FROM conversations")
+    @Query("SELECT * FROM conversations ORDER BY lastMessageAtMs DESC, id ASC")
     fun observeConversations(): Flow<List<ConversationEntity>>
 
     @Query("SELECT * FROM friends WHERE uid = :uid LIMIT 1")
@@ -325,7 +328,7 @@ interface LocketDao {
 
 @Database(
     entities = [MomentEntity::class, FriendEntity::class, ConversationEntity::class, ChatMessageEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

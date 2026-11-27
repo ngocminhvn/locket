@@ -52,7 +52,7 @@ fun ConversationsScreen(
     // Conversations strictly from live server data or friends list (No demo data)
     val conversations = remember(liveConversations, friends) {
         if (liveConversations.isNotEmpty()) {
-            liveConversations
+            liveConversations.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id })
         } else {
             friends.map { friend ->
                 Conversation(
@@ -129,7 +129,7 @@ fun ConversationsScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                items(conversations) { conv ->
+                items(conversations, key = { it.id }) { conv ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

@@ -81,7 +81,8 @@ data class Conversation(
     val friend: Friend,
     val lastMessage: String,
     val timeAgo: String,
-    val unreadCount: Int = 0
+    val unreadCount: Int = 0,
+    val lastMessageAtMs: Long? = null
 )
 
 /**

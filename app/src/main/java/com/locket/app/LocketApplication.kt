@@ -2,6 +2,8 @@ package com.locket.app
 
 import android.app.Application
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -28,6 +30,11 @@ class LocketApplication : Application(), ImageLoaderFactory {
             // DB moi lap lan dau (version 1); xoa + tao lai neu schema doi
             // o ban phat trien sau — cache chi la ban sao du lieu API nen
             // xoa khong mat du lieu that (sync lai la co).
+            .addMigrations(object : Migration(2, 3) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN lastMessageAtMs INTEGER")
+                }
+            })
             .fallbackToDestructiveMigration()
             .build()
         cache = LocketCache(database, sessionManager)
