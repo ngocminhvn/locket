@@ -29,7 +29,27 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0 ndk;27.2.12479018'
+
+      - name: Set up Rust Android toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Test and build Rust core
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: |
+          cargo test --manifest-path rust-core/Cargo.toml --locked
+          ./scripts/build-rust-android.sh
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            test -s "app/src/main/jniLibs/$abi/liblocket_core.so"
+          done
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x ./gradlew

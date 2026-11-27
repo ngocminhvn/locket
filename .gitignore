@@ -13,3 +13,5 @@
 Locket.apk
 video_frames/
 .kotlin/
+/rust-core/target/
+/app/src/main/jniLibs/
