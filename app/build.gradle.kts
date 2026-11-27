@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.locket.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.locket.app"
@@ -71,12 +71,13 @@ dependencies {
     implementation("androidx.emoji2:emoji2-emojipicker:1.4.0")
 
     // CameraX
-    val cameraxVersion = "1.3.4"
+    val cameraxVersion = "1.5.0"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
     implementation("androidx.camera:camera-video:$cameraxVersion")
+    implementation("androidx.camera:camera-extensions:$cameraxVersion")
 
     // Coil for Compose image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
