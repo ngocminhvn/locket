@@ -42,7 +42,8 @@ fun HomePagerScreen(
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
     onOpenProfile: () -> Unit,
-    onTabSwipeEnabledChange: (Boolean) -> Unit = {}
+    onTabSwipeEnabledChange: (Boolean) -> Unit = {},
+    tabActive: Boolean = true
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -142,7 +143,7 @@ fun HomePagerScreen(
         pagerState.currentPage == 0 && pagerState.settledPage == 0 && cameraSwipeEnabled
     )
 
-    BackHandler(enabled = pagerState.currentPage != 0) {
+    BackHandler(enabled = tabActive && pagerState.currentPage != 0) {
         viewModel.setReplyToFriend(null)
         scope.launch { pagerState.animateScrollToPage(0) }
     }
@@ -150,7 +151,8 @@ fun HomePagerScreen(
     Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
     VerticalPager(
         state = pagerState,
-        beyondViewportPageCount = 3,
+        beyondViewportPageCount = 1,
+        overscrollEffect = null,
         key = { page -> if (page == 0) "camera" else moments.getOrNull(page - 1)?.id ?: "loading-tail" },
         userScrollEnabled = !zoomLocked && !showFriendFilter && (pagerState.settledPage != 0 || cameraSwipeEnabled),
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {

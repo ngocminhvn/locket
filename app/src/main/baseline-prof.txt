@@ -1,0 +1,6 @@
+HSPLcom/locket/app/MainActivity;->onCreate(Landroid/os/Bundle;)V
+HSPLcom/locket/app/LocketApplication;->onCreate()V
+Lcom/locket/app/MainActivity;
+Lcom/locket/app/LocketApplication;
+Lcom/locket/app/ui/LocketViewModel;
+Lcom/locket/app/storage/SessionManager;

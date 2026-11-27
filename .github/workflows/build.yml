@@ -29,7 +29,16 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-34 platforms;android-35 platforms;android-36 build-tools;34.0.0 build-tools;35.0.0 ndk;27.2.12479018'
+          packages: 'platform-tools build-tools;34.0.0 build-tools;35.0.0 ndk;27.2.12479018'
+
+      - name: Install Android API 37.1
+        run: |
+          sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 --install "platforms;android-37.1" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
 
       - name: Set up Rust Android toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -71,7 +80,7 @@ jobs:
 
       - name: Build explicitly signed Release APK
         run: |
-          ./gradlew assembleRelease --stacktrace --no-daemon \
+          gradle assembleRelease --stacktrace --no-daemon \
             -Pandroid.injected.signing.store.file="$LOCKET_KEYSTORE" \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=androiddebugkey \
@@ -85,6 +94,7 @@ jobs:
           apk="app/build/outputs/apk/release/app-release.apk"
           signer="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           "$signer" verify --verbose --print-certs "$apk"
+          unzip -l "$apk" | grep -F 'assets/dexopt/baseline.prof'
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$apk"
           certificate() {
             "$signer" verify --print-certs "$1" |

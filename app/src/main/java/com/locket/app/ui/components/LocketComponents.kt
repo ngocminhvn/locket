@@ -36,7 +36,7 @@ fun ShutterButton(
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.90f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.6f),
+        animationSpec = androidx.compose.animation.core.tween(120),
         label = "shutterScale"
     )
 

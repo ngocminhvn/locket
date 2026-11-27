@@ -26,15 +26,15 @@ The client communicates directly with Locket's production backend:
 
 | Component | Version / Specification |
 |---|---|
-| **Language** | Kotlin 2.2.21, Java 17 |
-| **Android SDK** | compileSdk 36, targetSdk 34, minSdk 26 |
-| **Android Gradle Plugin (AGP)** | 8.13.2 |
-| **UI Framework** | Jetpack Compose (BOM 2025.09.01), Compose Compiler 2.2.21 |
-| **Design System** | Material 3 Expressive 1.4.0, Liquid Glass gradients (no realtime blur) |
-| **Camera** | CameraX 1.5.0 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
-| **Networking** | OkHttp 4.12.0, Gson 2.11.0 |
-| **Image Loading** | Coil Compose 2.6.0 |
-| **State Management** | Android Lifecycle ViewModel (`androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7`), Kotlin Coroutines & `StateFlow` |
+| **Language** | Kotlin 2.4.21 Compose compiler, Java 17 (AGP built-in Kotlin) |
+| **Android SDK** | compileSdk 37.1, targetSdk 34, minSdk 26 |
+| **Android Gradle Plugin (AGP)** | 9.2.1 |
+| **UI Framework** | Jetpack Compose (BOM 2026.11.01), Compose Compiler 2.4.21 |
+| **Design System** | Material 3 Expressive 1.5.0, Liquid Glass gradients (no realtime blur) |
+| **Camera** | CameraX 1.6.2 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
+| **Networking** | OkHttp 5.5.1, Gson 2.15.0 |
+| **Image Loading** | Coil Compose 2.7.0 |
+| **State Management** | Android Lifecycle ViewModel (`androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0`), Kotlin Coroutines & `StateFlow` |
 
 ---
 
@@ -168,3 +168,9 @@ When modifying this repository:
   one-writer transactional migration/rollback plan.
 - The GitHub workflow must remain `workflow_dispatch`; do not run it unless the
   repository owner explicitly asks for an APK build.
+
+### Navigation and release performance
+
+- Main tabs use one HorizontalPager with a monotonic tween; no second slide, fade, bounce, shake or stretch overscroll. Vertical HomePager remains independent. Do not animate the entire window or add vibration effects.
+- Release enables R8 and resource shrinking. Preserve Gson model fields, Room storage schema and JNI symbols. The checked-in baseline profile is a small manually authored startup seed, not a measured/generated benchmark profile. CI verifies that the compiled APK contains a baseline profile. Do not claim performance gains without measurement.
+- SDK 37.1, AGP 9.2.1, Gradle 9.4.1 and the November 2026 Compose BOM follow the TKB SV toolchain. Workflow stays manual-only.

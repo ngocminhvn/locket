@@ -5,19 +5,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.dp
-import kotlin.math.abs
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.rememberPagerState
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -64,39 +60,14 @@ class MainActivity : ComponentActivity() {
                     "chat" -> 2
                     else -> -1
                 }
-                // Retain saveable history/chat UI state, not live camera resources.
                 val tabStateHolder = rememberSaveableStateHolder()
-                val density = LocalDensity.current
-                var previousTab by remember { mutableIntStateOf(mainTab) }
-                val tabDirection = remember(mainTab) {
-                    if (previousTab >= 0 && mainTab >= 0) (mainTab - previousTab).coerceIn(-1, 1) else 0
-                }
-                val tabMotion = remember(mainTab) { Animatable(if (tabDirection == 0) 0f else 1f) }
-                SideEffect { previousTab = mainTab }
-                LaunchedEffect(tabMotion) {
-                    tabMotion.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow))
-                }
-                val canSwipeTabs by rememberUpdatedState(
-                    isLoggedIn && mainTab >= 0 && !showProfileScreen && !showFriendsModal &&
-                        (currentScreen !in listOf("camera", "feed") || homeTabSwipeEnabled)
-                )
-                val activeTab by rememberUpdatedState(mainTab)
-                val switchTab by rememberUpdatedState<(Int) -> Unit>({ tab ->
-                    if (tab in 0..2 && tab != mainTab) {
-                        if (tab == 1) {
-                            viewModel.setReplyToFriend(null)
-                            viewModel.selectFriend(null)
-                            selectedGridIndex = 0
-                            homeTabSwipeEnabled = true
-                        }
-                        currentScreen = listOf("history", "camera", "chat")[tab]
-                    }
-                })
+                val tabRoutes = remember { listOf("history", "camera", "chat") }
 
                 LaunchedEffect(isLoggedIn) {
                     if (!isLoggedIn) {
                         currentScreen = "welcome"
+                        tabStateHolder.removeState("history")
+                        tabStateHolder.removeState("chat")
                     }
                 }
 
@@ -129,49 +100,6 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(LocketBlack)
-                        .pointerInput(Unit) {
-                            // Edge-inward swipe: right from the left edge goes
-                            // to the previous tab; left from the right goes to
-                            // the next. Leave the outermost system-back area
-                            // to Android and ignore vertical/diagonal drags.
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                val startTab = activeTab
-                                val edgeWidth = 80.dp.toPx()
-                                val systemEdge = 18.dp.toPx()
-                                val fromLeft = down.position.x >= systemEdge && down.position.x <= edgeWidth
-                                val fromRight = down.position.x <= size.width - systemEdge &&
-                                    down.position.x >= size.width - edgeWidth
-                                val target = when {
-                                    fromLeft && startTab > 0 -> startTab - 1
-                                    fromRight && startTab in 0..1 -> startTab + 1
-                                    else -> -1
-                                }
-                                if (!canSwipeTabs || target < 0) return@awaitEachGesture
-                                var locked = false
-                                var completed = false
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.changes.count { it.pressed } > 1 ||
-                                        !canSwipeTabs || activeTab != startTab) break
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    val delta = change.position - down.position
-                                    val horizontal = if (fromLeft) delta.x else -delta.x
-                                    if (!locked) {
-                                        if (abs(delta.y) > viewConfiguration.touchSlop && abs(delta.y) >= abs(delta.x)) break
-                                        if (horizontal < -viewConfiguration.touchSlop) break
-                                        if (horizontal > maxOf(viewConfiguration.touchSlop, 16.dp.toPx()) &&
-                                            horizontal > abs(delta.y) * 1.5f) locked = true
-                                    }
-                                    if (locked) {
-                                        change.consume()
-                                        if (!change.pressed) completed = horizontal >= 64.dp.toPx()
-                                    }
-                                    if (!change.pressed) break
-                                }
-                                if (completed && canSwipeTabs && activeTab == startTab) switchTab(target)
-                            }
-                        }
                 ) {
                     when {
                         showProfileScreen -> {
@@ -186,15 +114,88 @@ class MainActivity : ComponentActivity() {
                                 onClose = { showFriendsModal = false }
                             )
                         }
+                        currentScreen in listOf("history", "camera", "feed", "chat") -> {
+                            val pager = rememberPagerState(initialPage = mainTab.coerceIn(0, 2)) { 3 }
+                            val activeRoute by rememberUpdatedState(currentScreen)
+                            // Programmatic taps and Android Back use the same pager motion.
+                            LaunchedEffect(mainTab) {
+                                if (pager.currentPage != mainTab || pager.currentPageOffsetFraction != 0f) {
+                                    pager.animateScrollToPage(mainTab,
+                                        animationSpec = tween(230, easing = FastOutSlowInEasing))
+                                }
+                            }
+                            // Do not write navigation state mid-drag; update once settled.
+                            LaunchedEffect(pager) {
+                                snapshotFlow { pager.settledPage }.drop(1).collect { page ->
+                                    val route = activeRoute
+                                    val routeTab = when (route) {
+                                        "history" -> 0
+                                        "camera", "feed" -> 1
+                                        "chat" -> 2
+                                        else -> -1
+                                    }
+                                    if (routeTab >= 0 && page != routeTab) {
+                                        if (page == 1) {
+                                            viewModel.setReplyToFriend(null)
+                                            viewModel.selectFriend(null)
+                                            selectedGridIndex = 0
+                                            homeTabSwipeEnabled = true
+                                        }
+                                        currentScreen = tabRoutes[page]
+                                    }
+                                }
+                            }
+                            HorizontalPager(
+                                state = pager,
+                                modifier = Modifier.fillMaxSize(),
+                                beyondViewportPageCount = 0,
+                                userScrollEnabled = pager.settledPage != 1 || homeTabSwipeEnabled,
+                                flingBehavior = PagerDefaults.flingBehavior(
+                                    state = pager,
+                                    snapAnimationSpec = tween(230, easing = FastOutSlowInEasing)
+                                ),
+                                overscrollEffect = null
+                            ) { page ->
+                                when (page) {
+                                    0 -> tabStateHolder.SaveableStateProvider("history") {
+                                        HistoryScreen(viewModel = viewModel,
+                                            onNavigate = { currentScreen = it },
+                                            onOpenProfile = { showProfileScreen = true })
+                                    }
+                                    1 -> {
+                                        // Only bind the camera when its page is actually being displayed.
+                                        // Prefetched but invisible pages must not keep the hardware open.
+                                        if (pager.currentPage == 1 || pager.settledPage == 1 || pager.targetPage == 1) {
+                                            HomePagerScreen(
+                                                viewModel = viewModel,
+                                                startOnCamera = currentScreen != "feed",
+                                                initialMomentIndex = selectedGridIndex,
+                                                onNavigate = { destination ->
+                                                    if (destination == "profile") showProfileScreen = true
+                                                    else currentScreen = destination
+                                                },
+                                                onOpenFriends = { showFriendsModal = true },
+                                                onOpenProfile = { showProfileScreen = true },
+                                                onTabSwipeEnabledChange = { enabled ->
+                                                    if (pager.settledPage == 1 || pager.currentPage == 1) homeTabSwipeEnabled = enabled
+                                                },
+                                                tabActive = pager.settledPage == 1
+                                            )
+                                        }
+                                    }
+                                    2 -> tabStateHolder.SaveableStateProvider("chat") {
+                                        ConversationsScreen(viewModel = viewModel,
+                                            onNavigate = { currentScreen = it },
+                                            onOpenChatDetail = { friend ->
+                                                activeChatFriend = friend
+                                                currentScreen = "chat_detail"
+                                            },
+                                            onOpenProfile = { showProfileScreen = true })
+                                    }
+                                }
+                            }
+                        }
                         else -> {
-                            // Animate only the incoming surface. Keeping two live
-                            // screen trees during a transition is expensive and can
-                            // overlap camera bind/unbind operations.
-                            Box(Modifier.fillMaxSize().graphicsLayer {
-                                val progress = tabMotion.value.coerceIn(0f, 1f)
-                                translationX = with(density) { 28.dp.toPx() } * tabDirection * progress
-                                alpha = 1f - 0.12f * progress
-                            }) {
                             when (currentScreen) {
                                 "welcome" -> {
                                     WelcomeScreen(
@@ -219,20 +220,6 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = "chat"
                                     }
                                 }
-                                "camera", "feed" -> {
-                                    HomePagerScreen(
-                                        viewModel = viewModel,
-                                        startOnCamera = currentScreen == "camera",
-                                        initialMomentIndex = selectedGridIndex,
-                                        onNavigate = { destination ->
-                                            if (destination == "profile") showProfileScreen = true
-                                            else currentScreen = destination
-                                        },
-                                        onOpenFriends = { showFriendsModal = true },
-                                        onOpenProfile = { showProfileScreen = true },
-                                        onTabSwipeEnabledChange = { homeTabSwipeEnabled = it }
-                                    )
-                                }
                                 "grid" -> {
                                     HomeGridScreen(
                                         viewModel = viewModel,
@@ -245,25 +232,6 @@ class MainActivity : ComponentActivity() {
                                         onOpenProfile = { showProfileScreen = true }
                                     )
                                 }
-                                "history" -> tabStateHolder.SaveableStateProvider("history") {
-                                    HistoryScreen(
-                                        viewModel = viewModel,
-                                        onNavigate = { currentScreen = it },
-                                        onOpenProfile = { showProfileScreen = true }
-                                    )
-                                }
-                                "chat" -> tabStateHolder.SaveableStateProvider("chat") {
-                                    ConversationsScreen(
-                                        viewModel = viewModel,
-                                        onNavigate = { currentScreen = it },
-                                        onOpenChatDetail = { friend ->
-                                            activeChatFriend = friend
-                                            currentScreen = "chat_detail"
-                                        },
-                                        onOpenProfile = { showProfileScreen = true }
-                                    )
-                                }
-                            }
                             }
                         }
                     }

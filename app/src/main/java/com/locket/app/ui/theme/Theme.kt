@@ -3,6 +3,8 @@ package com.locket.app.ui.theme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
@@ -36,9 +38,11 @@ fun LocketTheme(content: @Composable () -> Unit) {
             if (folder.list()?.isEmpty() == true) folder.delete()
         }
     }
-    MaterialExpressiveTheme(
-        colorScheme = DarkColorScheme,
-        typography = LocketTypography,
-        content = content
-    )
+    CompositionLocalProvider(LocalOverscrollFactory provides null) {
+        MaterialExpressiveTheme(
+            colorScheme = DarkColorScheme,
+            typography = LocketTypography,
+            content = content
+        )
+    }
 }
