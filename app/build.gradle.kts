@@ -71,6 +71,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.emoji2:emoji2-emojipicker:1.7.0")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     // CameraX
     val cameraxVersion = "1.6.2"
