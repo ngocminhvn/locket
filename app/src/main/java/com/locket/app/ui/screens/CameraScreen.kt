@@ -473,8 +473,7 @@ fun CameraScreen(
                                 recordingElapsedMs / 100 % 10),
                             color = Color.White,
                             fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 } else Row(

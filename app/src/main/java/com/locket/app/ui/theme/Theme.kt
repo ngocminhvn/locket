@@ -22,6 +22,7 @@ private val DarkColorScheme = darkColorScheme(
 fun LocketTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = DarkColorScheme,
+        typography = LocketTypography,
         content = content
     )
 }
