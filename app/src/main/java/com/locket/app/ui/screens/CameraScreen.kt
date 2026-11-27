@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Rational
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -169,8 +170,13 @@ fun CameraScreen(
                             val preview = Preview.Builder().build().also {
                                 it.setSurfaceProvider(previewView.surfaceProvider)
                             }
+                            val rotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+                            // Match the square FILL_CENTER preview with the actual captured sensor region.
+                            val viewPort = ViewPort.Builder(Rational(1, 1), rotation)
+                                .setScaleType(ViewPort.FILL_CENTER)
+                                .build()
                             val photo = ImageCapture.Builder()
-                                .setTargetRotation(previewView.display?.rotation ?: android.view.Surface.ROTATION_0)
+                                .setTargetRotation(rotation)
                                 .setFlashMode(if (frontCamera) ImageCapture.FLASH_MODE_OFF else flashMode)
                                 .build()
                             val video = VideoCapture.withOutput(
@@ -180,12 +186,23 @@ fun CameraScreen(
                             )
                             cameraProvider.unbindAll()
                             val camera = try {
-                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, photo, video)
+                                val group = UseCaseGroup.Builder()
+                                    .setViewPort(viewPort)
+                                    .addUseCase(preview)
+                                    .addUseCase(photo)
+                                    .addUseCase(video)
+                                    .build()
+                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
                                     .also { videoCapture = video }
                             } catch (_: IllegalArgumentException) {
                                 // Some cameras cannot bind three use cases at once.
                                 cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, photo)
+                                val group = UseCaseGroup.Builder()
+                                    .setViewPort(viewPort)
+                                    .addUseCase(preview)
+                                    .addUseCase(photo)
+                                    .build()
+                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
                             }
                             hasFlash = camera.cameraInfo.hasFlashUnit()
                             imageCapture = photo
@@ -215,10 +232,11 @@ fun CameraScreen(
         val capture = imageCapture
         if (capture == null || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
+        val mirrorPhoto = frontCamera
         capture.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
-                    val bitmap = imageProxyToBitmap(image)
+                    val bitmap = imageProxyToBitmap(image, mirrorPhoto)
                     if (screenActive) capturedBitmap = bitmap
                 } catch (e: Exception) {
                     if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -754,18 +772,40 @@ fun CameraScreen(
     }
 }
 
-private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
-    val planeProxy = image.planes[0]
-    val buffer = planeProxy.buffer
+private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
+    val buffer = image.planes[0].buffer
     val bytes = ByteArray(buffer.remaining())
     buffer.get(bytes)
-    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    val rotationDegrees = image.imageInfo.rotationDegrees
-    return if (rotationDegrees != 0) {
-        val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-        Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-    } else {
-        bmp
-    }
-}
+    val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        ?: error("Không giải mã được ảnh JPEG")
 
+    // ImageProxy.cropRect is expressed in the unrotated buffer coordinates.
+    val rect = image.cropRect
+    val scaleX = source.width.toFloat() / image.width
+    val scaleY = source.height.toFloat() / image.height
+    val left = (rect.left * scaleX).toInt().coerceIn(0, source.width - 1)
+    val top = (rect.top * scaleY).toInt().coerceIn(0, source.height - 1)
+    val right = (rect.right * scaleX).toInt().coerceIn(left + 1, source.width)
+    val bottom = (rect.bottom * scaleY).toInt().coerceIn(top + 1, source.height)
+    val cropped = Bitmap.createBitmap(source, left, top, right - left, bottom - top)
+    if (cropped !== source) source.recycle()
+
+    val rotation = image.imageInfo.rotationDegrees
+    val upright = if (rotation != 0) {
+        Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height,
+            Matrix().apply { postRotate(rotation.toFloat()) }, true)
+    } else cropped
+    if (upright !== cropped) cropped.recycle()
+
+    // Front PreviewView is mirrored by CameraX; match that orientation in the
+    // saved photo, not merely in the review UI. Rear camera remains unmirrored.
+    val size = minOf(upright.width, upright.height)
+    val square = Bitmap.createBitmap(upright, (upright.width - size) / 2,
+        (upright.height - size) / 2, size, size)
+    if (square !== upright) upright.recycle()
+    if (!mirror) return square
+    val mirrored = Bitmap.createBitmap(square, 0, 0, square.width, square.height,
+        Matrix().apply { setScale(-1f, 1f) }, true)
+    if (mirrored !== square) square.recycle()
+    return mirrored
+}
