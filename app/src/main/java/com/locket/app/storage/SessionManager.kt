@@ -68,6 +68,12 @@ class SessionManager(context: Context) {
         get() = prefs.getBoolean("room_cache_migrated_v1", false)
         set(value) = prefs.edit().putBoolean("room_cache_migrated_v1", value).apply()
 
+    // Hien/An chip luot xem tren moment cua minh (Batch 7a).
+    // Mac dinh BAT. Tat thi an chip du server co tra so lieu.
+    var showViewCount: Boolean
+        get() = prefs.getBoolean("show_view_count", true)
+        set(value) = prefs.edit().putBoolean("show_view_count", value).apply()
+
     var currentUser: User
         get() {
             val json = prefs.getString("current_user", null)

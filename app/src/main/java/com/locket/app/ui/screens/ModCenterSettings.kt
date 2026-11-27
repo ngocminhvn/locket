@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.theme.LocketTextDim
 import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.Dispatchers
@@ -172,7 +174,7 @@ private fun installUpdate(context: Context, file: File) {
 }
 
 @Composable
-fun ModCenterSettings() {
+fun ModCenterSettings(viewModel: LocketViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
@@ -200,6 +202,20 @@ fun ModCenterSettings() {
     ModRow({ Icon(Icons.Default.Code, null, tint = Color.White) }, "GitHub", "github.com/ngocminhvn/locket") {
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO))) }
         catch (e: Exception) { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
+    }
+
+    // Nut tat "Hien luot xem" (chip luot xem tren moment cua minh,
+    // Batch 7a). Mac dinh bat; tat thi an chip.
+    val showViewCount by viewModel.showViewCount.collectAsState()
+    Row(Modifier.fillMaxWidth().clickable { viewModel.setShowViewCount(!showViewCount) }
+        .padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Visibility, null, tint = Color.White)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Hiện lượt xem", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Text("Hiện số lượt xem trên khoảnh khắc của bạn", color = LocketTextDim, fontSize = 14.sp)
+        }
+        Switch(checked = showViewCount, onCheckedChange = { viewModel.setShowViewCount(it) })
     }
 
     release?.let { update ->

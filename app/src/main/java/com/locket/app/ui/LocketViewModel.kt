@@ -152,6 +152,16 @@ class LocketViewModel(
     private val _momentViewCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val momentViewCounts: StateFlow<Map<String, Int>> = _momentViewCounts.asStateFlow()
 
+    // Nut tat "Hien luot xem" o Mod Center. Mac dinh bat; tat thi an
+    // chip luot xem du server co tra so lieu.
+    private val _showViewCount = MutableStateFlow(sessionManager.showViewCount)
+    val showViewCount: StateFlow<Boolean> = _showViewCount.asStateFlow()
+
+    fun setShowViewCount(show: Boolean) {
+        sessionManager.showViewCount = show
+        _showViewCount.value = show
+    }
+
     /**
      * Tai luot xem cho 1 moment CUA MINH (owner_uid == myUid). Khong goi
      * cho moment cua ban (server tra 401 "User does not have access to

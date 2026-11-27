@@ -48,6 +48,7 @@ fun HomeMomentScreen(
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val momentViewCounts by viewModel.momentViewCounts.collectAsState()
+    val showViewCount by viewModel.showViewCount.collectAsState()
     var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(reactionSerial) {
         if (reactionSerial > 0 && currentMoment?.id == reactionEvent?.first) {
@@ -237,7 +238,7 @@ fun HomeMomentScreen(
                     // Luot xem (Batch 7a): chi moment CUA MINH, chi hien
                     // khi server tra 200 (co so lieu that). Loi/401 -> an.
                     val ownViewCount = momentViewCounts[currentMoment.id]
-                    if (currentMoment.userUid == currentUser.uid && ownViewCount != null) {
+                    if (showViewCount && currentMoment.userUid == currentUser.uid && ownViewCount != null) {
                         Icon(
                             Icons.Default.Visibility,
                             contentDescription = null,

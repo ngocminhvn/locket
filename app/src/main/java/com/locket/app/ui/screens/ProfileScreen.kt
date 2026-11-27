@@ -363,7 +363,7 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             SectionTitle("Mod Center")
-            ModCenterSettings()
+            ModCenterSettings(viewModel)
             Spacer(modifier = Modifier.height(24.dp))
 
             SectionTitle("Tổng quát")
