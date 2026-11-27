@@ -99,8 +99,6 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val scope = rememberCoroutineScope()
-    val focus = LocalFocusManager.current
-    val keyboard = LocalSoftwareKeyboardController.current
     val recent = remember(context) { SharedEmojiRecents(context) }
     var query by remember { mutableStateOf("") }
     val searching = query.isNotBlank()
@@ -111,11 +109,6 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
         }
     }
     val headerHeight = dimensionResource(EmojiPickerR.dimen.emoji_picker_header_height)
-    fun clearSearch() {
-        query = ""
-        focus.clearFocus()
-        keyboard?.hide()
-    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -126,6 +119,13 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                 .clip(CircleShape).background(Color.White.copy(alpha = 0.35f)))
         }
     ) {
+        val focus = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        fun clearSearch() {
+            query = ""
+            focus.clearFocus()
+            keyboard?.hide()
+        }
         Box(Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
             val contentHeight = if (sheetState.targetValue == SheetValue.PartiallyExpanded) {
                 Modifier.height((screenHeight * 0.5f - 28.dp).coerceAtLeast(140.dp))
@@ -173,7 +173,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                             }
                             SwipeEmojiPickerHost(ctx, picker)
                         },
-                        update = { host -> host.setSearchMode(searching, ::clearSearch) }
+                        update = { host -> host.setSearchMode(searching) { clearSearch() } }
                     )
                     if (searching) {
                         Box(Modifier.fillMaxSize().padding(top = headerHeight).background(Color(0xFF242424))) {
@@ -220,7 +220,7 @@ private object EmojiSearchIndex {
         val list = entries ?: synchronized(this) {
             entries ?: context.assets.open("emoji-search.tsv").bufferedReader().useLines { lines ->
                 lines.filter { !it.startsWith("#") }.mapNotNull { line ->
-                    val split = line.indexOf('\\t')
+                    val split = line.indexOf('\t')
                     if (split <= 0) null else line.substring(0, split) to line.substring(split + 1)
                 }.toList()
             }.also { entries = it }
