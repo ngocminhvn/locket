@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.item
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -125,7 +125,9 @@ fun HomeGridScreen(
                 // Item cuoi luoi: dang tai thi xoay vong, loi thi nut thu lai.
                 // Het lich su (hasMore == false) thi khong hien gi them.
                 if (historyLoading || historyError != null) {
-                    item(span = { GridItemSpan(3) }) {
+                    // 'item' khong co trong foundation 1.7 (BOM 2024.09.02) nen
+                    // dung items(count = 1) thay the.
+                    items(1, span = { GridItemSpan(3) }) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
