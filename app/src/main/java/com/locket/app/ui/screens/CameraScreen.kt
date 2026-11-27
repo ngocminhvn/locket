@@ -30,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,6 +48,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -64,6 +69,9 @@ import com.locket.app.ui.components.*
 import com.locket.app.ui.theme.*
 import kotlinx.coroutines.launch
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+import kotlin.math.abs
 
 @Composable
 fun CameraScreen(
@@ -115,6 +123,13 @@ fun CameraScreen(
     var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var pinchingCamera by remember { mutableStateOf(false) }
     var cameraZoomRatio by remember { mutableFloatStateOf(1f) }
+    var zoomLimits by remember { mutableStateOf<ZoomState?>(null) }
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var focusRegionSupported by remember { mutableStateOf(false) }
+    var focusSerial by remember { mutableIntStateOf(0) }
+    var exposureDragging by remember { mutableStateOf(false) }
+    var exposureIndex by remember { mutableIntStateOf(0) }
+    var exposureRange by remember { mutableStateOf<IntRange?>(null) }
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
@@ -143,7 +158,7 @@ fun CameraScreen(
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
-    val canSwipe = !pinchingCamera && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
+    val canSwipe = !pinchingCamera && !exposureDragging && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect {
         onSwipeEnabledChange(canSwipe)
         onReviewVisibleChange(capturedBitmap != null)
@@ -171,6 +186,12 @@ fun CameraScreen(
         boundCamera = null
         pinchingCamera = false
         cameraZoomRatio = 1f
+        zoomLimits = null
+        focusPoint = null
+        focusRegionSupported = false
+        exposureDragging = false
+        exposureIndex = 0
+        exposureRange = null
         imageCapture = null
         videoCapture = null
         hasFlash = false
@@ -223,7 +244,14 @@ fun CameraScreen(
                                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
                             }
                             boundCamera = camera
-                            cameraZoomRatio = camera.cameraInfo.zoomState.value?.zoomRatio ?: 1f
+                            zoomLimits = camera.cameraInfo.zoomState.value
+                            cameraZoomRatio = zoomLimits?.zoomRatio ?: 1f
+                            val exposure = camera.cameraInfo.exposureState
+                            exposureIndex = exposure.exposureCompensationIndex
+                            exposureRange = if (exposure.isExposureCompensationSupported &&
+                                exposure.exposureCompensationRange.upper > exposure.exposureCompensationRange.lower) {
+                                exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper
+                            } else null
                             hasFlash = camera.cameraInfo.hasFlashUnit()
                             imageCapture = photo
                         }
@@ -238,6 +266,83 @@ fun CameraScreen(
             provider?.unbindAll()
         }
     }
+    // Observe hardware zoom changes; do not carry front-camera limits to the rear lens.
+    DisposableEffect(boundCamera, lifecycleOwner) {
+        val camera = boundCamera
+        val observer = androidx.lifecycle.Observer<ZoomState> { state ->
+            if (boundCamera === camera) {
+                zoomLimits = state
+                if (!pinchingCamera) cameraZoomRatio = state.zoomRatio
+            }
+        }
+        camera?.cameraInfo?.zoomState?.observe(lifecycleOwner, observer)
+        onDispose { camera?.cameraInfo?.zoomState?.removeObserver(observer) }
+    }
+
+    LaunchedEffect(focusSerial, exposureDragging) {
+        if (focusPoint != null && !exposureDragging) {
+            delay(5000)
+            focusPoint = null
+        }
+    }
+
+    fun requestZoom(camera: Camera, ratio: Float) {
+        if (camera !== boundCamera) return
+        val limits = camera.cameraInfo.zoomState.value ?: return
+        val next = ratio.coerceIn(limits.minZoomRatio, limits.maxZoomRatio)
+        if (!next.isFinite()) return
+        cameraZoomRatio = next
+        val future = camera.cameraControl.setZoomRatio(next)
+        future.addListener({
+            try { future.get() } catch (_: Exception) {
+                // Superseded requests are normal during a pinch.
+                if (camera === boundCamera && !pinchingCamera && cameraZoomRatio == next) {
+                    cameraZoomRatio = camera.cameraInfo.zoomState.value?.zoomRatio ?: 1f
+                }
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    fun requestExposure(camera: Camera, index: Int) {
+        if (camera !== boundCamera) return
+        val range = exposureRange ?: return
+        val next = index.coerceIn(range.first, range.last)
+        if (next == exposureIndex) return
+        exposureIndex = next
+        val future = camera.cameraControl.setExposureCompensationIndex(next)
+        future.addListener({
+            try { future.get() } catch (_: Exception) {
+                if (camera === boundCamera && exposureIndex == next) {
+                    exposureIndex = camera.cameraInfo.exposureState.exposureCompensationIndex
+                }
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    fun meterAt(camera: Camera, position: Offset) {
+        if (camera !== boundCamera || previewView.width <= 0 || previewView.height <= 0 ||
+            previewView.previewStreamState.value != PreviewView.StreamState.STREAMING) return
+        val point = previewView.meteringPointFactory.createPoint(position.x, position.y)
+        // Leave CameraX continuous auto focus, AE and AWB defaults intact; tap
+        // temporarily selects the supported metering regions before auto cancel.
+        val action = FocusMeteringAction.Builder(point,
+            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB)
+            .setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+        focusRegionSupported = camera.cameraInfo.isFocusMeteringSupported(action)
+        if (focusRegionSupported) {
+            val future = camera.cameraControl.startFocusAndMetering(action)
+            future.addListener({
+                try { future.get() } catch (_: Exception) {
+                    // A newer tap, a lens switch or lifecycle stop can cancel this request.
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+        if (focusRegionSupported || exposureRange != null) {
+            focusPoint = position
+            focusSerial++
+        }
+    }
+
     LaunchedEffect(flashMode, hasFlash, imageCapture) {
         imageCapture?.flashMode = if (hasFlash) flashMode else ImageCapture.FLASH_MODE_OFF
     }
@@ -404,66 +509,155 @@ fun CameraScreen(
                     .aspectRatio(1.0f)
                     .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
-                    .pointerInput(boundCamera) {
-                        val camera = boundCamera ?: return@pointerInput
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            var scaling = false
-                            var requestedZoom = cameraZoomRatio
-                            try {
-                                do {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    val pressed = event.changes.count { it.pressed }
-                                    if (pressed >= 2) {
-                                        val limits = camera.cameraInfo.zoomState.value
-                                        if (!scaling) {
-                                            scaling = true
-                                            pinchingCamera = true
-                                            requestedZoom = limits?.zoomRatio ?: cameraZoomRatio
-                                        }
-                                        val factor = event.calculateZoom()
-                                        if (limits != null && factor.isFinite() && factor > 0f) {
-                                            val next = (requestedZoom * factor).coerceIn(limits.minZoomRatio, limits.maxZoomRatio)
-                                            if (kotlin.math.abs(next - requestedZoom) > 0.001f) {
-                                                requestedZoom = next
-                                                cameraZoomRatio = next
-                                                // Sensor/use-case zoom: applies to preview, captured photo and video.
-                                                val future = camera.cameraControl.setZoomRatio(next)
-                                                future.addListener({
-                                                    try {
-                                                        future.get()
-                                                    } catch (_: Exception) {
-                                                        // CameraX cancels superseded requests during a pinch.
-                                                    }
-                                                }, ContextCompat.getMainExecutor(context))
-                                            }
-                                        }
-                                        event.changes.forEach { it.consume() }
-                                    } else if (scaling) {
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                } while (event.changes.any { it.pressed })
-                            } finally {
-                                pinchingCamera = false
-                            }
-                        }
-                    }
             ) {
                 if (hasCameraPermission) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { previewView }
                     )
-                    if (pinchingCamera && boundCamera != null) {
-                        Text(
-                            text = String.format(java.util.Locale.US, "%.1f×", cameraZoomRatio),
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
-                                .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
+                    // This transparent gesture surface is below the controls, so tapping
+                    // flash or a quick-zoom button never also meters the camera.
+                    Box(Modifier.matchParentSize().pointerInput(boundCamera) {
+                        val camera = boundCamera ?: return@pointerInput
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var scaling = false
+                            var moved = false
+                            var requestedZoom = camera.cameraInfo.zoomState.value?.zoomRatio ?: cameraZoomRatio
+                            val range = exposureRange
+                            val adjusting = range != null && focusPoint != null &&
+                                down.position.x >= size.width - 64.dp.toPx() &&
+                                abs(down.position.y - size.height / 2f) <= 82.dp.toPx()
+                            val initialExposure = camera.cameraInfo.exposureState.exposureCompensationIndex
+                            if (adjusting) {
+                                exposureDragging = true
+                                exposureIndex = initialExposure
+                                down.consume()
+                            }
+                            try {
+                                do {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val pointer = event.changes.firstOrNull { it.id == down.id }
+                                    if (event.changes.count { it.pressed } >= 2 && !adjusting) {
+                                        if (!scaling) {
+                                            scaling = true
+                                            pinchingCamera = true
+                                            focusPoint = null
+                                            requestedZoom = camera.cameraInfo.zoomState.value?.zoomRatio ?: cameraZoomRatio
+                                        }
+                                        val limits = camera.cameraInfo.zoomState.value
+                                        val factor = event.calculateZoom()
+                                        if (limits != null && factor.isFinite() && factor > 0f) {
+                                            val next = (requestedZoom * factor).coerceIn(limits.minZoomRatio, limits.maxZoomRatio)
+                                            if (abs(next - requestedZoom) > 0.001f) {
+                                                requestedZoom = next
+                                                requestZoom(camera, next)
+                                            }
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } else if (scaling) {
+                                        event.changes.forEach { it.consume() }
+                                    } else if (adjusting && range != null) {
+                                        if (pointer != null) {
+                                            val delta = (down.position.y - pointer.position.y) / 120.dp.toPx()
+                                            val next = (initialExposure + delta * (range.last - range.first)).roundToInt()
+                                            requestExposure(camera, next)
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } else if (pointer != null) {
+                                        if ((pointer.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                                        // Do not intercept ordinary one-finger history swipes.
+                                        if (!pointer.pressed && !moved && !pointer.isConsumed &&
+                                            event.changes.size == 1 &&
+                                            event.changes.none { it.id != down.id }) {
+                                            meterAt(camera, pointer.position)
+                                            pointer.consume()
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            } finally {
+                                pinchingCamera = false
+                                exposureDragging = false
+                                if (scaling) cameraZoomRatio = camera.cameraInfo.zoomState.value?.zoomRatio ?: requestedZoom
+                                if (adjusting) focusSerial++
+                            }
+                        }
+                    })
+
+                    val point = focusPoint
+                    if (point != null && focusRegionSupported) {
+                        Canvas(Modifier.matchParentSize()) {
+                            val half = 24.dp.toPx()
+                            val x = point.x.coerceIn(half, (size.width - half).coerceAtLeast(half))
+                            val y = point.y.coerceIn(half, (size.height - half).coerceAtLeast(half))
+                            drawRoundRect(
+                                color = LocketYellow,
+                                topLeft = Offset(x - half, y - half),
+                                size = Size(half * 2, half * 2),
+                                cornerRadius = CornerRadius(5.dp.toPx()),
+                                style = Stroke(1.5.dp.toPx())
+                            )
+                        }
+                    }
+                    val range = exposureRange
+                    if (point != null && range != null) {
+                        Column(
+                            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.WbSunny, contentDescription = "Vuốt lên xuống để chỉnh sáng",
+                                tint = LocketYellow, modifier = Modifier.size(18.dp))
+                            Canvas(Modifier.width(24.dp).height(96.dp)) {
+                                val x = size.width / 2
+                                val fraction = ((exposureIndex - range.first).toFloat() /
+                                    (range.last - range.first)).coerceIn(0f, 1f)
+                                val top = 5.dp.toPx()
+                                val bottom = size.height - top
+                                drawLine(Color.White.copy(alpha = 0.55f), Offset(x, top), Offset(x, bottom), 1.dp.toPx())
+                                drawCircle(LocketYellow, 4.dp.toPx(), Offset(x, bottom - fraction * (bottom - top)))
+                            }
+                        }
+                    }
+
+                    val camera = boundCamera
+                    val limits = zoomLimits
+                    if (camera != null && limits != null && limits.maxZoomRatio - limits.minZoomRatio > 0.01f) {
+                        val presets = remember(limits.minZoomRatio, limits.maxZoomRatio) {
+                            cameraQuickZoomRatios(limits.minZoomRatio, limits.maxZoomRatio)
+                        }
+                        if (pinchingCamera) {
+                            Text(formatCameraZoom(cameraZoomRatio), color = Color.White, fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp))
+                        } else {
+                            Row(
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                                    .background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                presets.forEach { ratio ->
+                                    val selected = abs(cameraZoomRatio - ratio) < 0.04f
+                                    Box(Modifier.size(40.dp, 34.dp).clip(CircleShape)
+                                        .background(if (selected) LocketYellow else Color.Transparent)
+                                        .clickable { requestZoom(camera, ratio) }
+                                        .semantics { this.selected = selected },
+                                        contentAlignment = Alignment.Center) {
+                                        Text(formatCameraZoom(ratio), color = if (selected) Color.Black else Color.White,
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                if (presets.none { abs(cameraZoomRatio - it) < 0.04f }) {
+                                    Text(formatCameraZoom(cameraZoomRatio), color = LocketYellow,
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp))
+                                }
+                            }
+                        }
                     }
                     cameraError?.let { error ->
                         Text(error, color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp))
@@ -725,6 +919,19 @@ fun CameraScreen(
         }
     }
 }
+
+// Ratios are hardware-reported zoom bounds, not a claim of optical lens availability.
+private fun cameraQuickZoomRatios(min: Float, max: Float): List<Float> {
+    val values = mutableListOf<Float>()
+    if (min < 0.99f) values += min
+    values += listOf(1f, 2f, 3f, 5f).filter { it in min..max }
+    if (values.isEmpty()) values += min
+    if (max > values.last() + 0.1f && values.size < 5) values += max
+    return values.distinct()
+}
+
+private fun formatCameraZoom(ratio: Float): String =
+    String.format(java.util.Locale.US, "%.1f", ratio).removeSuffix(".0") + "×"
 
 private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
     val buffer = image.planes[0].buffer
