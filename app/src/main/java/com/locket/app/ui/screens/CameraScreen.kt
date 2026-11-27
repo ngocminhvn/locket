@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Rational
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -109,6 +110,8 @@ fun CameraScreen(
     var videoMode by remember { mutableStateOf(false) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
+    var recordingStartedAt by remember { mutableLongStateOf(0L) }
+    var recordingElapsedMs by remember { mutableLongStateOf(0L) }
     var processingVideo by remember { mutableStateOf(false) }
     var capturingPhoto by remember { mutableStateOf(false) }
     var capturedVideo by remember { mutableStateOf<File?>(null) }
@@ -226,6 +229,15 @@ fun CameraScreen(
         activeRecording.stop()
     }
 
+    LaunchedEffect(recordingStartedAt) {
+        val startedAt = recordingStartedAt
+        if (startedAt == 0L) return@LaunchedEffect
+        while (true) {
+            recordingElapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceIn(0L, 2500L)
+            delay(50)
+        }
+    }
+
     fun takePhoto() {
         val capture = imageCapture
         if (capture == null || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
@@ -263,8 +275,14 @@ fun CameraScreen(
             if (hasAudioPermission && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 pending = pending.withAudioEnabled()
             }
+            recordingElapsedMs = 0L
+            recordingStartedAt = 0L
             recording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
+                if (event is VideoRecordEvent.Start) {
+                    recordingStartedAt = SystemClock.elapsedRealtime()
+                }
                 if (event is VideoRecordEvent.Finalize) {
+                    recordingStartedAt = 0L
                     recording = null
                     if (!screenActive || event.hasError()) {
                         file.delete()
@@ -436,8 +454,31 @@ fun CameraScreen(
                     )
                 }
 
-                // Mode Selector Pill (Bottom inside Viewfinder)
-                Row(
+                // Replace the photo/video selector with a live timer during recording.
+                if (recording != null) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 16.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0xD92C2C2E))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(Modifier.size(9.dp).background(Color(0xFFFF453A), CircleShape))
+                        Text(
+                            text = java.lang.String.format(java.util.Locale.ROOT, "%02d:%02d.%d",
+                                recordingElapsedMs / 60000,
+                                recordingElapsedMs / 1000 % 60,
+                                recordingElapsedMs / 100 % 10),
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                } else Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 16.dp)
