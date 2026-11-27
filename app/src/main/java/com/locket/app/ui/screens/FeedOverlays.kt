@@ -29,7 +29,12 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.draw.clipToBounds
+import kotlin.math.roundToInt
 import androidx.emoji2.emojipicker.R as EmojiPickerR
 import kotlin.math.abs
 import androidx.compose.foundation.background
@@ -97,7 +102,8 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     val context = LocalContext.current
     val pick by rememberUpdatedState(onPick)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val density = LocalDensity.current
+    var visibleHeightPx by remember { mutableIntStateOf(-1) }
     val scope = rememberCoroutineScope()
     val recent = remember(context) { SharedEmojiRecents(context) }
     var query by remember { mutableStateOf("") }
@@ -114,6 +120,9 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
         sheetState = sheetState,
         containerColor = Color(0xFF242424),
         shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        // Apply bottom safe-area padding to the visible content, not to the
+        // off-screen bottom edge of the partially expanded sheet.
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Box(Modifier.padding(vertical = 9.dp).size(width = 32.dp, height = 4.dp)
                 .clip(CircleShape).background(Color.White.copy(alpha = 0.35f)))
@@ -126,14 +135,27 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
             focus.clearFocus()
             keyboard?.hide()
         }
-        Box(Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
-            val contentHeight = if (sheetState.targetValue == SheetValue.PartiallyExpanded) {
-                Modifier.height((screenHeight * 0.5f - 28.dp).coerceAtLeast(140.dp))
-            } else {
-                Modifier.fillMaxHeight()
-            }
-            Column(Modifier.fillMaxWidth().then(contentHeight)
-                .navigationBarsPadding().padding(horizontal = 12.dp)) {
+        // Keep a stable measured sheet height for Material's drag anchors.
+        // Measure the actual visible viewport after the sheet is positioned;
+        // screenHeightDp excludes system bars on some Android versions and a
+        // fixed half-screen estimate leaves a blank strip under the picker.
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().fillMaxHeight(0.82f).clipToBounds()
+                .onGloballyPositioned { coordinates ->
+                    val rootHeight = coordinates.findRootCoordinates().size.height
+                    val top = coordinates.positionInRoot().y
+                    if (top.isFinite()) {
+                        val height = (rootHeight - top).roundToInt().coerceIn(0, coordinates.size.height)
+                        if (visibleHeightPx != height) visibleHeightPx = height
+                    }
+                }
+        ) {
+            val viewport = if (visibleHeightPx >= 0) {
+                with(density) { visibleHeightPx.toDp() }.coerceIn(0.dp, maxHeight)
+            } else maxHeight
+            Column(Modifier.fillMaxWidth().height(viewport)
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                .padding(horizontal = 12.dp)) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
                         .height(40.dp).clip(RoundedCornerShape(24.dp))
