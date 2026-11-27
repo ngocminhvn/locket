@@ -26,12 +26,12 @@ The client communicates directly with Locket's production backend:
 
 | Component | Version / Specification |
 |---|---|
-| **Language** | Kotlin 2.0.21, Java 17 |
-| **Android SDK** | compileSdk 34, targetSdk 34, minSdk 26 |
-| **Android Gradle Plugin (AGP)** | 8.7.2 |
-| **UI Framework** | Jetpack Compose (BOM 2024.10.01), Compose Compiler 2.0.21 |
-| **Design System** | Material 3 Expressive, Liquid Glass modifier (Blur, Specular highlight) |
-| **Camera** | CameraX 1.4.0 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
+| **Language** | Kotlin 2.2.21, Java 17 |
+| **Android SDK** | compileSdk 36, targetSdk 34, minSdk 26 |
+| **Android Gradle Plugin (AGP)** | 8.13.2 |
+| **UI Framework** | Jetpack Compose (BOM 2025.09.01), Compose Compiler 2.2.21 |
+| **Design System** | Material 3 Expressive 1.4.0, Liquid Glass gradients (no realtime blur) |
+| **Camera** | CameraX 1.5.0 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
 | **Networking** | OkHttp 4.12.0, Gson 2.11.0 |
 | **Image Loading** | Coil Compose 2.6.0 |
 | **State Management** | Android Lifecycle ViewModel (`androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7`), Kotlin Coroutines & `StateFlow` |

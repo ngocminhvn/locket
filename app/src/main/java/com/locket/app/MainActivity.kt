@@ -5,6 +5,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -57,6 +63,19 @@ class MainActivity : ComponentActivity() {
                     "camera", "feed", "grid" -> 1
                     "chat" -> 2
                     else -> -1
+                }
+                // Retain saveable history/chat UI state, not live camera resources.
+                val tabStateHolder = rememberSaveableStateHolder()
+                val density = LocalDensity.current
+                var previousTab by remember { mutableIntStateOf(mainTab) }
+                val tabDirection = remember(mainTab) {
+                    if (previousTab >= 0 && mainTab >= 0) (mainTab - previousTab).coerceIn(-1, 1) else 0
+                }
+                val tabMotion = remember(mainTab) { Animatable(if (tabDirection == 0) 0f else 1f) }
+                SideEffect { previousTab = mainTab }
+                LaunchedEffect(tabMotion) {
+                    tabMotion.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow))
                 }
                 val canSwipeTabs by rememberUpdatedState(
                     isLoggedIn && mainTab >= 0 && !showProfileScreen && !showFriendsModal &&
@@ -168,6 +187,14 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         else -> {
+                            // Animate only the incoming surface. Keeping two live
+                            // screen trees during a transition is expensive and can
+                            // overlap camera bind/unbind operations.
+                            Box(Modifier.fillMaxSize().graphicsLayer {
+                                val progress = tabMotion.value.coerceIn(0f, 1f)
+                                translationX = with(density) { 28.dp.toPx() } * tabDirection * progress
+                                alpha = 1f - 0.12f * progress
+                            }) {
                             when (currentScreen) {
                                 "welcome" -> {
                                     WelcomeScreen(
@@ -218,14 +245,14 @@ class MainActivity : ComponentActivity() {
                                         onOpenProfile = { showProfileScreen = true }
                                     )
                                 }
-                                "history" -> {
+                                "history" -> tabStateHolder.SaveableStateProvider("history") {
                                     HistoryScreen(
                                         viewModel = viewModel,
                                         onNavigate = { currentScreen = it },
                                         onOpenProfile = { showProfileScreen = true }
                                     )
                                 }
-                                "chat" -> {
+                                "chat" -> tabStateHolder.SaveableStateProvider("chat") {
                                     ConversationsScreen(
                                         viewModel = viewModel,
                                         onNavigate = { currentScreen = it },
@@ -236,6 +263,7 @@ class MainActivity : ComponentActivity() {
                                         onOpenProfile = { showProfileScreen = true }
                                     )
                                 }
+                            }
                             }
                         }
                     }

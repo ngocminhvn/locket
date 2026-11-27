@@ -1,6 +1,7 @@
 package com.locket.app.ui.theme
 
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +24,7 @@ private val DarkColorScheme = darkColorScheme(
     onSurfaceVariant = LocketTextDim
 )
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LocketTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current.applicationContext
@@ -34,7 +36,7 @@ fun LocketTheme(content: @Composable () -> Unit) {
             if (folder.list()?.isEmpty() == true) folder.delete()
         }
     }
-    MaterialTheme(
+    MaterialExpressiveTheme(
         colorScheme = DarkColorScheme,
         typography = LocketTypography,
         content = content
