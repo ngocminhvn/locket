@@ -5,22 +5,30 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.item
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.theme.LocketYellow
@@ -40,7 +48,26 @@ fun HomeGridScreen(
     val friends by viewModel.friends.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val historyLoading by viewModel.historyLoading.collectAsState()
+    val historyHasMore by viewModel.historyHasMore.collectAsState()
+    val historyError by viewModel.historyError.collectAsState()
     var showFriendFilter by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val gridState = rememberLazyGridState()
+
+    // Tai them lich su khi cuon gan het luoi (con ~9 anh = 3 hang cuoi).
+    // Chi goi khi chua het, khong dang tai, khong loi; ViewModel tu chan
+    // goi trung (loadOlderMoments return ngay khi dang tai).
+    val nearEnd by remember {
+        derivedStateOf {
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            moments.isNotEmpty() && lastVisible >= (moments.size - 9).coerceAtLeast(0)
+        }
+    }
+    LaunchedEffect(nearEnd, historyLoading, historyHasMore, historyError) {
+        if (nearEnd && historyHasMore && !historyLoading && historyError == null) {
+            viewModel.loadOlderMoments()
+        }
+    }
 
     val topBarTitle = if (selectedFriend == null) {
         "Tất cả bạn bè"
@@ -70,6 +97,7 @@ fun HomeGridScreen(
             // 3-Column Moments Grid with Live Moments
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
+                state = gridState,
                 contentPadding = PaddingValues(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -91,6 +119,42 @@ fun HomeGridScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
+                    }
+                }
+
+                // Item cuoi luoi: dang tai thi xoay vong, loi thi nut thu lai.
+                // Het lich su (hasMore == false) thi khong hien gi them.
+                if (historyLoading || historyError != null) {
+                    item(span = { GridItemSpan(3) }) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (historyLoading) {
+                                CircularProgressIndicator(
+                                    color = LocketYellow,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            } else {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "Không tải được ảnh cũ",
+                                        color = LocketTextDim,
+                                        fontSize = 14.sp
+                                    )
+                                    TextButton(onClick = { viewModel.loadOlderMoments() }) {
+                                        Text(
+                                            text = "Thử lại",
+                                            color = LocketYellow,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
