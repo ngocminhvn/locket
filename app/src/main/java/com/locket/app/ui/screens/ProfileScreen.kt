@@ -279,6 +279,10 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            SectionTitle("Mod Center")
+            ModCenterSettings()
+            Spacer(modifier = Modifier.height(24.dp))
+
             // Section: Tài khoản & Kết nối Live API Locket
             SectionTitle("Tài khoản Live Locket")
             if (viewModel.isLoggedIn) {

@@ -13,8 +13,9 @@ android {
         applicationId = "com.locket.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        val buildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        versionCode = buildNumber
+        versionName = "1.0.$buildNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

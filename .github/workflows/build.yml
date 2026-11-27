@@ -3,6 +3,9 @@ name: Build Locket Android APK
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,6 +34,20 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x ./gradlew
 
+      - name: Restore persistent APK signing key
+        env:
+          LOCKET_DEBUG_KEYSTORE_B64: ${{ secrets.LOCKET_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$LOCKET_DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p "$HOME/.android"
+            printf '%s' "$LOCKET_DEBUG_KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
+            chmod 600 "$HOME/.android/debug.keystore"
+            keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+            echo "LOCKET_STABLE_SIGNING=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Stable signing secret missing; artifact only, no update release."
+          fi
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
@@ -41,3 +58,17 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish signed update APK
+        if: github.ref == 'refs/heads/main' && env.LOCKET_STABLE_SIGNING == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v1.0.${GITHUB_RUN_NUMBER}"
+          apk="Locket-1.0.${GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$apk"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk" --clobber
+          else
+            gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Locket 1.0.${GITHUB_RUN_NUMBER}" --generate-notes --latest
+          fi
