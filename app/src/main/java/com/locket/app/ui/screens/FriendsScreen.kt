@@ -40,11 +40,13 @@ fun FriendsScreen(
     val scope = rememberCoroutineScope()
     val friends by viewModel.friends.collectAsState()
     val incomingRequests by viewModel.incomingFriendRequests.collectAsState()
+    val recommendations by viewModel.friendRecommendations.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.syncAllData()
         viewModel.refreshIncomingFriendRequests()
+        viewModel.refreshFriendRecommendations()
     }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -383,6 +385,119 @@ fun FriendsScreen(
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text("Từ chối", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            // Goi y ket ban (Batch 6, defensive): chi hien khi server tra 200
+            // (getFriendRecommendations). Loi/401 -> danh sach rong -> an han.
+            if (recommendations.isNotEmpty()) {
+                Text(
+                    text = "Gợi ý kết bạn",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    recommendations.forEach { rec ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C2C2E))
+                                    .border(2.dp, LocketYellow, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (rec.avatarUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = rec.avatarUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = rec.displayName.ifBlank { rec.username.ifBlank { rec.uid } },
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                val subtitle = buildString {
+                                    if (rec.username.isNotBlank()) append("@${rec.username}")
+                                    if (rec.mutualFriendCount > 0) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append("${rec.mutualFriendCount} bạn chung")
+                                    }
+                                }
+                                if (subtitle.isNotBlank()) {
+                                    Text(
+                                        text = subtitle,
+                                        color = LocketTextDim,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val res = viewModel.apiClient.sendFriendRequest(rec.uid)
+                                        if (res.isSuccess) {
+                                            viewModel.dismissRecommendation(rec.uid)
+                                            Toast.makeText(context, "Đã gửi lời mời kết bạn!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Lỗi kết bạn: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Kết bạn", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            IconButton(
+                                onClick = { viewModel.dismissRecommendation(rec.uid) },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFF2C2C2E), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Ẩn gợi ý",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }

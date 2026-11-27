@@ -47,6 +47,20 @@ data class FriendRequest(
 )
 
 /**
+ * Goi y ket ban (getFriendRecommendations, bundle ~1244458).
+ * Response schema goc (FriendRecommendationsResponseSchema):
+ * {version: "v1", recommendations: [{user_uid, mutual_friend_count}]}.
+ * Ten/avatar resolve tu fetchUsers nhu ban be (xem ApiClient).
+ */
+data class RecommendedFriend(
+    val uid: String,
+    val username: String = "",
+    val displayName: String = "",
+    val avatarUrl: String = "",
+    val mutualFriendCount: Int = 0
+)
+
+/**
  * Tai khoan bi chan.
  * Nguon that: document Firestore `users/{uid}/blocked_users/{blockedUid}`
  * (database mac dinh, KHONG phai database `locket` nhu history).

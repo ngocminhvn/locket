@@ -13,6 +13,7 @@ import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.model.FriendRequest
 import com.locket.app.model.Moment
+import com.locket.app.model.RecommendedFriend
 import com.locket.app.model.User
 import com.locket.app.storage.SessionManager
 import com.locket.app.storage.db.LocketCache
@@ -46,6 +47,11 @@ class LocketViewModel(
     // Room. Nguon that: Firestore users/{uid}/incoming_friend_requests.
     private val _incomingFriendRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
     val incomingFriendRequests: StateFlow<List<FriendRequest>> = _incomingFriendRequests.asStateFlow()
+
+    // Goi y ket ban (Batch 6, defensive): chi co gia tri khi server tra 200;
+    // loi/401 thi rong -> UI an section, khong bao loi.
+    private val _friendRecommendations = MutableStateFlow<List<RecommendedFriend>>(emptyList())
+    val friendRecommendations: StateFlow<List<RecommendedFriend>> = _friendRecommendations.asStateFlow()
 
     // Danh sach that cac tai khoan bi chan: REST moi lan mo man Profile,
     // khong cache Room. Nguon that: Firestore users/{uid}/blocked_users.
@@ -757,6 +763,25 @@ class LocketViewModel(
                 if (_isLoggedIn.value) _incomingFriendRequests.value = requests
             }
         }
+    }
+
+    /** Tai lai goi y ket ban (goi khi mo man Ban be). Loi/401 -> rong, UI an section. */
+    fun refreshFriendRecommendations() {
+        viewModelScope.launch {
+            val dismissed = sessionManager.dismissedRecommendationUids
+            apiClient.getFriendRecommendations(dismissed.toList()).onSuccess { recs ->
+                if (!_isLoggedIn.value) return@onSuccess
+                val myUid = sessionManager.currentUser.uid
+                val friendUids = _friends.value.map { it.uid }.toSet()
+                _friendRecommendations.value = recs.filter { it.uid != myUid && it.uid !in friendUids && it.uid !in dismissed }
+            }
+        }
+    }
+
+    /** An 1 goi y: luu uid vao dismissed (goc gui lai o lan goi sau) + bo khoi danh sach hien. */
+    fun dismissRecommendation(uid: String) {
+        sessionManager.dismissedRecommendationUids = sessionManager.dismissedRecommendationUids + uid
+        _friendRecommendations.value = _friendRecommendations.value.filter { it.uid != uid }
     }
 
     /**

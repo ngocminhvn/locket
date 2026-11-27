@@ -9,6 +9,7 @@ import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.model.FriendRequest
+import com.locket.app.model.RecommendedFriend
 import com.locket.app.model.MessageReaction
 import com.locket.app.model.Moment
 import com.locket.app.model.User
@@ -1041,6 +1042,74 @@ class LocketApiClient(
             Result.success(requests)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Goi y ket ban: getFriendRecommendations {dismissed_user_ids, version: "v1"}
+     * (bundle 1025704, callsite ~1244458; response validate bang
+     * FriendRecommendationsResponseSchema: {version: "v1",
+     * recommendations: [{user_uid, mutual_friend_count}]}).
+     * DEFENSIVE: probe 27/11 tra HTTP 401 UNAUTHENTICATED du token hop le
+     * (nghi can App Check) — moi loi (401, mang, parse, chua dang nhap)
+     * deu tra ve danh sach rong de UI an section, khong bao loi, khong
+     * hien du lieu gia. Ten/avatar resolve tu fetchUsers nhu ban be
+     * (batch 10 uid), fallback doc users/{uid}. Chua live-verify.
+     */
+    suspend fun getFriendRecommendations(dismissedUserIds: List<String>): Result<List<RecommendedFriend>> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureFreshToken()) return@withContext Result.success(emptyList())
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    val arr = JsonArray()
+                    dismissedUserIds.forEach { arr.add(it) }
+                    add("dismissed_user_ids", arr)
+                    addProperty("version", "v1")
+                })
+            }
+            val response = callEndpoint("getFriendRecommendations", payload)
+                ?: return@withContext Result.success(emptyList())
+            val status = response.get("status")?.asInt
+            if (status != null && status != 200) return@withContext Result.success(emptyList())
+            // Payload nam o response.data (phong thu them dang data.data.* nhu momentArray).
+            val payloadObj: JsonObject? = when {
+                response.has("recommendations") -> response
+                response.get("data")?.isJsonObject == true && response.getAsJsonObject("data").has("recommendations") -> response.getAsJsonObject("data")
+                response.get("data")?.isJsonObject == true && response.getAsJsonObject("data").get("data")?.isJsonObject == true -> response.getAsJsonObject("data").getAsJsonObject("data")
+                else -> null
+            }
+            val version = payloadObj?.get("version")?.takeIf { it.isJsonPrimitive }?.asString
+            if (payloadObj == null || (version != null && version != "v1")) {
+                return@withContext Result.success(emptyList())
+            }
+            val recArr = payloadObj.getAsJsonArray("recommendations") ?: JsonArray()
+            val recs = mutableListOf<Pair<String, Int>>()
+            for (elem in recArr) {
+                if (!elem.isJsonObject) continue
+                val obj = elem.asJsonObject
+                val uid = obj.get("user_uid")?.takeIf { it.isJsonPrimitive }?.asString ?: continue
+                if (uid.isBlank()) continue
+                val mutual = obj.get("mutual_friend_count")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+                recs.add(uid to mutual)
+            }
+            if (recs.isEmpty()) return@withContext Result.success(emptyList())
+            val names = resolveUserNames(recs.map { it.first })
+            val out = recs.take(10).map { (uid, mutual) ->
+                val resolved = names[uid]
+                if (resolved != null) {
+                    RecommendedFriend(uid = uid, displayName = resolved.first, avatarUrl = resolved.second, mutualFriendCount = mutual)
+                } else {
+                    val docFriend = fetchUserProfileFromDoc(uid)
+                    if (docFriend != null) {
+                        RecommendedFriend(uid = uid, username = docFriend.username, displayName = docFriend.displayName, avatarUrl = docFriend.avatarUrl, mutualFriendCount = mutual)
+                    } else {
+                        RecommendedFriend(uid = uid, displayName = uid, mutualFriendCount = mutual)
+                    }
+                }
+            }
+            Result.success(out)
+        } catch (e: Exception) {
+            Result.success(emptyList())
         }
     }
 

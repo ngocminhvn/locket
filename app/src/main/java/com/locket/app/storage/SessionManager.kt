@@ -26,6 +26,14 @@ class SessionManager(context: Context) {
         get() = prefs.getString("streak_last_updated_yyyymmdd_" + currentUser.uid, null)
         set(value) = prefs.edit().putString("streak_last_updated_yyyymmdd_" + currentUser.uid, value).apply()
 
+    // Uid da an (dismiss) trong muc Goi y ket ban — goc gui lai qua
+    // dismissed_user_ids moi lan goi getFriendRecommendations
+    // (bundle ~1244447, getDismissedFofUids). Luu theo uid; logout xoa
+    // het prefs nen reset theo tai khoan.
+    var dismissedRecommendationUids: Set<String>
+        get() = prefs.getStringSet("dismissed_recommendations_" + currentUser.uid, emptySet()) ?: emptySet()
+        set(value) = prefs.edit().putStringSet("dismissed_recommendations_" + currentUser.uid, value).apply()
+
     var savedEmail: String?
         get() = prefs.getString("saved_email", null)
         set(value) = prefs.edit().putString("saved_email", value).apply()
