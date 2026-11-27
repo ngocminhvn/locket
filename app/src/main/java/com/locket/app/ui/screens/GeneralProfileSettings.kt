@@ -77,7 +77,7 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
                 .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
         } catch (e: Exception) { notice = "Không mở được cài đặt thông báo" }
     }
-    GeneralRow(Icons.Default.AccountBox, "Sửa tên", displayName.takeIf { it.isNotBlank() }, onEditName)
+    GeneralRow(Icons.Default.AccountBox, "Đổi tên", displayName.takeIf { it.isNotBlank() }, onEditName)
     GeneralRow(Icons.Default.Phone, "Thay đổi số điện thoại", shown(details?.phone)) { open("phone") }
     GeneralRow(Icons.Default.Email, "Thay đổi địa chỉ email", shown(details?.email)) { open("email") }
     val birthdayLabel = details?.birthdayMdd?.let {

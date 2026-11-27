@@ -48,6 +48,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -145,95 +149,68 @@ fun ProfileScreen(
                 .padding(bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar: Back arrow & QR code button (Matches 05-profile.jpg)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Quay lại",
-                        tint = Color.White
-                    )
+            // The navigation controls share the same vertical space as the avatar.
+            Box(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                Box(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).size(116.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            .background(LocketBlack).border(3.dp, LocketYellow, CircleShape)
+                            .padding(7.dp).clip(CircleShape).background(Color(0xFF2C2C2E)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (user.profilePictureUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = user.profilePictureUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(64.dp))
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier.size(40.dp)
+                            .background(LocketYellow, CircleShape)
+                            .border(3.dp, LocketBlack, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Favorite, null, tint = LocketBlack, modifier = Modifier.size(20.dp))
+                    }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .padding(end = 8.dp),
-                            color = LocketYellow,
-                            strokeWidth = 2.dp
-                        )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = LocketTextDim)
                     }
-                    IconButton(onClick = { showQrModal = true }) {
-                        Icon(
-                            imageVector = Icons.Default.QrCode,
-                            contentDescription = "Mã QR",
-                            tint = Color.White
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = LocketYellow, strokeWidth = 2.dp)
+                        }
+                        IconButton(onClick = { showQrModal = true }) {
+                            Icon(Icons.Default.QrCode, "Mã QR", tint = LocketYellow)
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Large Avatar Circle with Yellow border & Heart Badge
-            Box(
-                modifier = Modifier.size(116.dp),
-                contentAlignment = Alignment.BottomEnd
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E))
-                        .border(3.5.dp, LocketYellow, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (user.profilePictureUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = user.profilePictureUrl,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(64.dp)
-                        )
-                    }
-                }
-
-                // Yellow Heart Badge
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(LocketYellow, CircleShape)
-                        .border(2.5.dp, Color.Black, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("💛", fontSize = 16.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(5.dp))
 
             // Name & Edit photo — "Chỉnh ảnh" mo gallery that (upload
-            // Storage + changeProfileInfo), "Sửa tên" mo dialog doi ten that.
+            // Storage + changeProfileInfo), "Đổi tên" mo dialog doi ten that.
             Text(
                 text = user.displayName.ifBlank { user.username.ifBlank { "Tài khoản Locket" } },
                 color = Color.White,
                 fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Row(
@@ -250,7 +227,7 @@ fun ProfileScreen(
                     }
                 )
                 Text(
-                    text = "Sửa tên",
+                    text = "Đổi tên",
                     color = LocketYellow,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -260,86 +237,96 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Rollcall Card & Invite Card
+            // Separate rounded cards with the narrow gap from the reference.
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFF1C1C1E))
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 17.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
+                        .background(Color(0xFF1E1E1E))
+                        .heightIn(min = 104.dp).padding(horizontal = 16.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Campaign,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    // No Rollcall thumbnail or participant count is available in the current data model.
+                    Icon(Icons.Outlined.Campaign, null, tint = Color.White, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Rollcall", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Text("Một người bạn đã chia sẻ!", color = LocketTextDim, fontSize = 13.sp)
+                        Text("Rollcall", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text("Chia sẻ ảnh với bạn bè", color = LocketTextDim, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 21.sp)
                     }
-                    Button(
-                        onClick = { Toast.makeText(context, "Chọn ảnh Rollcall", Toast.LENGTH_SHORT).show() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, LocketYellow),
-                        shape = RoundedCornerShape(16.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .drawBehind {
+                                drawRoundRect(
+                                    color = LocketYellow.copy(alpha = 0.32f),
+                                    cornerRadius = CornerRadius(24.dp.toPx()),
+                                    style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
+                                )
+                            }
+                            .clickable { Toast.makeText(context, "Chọn ảnh Rollcall", Toast.LENGTH_SHORT).show() }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("CHỌN ẢNH", color = LocketYellow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("CHỌN ẢNH", color = LocketYellow, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                HorizontalDivider(color = Color(0xFF2C2C2E))
-
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp, bottomStart = 24.dp, bottomEnd = 24.dp))
+                        .background(Color(0xFF1E1E1E))
+                        .heightIn(min = 84.dp).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, LocketYellow, CircleShape)
-                            .background(Color(0xFF2C2C2E)),
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                            .background(LocketBlack).border(2.dp, LocketYellow, CircleShape)
+                            .padding(4.dp).clip(CircleShape).background(Color(0xFF2C2C2E)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Mời bạn bè tham gia Locket!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        // Chi hien link moi khi co username that; username trong thi
-                        // khong hien "locket.cam/" trong (bug anh chup man hinh).
-                        if (user.username.isNotBlank()) {
-                            Text("locket.cam/${user.username}", color = LocketTextDim, fontSize = 13.sp)
+                        if (user.profilePictureUrl.isNotBlank()) {
+                            AsyncImage(user.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        } else {
+                            Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                     }
-                    IconButton(onClick = { showQrModal = true }) {
-                        Icon(Icons.Default.Share, null, tint = Color.White)
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Mời bạn bè tham gia Locket!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 20.sp)
+                        if (user.username.isNotBlank()) {
+                            Text("locket.cam/${user.username}", color = LocketTextDim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    IconButton(onClick = { showQrModal = true }, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Default.Share, null, tint = Color.LightGray)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Section: Locket Gold
             SectionTitle("Locket Gold")
             SettingsItem(
-                icon = { Icon(Icons.Default.Favorite, null, tint = LocketYellow) },
+                icon = {
+                    Box(Modifier.size(20.dp).background(LocketYellow, RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Favorite, null, tint = LocketBlack, modifier = Modifier.size(14.dp))
+                    }
+                },
                 title = "Choose app icon",
                 onClick = { Toast.makeText(context, "Chọn icon", Toast.LENGTH_SHORT).show() }
             )
             SettingsItem(
-                icon = { Icon(Icons.Default.Edit, null, tint = LocketYellow) },
+                icon = {
+                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.align(Alignment.BottomStart).size(19.dp).border(2.dp, LocketYellow, RoundedCornerShape(3.dp)))
+                        Icon(Icons.Default.Edit, null, tint = LocketYellow, modifier = Modifier.align(Alignment.TopEnd).size(19.dp).background(LocketBlack, CircleShape))
+                    }
+                },
                 title = "Chỉnh sửa khung widget",
                 onClick = { Toast.makeText(context, "Sửa widget", Toast.LENGTH_SHORT).show() }
             )
@@ -349,7 +336,12 @@ fun ProfileScreen(
                 onClick = { Toast.makeText(context, "Đổi giao diện", Toast.LENGTH_SHORT).show() }
             )
             SettingsItem(
-                icon = { Icon(Icons.Default.Stars, null, tint = LocketYellow) },
+                icon = {
+                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Stars, null, tint = LocketYellow, modifier = Modifier.fillMaxSize())
+                        Icon(Icons.Default.Favorite, null, tint = LocketBlack, modifier = Modifier.size(14.dp).background(LocketYellow, CircleShape))
+                    }
+                },
                 title = "Huy hiệu Locket Gold",
                 trailing = {
                     Switch(
@@ -444,11 +436,11 @@ private fun SectionTitle(title: String) {
     Text(
         text = title,
         color = Color.White,
-        fontSize = 18.sp,
+        fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .padding(horizontal = 17.dp, vertical = 8.dp)
     )
 }
 
@@ -464,16 +456,17 @@ private fun SettingsItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 17.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        icon()
-        Spacer(modifier = Modifier.width(16.dp))
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) { icon() }
+        Spacer(modifier = Modifier.width(14.dp))
         Text(
             text = title,
             color = textColor,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f)
         )
         trailing?.invoke()
@@ -921,7 +914,7 @@ private fun EditNameDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1E1E22),
-        title = { Text("Sửa tên hồ sơ", color = Color.White, fontWeight = FontWeight.Bold) },
+        title = { Text("Đổi tên hồ sơ", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
