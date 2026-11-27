@@ -13,8 +13,10 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
+import com.locket.app.model.MessageReaction
 import com.locket.app.model.Moment
 import kotlinx.coroutines.flow.Flow
 
@@ -70,6 +72,25 @@ data class ConversationEntity(
     val lastMessage: String = "",
     val timeAgo: String = "",
     val unreadCount: Int = 0
+)
+
+/**
+ * Tin nhan chat that (xem ChatMessage trong Models.kt).
+ * Khoa chinh = id that cua message tren server (doc id Firestore),
+ * KHONG sinh id gia. reactions luu dang JSON.
+ */
+@Entity(tableName = "chat_messages")
+data class ChatMessageEntity(
+    @PrimaryKey val id: String,
+    val conversationId: String = "",
+    val senderUid: String = "",
+    val isMe: Boolean = false,
+    val text: String = "",
+    val createdAtMs: Long = 0L,
+    val clientToken: String? = null,
+    val replyMomentUid: String? = null,
+    val thumbnailUrl: String? = null,
+    val reactionsJson: String = "[]"
 )
 
 // ---------------------------------------------------------------------------
@@ -146,6 +167,32 @@ fun ConversationEntity.toModel() = Conversation(
     unreadCount = unreadCount
 )
 
+fun ChatMessage.toEntity() = ChatMessageEntity(
+    id = id,
+    conversationId = conversationId,
+    senderUid = senderUid,
+    isMe = isMe,
+    text = text,
+    createdAtMs = createdAtMs,
+    clientToken = clientToken,
+    replyMomentUid = replyMomentUid,
+    thumbnailUrl = thumbnailUrl,
+    reactionsJson = Converters.chatReactionsToJson(reactions)
+)
+
+fun ChatMessageEntity.toModel() = ChatMessage(
+    id = id,
+    conversationId = conversationId,
+    senderUid = senderUid,
+    isMe = isMe,
+    text = text,
+    createdAtMs = createdAtMs,
+    clientToken = clientToken,
+    replyMomentUid = replyMomentUid,
+    thumbnailUrl = thumbnailUrl,
+    reactions = Converters.chatReactionsFromJson(reactionsJson)
+)
+
 // ---------------------------------------------------------------------------
 // Converters
 // ---------------------------------------------------------------------------
@@ -163,6 +210,19 @@ object Converters {
             gson.fromJson(value, type) ?: emptyMap()
         } catch (e: Exception) {
             emptyMap()
+        }
+    }
+
+    @TypeConverter
+    fun chatReactionsToJson(value: List<MessageReaction>): String = gson.toJson(value)
+
+    @TypeConverter
+    fun chatReactionsFromJson(value: String): List<MessageReaction> {
+        return try {
+            val type = object : TypeToken<List<MessageReaction>>() {}.type
+            gson.fromJson(value, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 }
@@ -227,11 +287,27 @@ interface LocketDao {
         if (conversations.isNotEmpty()) insertConversations(conversations)
     }
 
+    @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId ORDER BY createdAtMs ASC")
+    fun observeChatMessages(conversationId: String): Flow<List<ChatMessageEntity>>
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE conversationId = :conversationId")
+    suspend fun chatMessageCount(conversationId: String): Int
+
+    @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
+    suspend fun clearChatMessages(conversationId: String)
+
+    @Query("DELETE FROM chat_messages")
+    suspend fun clearAllChatMessages()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChatMessages(messages: List<ChatMessageEntity>)
+
     @Transaction
     suspend fun clearAll() {
         clearMoments()
         clearFriends()
         clearConversations()
+        clearAllChatMessages()
     }
 }
 
@@ -240,8 +316,8 @@ interface LocketDao {
 // ---------------------------------------------------------------------------
 
 @Database(
-    entities = [MomentEntity::class, FriendEntity::class, ConversationEntity::class],
-    version = 1,
+    entities = [MomentEntity::class, FriendEntity::class, ConversationEntity::class, ChatMessageEntity::class],
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

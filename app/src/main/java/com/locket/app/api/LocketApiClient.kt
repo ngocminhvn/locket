@@ -5,8 +5,10 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
+import com.locket.app.model.MessageReaction
 import com.locket.app.model.Moment
 import com.locket.app.model.User
 import kotlinx.coroutines.Dispatchers
@@ -242,15 +244,17 @@ class LocketApiClient(
             if (resp != null && resp.get("status")?.asInt == 200) {
                 val data = resp.getAsJsonObject("data")
                 val u = if (data.has("data")) data.getAsJsonObject("data") else data
-                val firstName = u?.get("first_name")?.asString ?: ""
-                val lastName = u?.get("last_name")?.asString ?: ""
+                // Doc null-safe: response that co "badge": null — JsonNull.asString()
+                // se throw, ca ham fail va Profile trang ten/anh (bug anh chup man hinh).
+                val firstName = optString(u, "first_name")
+                val lastName = optString(u, "last_name")
                 val displayName = "$firstName $lastName".trim().ifBlank { firstName }
                 val user = User(
                     uid = userUid,
-                    username = u?.get("username")?.asString ?: "",
+                    username = optString(u, "username"),
                     displayName = displayName,
-                    profilePictureUrl = u?.get("profile_picture_url")?.asString ?: "",
-                    badge = u?.get("badge")?.asString ?: "gold"
+                    profilePictureUrl = optString(u, "profile_picture_url"),
+                    badge = optString(u, "badge").ifBlank { "gold" }
                 )
                 return@withContext Result.success(user)
             }
@@ -714,6 +718,22 @@ class LocketApiClient(
     // 4. CHAT & CONVERSATIONS (LIVE API)
     // ==========================================
 
+    /**
+     * Doc tro chuyen that cua Firestore: users/{uid}/conversations/{convId}.
+     * Field da xac minh tu mapper doc->conversation trong bundle goc
+     * (orig/evidence_goc/decompiled.js, ham _temp gan dong 1287225):
+     * - uid: id cuoc tro chuyen
+     * - latest_message: {body, created_at (Timestamp .seconds), sender,
+     *   latest_reaction: {sender, emoji, created_at} | null}
+     * - is_read: boolean — false = chua doc
+     * - members: [uid, uid] — cac thanh vien
+     *
+     * KHONG co field unread_count nao trong doc (da grep toan bundle) nen
+     * unreadCount = 1 khi is_read == false, 0 khi is_read == true.
+     * Neu field is_read vang mat thi coi nhu da doc (khong dam bao chua doc
+     * khi khong co bang chung).
+     * timeAgo tinh tu latest_message.created_at that (truoc day hardcode "1d").
+     */
     suspend fun fetchConversations(userUid: String): Result<List<Conversation>> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
@@ -740,17 +760,52 @@ class LocketApiClient(
             for (docElem in documents) {
                 val doc = docElem.asJsonObject
                 val fields = doc.getAsJsonObject("fields")
-                val convId = doc.get("name")?.asString?.substringAfterLast("/") ?: ""
-                val otherUid = extractString(fields, "user_id").ifBlank { extractString(fields, "other_user_id") }
-                val lastMsg = extractString(fields, "last_message").ifBlank { "Đã gửi khoảnh khắc" }
-                val timeStr = extractString(fields, "last_message_date")
+                val convId = extractString(fields, "uid")
+                    .ifBlank { doc.get("name")?.asString?.substringAfterLast("/") ?: "" }
+                if (convId.isBlank()) continue
+
+                // Nguoi doi dien: members[] tru myUid (fallback: field user_id/other_user_id cu)
+                val members = extractStringList(fields, "members")
+                val otherUid = members.firstOrNull { it != userUid }
+                    ?: extractString(fields, "user_id").ifBlank { extractString(fields, "other_user_id") }
+
+                // Tin cuoi: latest_message that; fallback field cu neu server con ghi
+                val latestMsg = fields?.getAsJsonObject("latest_message")
+                    ?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
+                val lastMsg = if (latestMsg != null) extractString(latestMsg, "body") else ""
+                val lastMsgSeconds = if (latestMsg != null) {
+                    extractTimestampMs(latestMsg, "created_at")?.let { it / 1000 }
+                } else null
+                val latestSender = if (latestMsg != null) extractString(latestMsg, "sender") else ""
+                val latestThumb = if (latestMsg != null) extractString(latestMsg, "thumbnail_url") else ""
+                val fallbackMsg = extractString(fields, "last_message")
+                val fallbackSeconds = extractTimestampMs(fields, "last_message_date")?.let { it / 1000 }
+
+                // Preview that, theo thu tu uu tien:
+                // 1. body that cua tin cuoi; 2. "Da gui khoanh khac" CHI khi tin cuoi
+                // that su la 1 moment (co thumbnail, khong body) do chinh minh gui;
+                // 3. field last_message cu (neu server con ghi); 4. de trong.
+                // Khong bia chuoi chung cho moi hang khi khong co du lieu that.
+                val finalMsg = when {
+                    lastMsg.isNotBlank() -> lastMsg
+                    latestThumb.isNotBlank() && latestSender == userUid -> "Đã gửi khoảnh khắc"
+                    fallbackMsg.isNotBlank() -> fallbackMsg
+                    else -> ""
+                }
+                val finalSeconds = lastMsgSeconds ?: fallbackSeconds
+                val timeAgo = finalSeconds?.let { formatTimeAgo(it) } ?: ""
+
+                // Chua doc: chi khi is_read == false ro rang
+                val isRead = extractBool(fields, "is_read")
+                val unread = if (isRead == false) 1 else 0
 
                 convList.add(
                     Conversation(
                         id = convId,
                         friend = Friend(uid = otherUid, username = otherUid, displayName = ""),
-                        lastMessage = lastMsg,
-                        timeAgo = "1d"
+                        lastMessage = finalMsg,
+                        timeAgo = timeAgo,
+                        unreadCount = unread
                     )
                 )
             }
@@ -767,6 +822,88 @@ class LocketApiClient(
             }
 
             Result.success(resolved)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Lay tin nhan that cua 1 cuoc tro chuyen tu Firestore REST:
+     * GET conversations/{conversationId}/messages (pageSize 100), sap xep
+     * theo created_at giam dan o server — giong goc: onSnapshot tren
+     * messagesCollection orderBy('created_at', 'desc').limit(N) (bundle
+     * ~1732028); hien thi thi dao lai cu -> moi o client.
+     * Field doc xem parseChatMessageJson.
+     */
+    suspend fun fetchChatMessages(conversationId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
+        val token = getToken()
+        if (token.isNullOrBlank()) {
+            return@withContext Result.failure(Exception("Chưa đăng nhập"))
+        }
+        val myUid = getUid() ?: ""
+        try {
+            val url = "$FIRESTORE_BASE_URL/conversations/$conversationId/messages?pageSize=100&orderBy=created_at%20desc"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                return@withContext Result.failure(Exception("Lỗi Firestore messages: HTTP ${resp.code}"))
+            }
+            val json = gson.fromJson(resp.body?.string(), JsonObject::class.java)
+            val documents = json.getAsJsonArray("documents") ?: JsonArray()
+            val messages = mutableListOf<ChatMessage>()
+            for (docElem in documents) {
+                val parsed = parseChatMessageJson(docElem.asJsonObject, conversationId, myUid)
+                if (parsed != null) messages.add(parsed)
+            }
+            // Sap xep cu -> moi de hien thi; dedupe theo id that (khong sinh id gia)
+            val deduped = messages.distinctBy { it.id }.sortedBy { it.createdAtMs }
+            Result.success(deduped)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Danh dau 1 cuoc tro chuyen la da doc: callable markAsRead {conversation_uid}. */
+    suspend fun markConversationAsRead(conversationId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("conversation_uid", conversationId)
+                })
+            }
+            val resp = callEndpoint("markAsRead", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi markAsRead"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Reaction len 1 tin nhan chat: callable sendChatMessageReaction {conversation_id, message_id, emoji}. */
+    suspend fun sendChatMessageReaction(conversationId: String, messageId: String, emoji: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("conversation_id", conversationId)
+                    addProperty("message_id", messageId)
+                    addProperty("emoji", emoji)
+                })
+            }
+            val resp = callEndpoint("sendChatMessageReaction", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi gửi reaction"
+                Result.failure(Exception(err))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -957,7 +1094,109 @@ class LocketApiClient(
     }
 
     private fun extractString(fields: JsonObject?, fieldName: String): String {
-        return fields?.getAsJsonObject(fieldName)?.get("stringValue")?.asString ?: ""
+        val v = fields?.getAsJsonObject(fieldName)?.get("stringValue") ?: return ""
+        return if (v.isJsonNull) "" else try { v.asString } catch (e: Exception) { "" }
+    }
+
+    /** Doc chuoi tu JSON callable: tra "" khi field vang mat hoac null (JsonNull.asString() se throw). */
+    private fun optString(obj: JsonObject?, fieldName: String): String {
+        val el = obj?.get(fieldName) ?: return ""
+        return if (el.isJsonNull) "" else try { el.asString } catch (e: Exception) { "" }
+    }
+
+    /** Doc boolean that cua Firestore REST: fields.<name>.booleanValue (co the vang mat). */
+    private fun extractBool(fields: JsonObject?, fieldName: String): Boolean? {
+        val el = fields?.getAsJsonObject(fieldName)?.get("booleanValue") ?: return null
+        return try { el.asBoolean } catch (e: Exception) { null }
+    }
+
+    /**
+     * Doc timestamp that cua Firestore REST.
+     * Dang chuan: fields.<name>.timestampValue = chuoi RFC3339.
+     * Dang phong thu: mapValue {seconds, nanos} (neu server luu dang map).
+     * Tra ve epoch millis, hoac null neu khong doc duoc.
+     */
+    private fun extractTimestampMs(fields: JsonObject?, fieldName: String): Long? {
+        val fieldObj = fields?.getAsJsonObject(fieldName) ?: return null
+        fieldObj.get("timestampValue")?.takeIf { !it.isJsonNull }?.asString?.let { ts ->
+            return try {
+                java.time.Instant.parse(ts).toEpochMilli()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        val seconds = fieldObj.getAsJsonObject("mapValue")
+            ?.getAsJsonObject("fields")
+            ?.getAsJsonObject("seconds")
+            ?.get("integerValue")?.asString?.toLongOrNull()
+        return seconds?.let { it * 1000 }
+    }
+
+    /** Doc mang string that cua Firestore REST: fields.<name>.arrayValue.values[].stringValue. */
+    private fun extractStringList(fields: JsonObject?, fieldName: String): List<String> {
+        val values = fields?.getAsJsonObject(fieldName)
+            ?.getAsJsonObject("arrayValue")?.getAsJsonArray("values") ?: return emptyList()
+        return values.mapNotNull { it.asJsonObject?.get("stringValue")?.takeIf { v -> !v.isJsonNull }?.asString }
+    }
+
+    /** Cung cong thuc timeAgo dung o parseMomentJson: vua xong / Xm / Xh / Xd. */
+    private fun formatTimeAgo(epochSeconds: Long): String {
+        val diff = (System.currentTimeMillis() / 1000) - epochSeconds
+        return when {
+            diff < 60 -> "vừa xong"
+            diff < 3600 -> "${diff / 60}m"
+            diff < 86400 -> "${diff / 3600}h"
+            else -> "${diff / 86400}d"
+        }
+    }
+
+    /**
+     * Parse 1 document tin nhan Firestore REST thanh ChatMessage.
+     * Field da xac minh tu ham toMessage trong bundle goc (xem Models.kt).
+     * Tra ve null neu doc khong co body/sender/created_at hop le.
+     */
+    private fun parseChatMessageJson(doc: JsonObject, conversationId: String, myUid: String): ChatMessage? {
+        val fields = doc.getAsJsonObject("fields") ?: return null
+        val id = doc.get("name")?.asString?.substringAfterLast("/") ?: return null
+        val body = extractString(fields, "body")
+        val sender = extractString(fields, "sender")
+        val createdAtMs = extractTimestampMs(fields, "created_at") ?: return null
+        // Moment dinh kem da bi xoa (deleted_moment co gia tri that, khong phai null):
+        // bo thumbnail, chi giu text that neu co. Tin khong con noi dung hien thi
+        // duoc (khong body, khong thumbnail) thi bo qua.
+        val deletedMomentObj = fields.getAsJsonObject("deleted_moment")
+        val hasDeletedMoment = deletedMomentObj != null && !deletedMomentObj.has("nullValue")
+        val thumbnailUrl = if (hasDeletedMoment) null else extractString(fields, "thumbnail_url").ifBlank { null }
+        if (body.isBlank() && thumbnailUrl.isNullOrBlank()) return null
+
+        val reactions = mutableListOf<MessageReaction>()
+        val reactionValues = fields.getAsJsonObject("reactions")
+            ?.getAsJsonObject("arrayValue")?.getAsJsonArray("values")
+        if (reactionValues != null) {
+            for (rElem in reactionValues) {
+                val rFields = rElem.asJsonObject?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
+                    ?: continue
+                val rSender = extractString(rFields, "sender")
+                val rEmoji = extractString(rFields, "emoji")
+                val rCreated = extractTimestampMs(rFields, "created_at") ?: 0L
+                if (rSender.isNotBlank() && rEmoji.isNotBlank()) {
+                    reactions.add(MessageReaction(rSender, rEmoji, rCreated))
+                }
+            }
+        }
+
+        return ChatMessage(
+            id = id,
+            conversationId = conversationId,
+            senderUid = sender,
+            isMe = sender.isNotBlank() && sender == myUid,
+            text = body,
+            createdAtMs = createdAtMs,
+            clientToken = extractString(fields, "client_token").ifBlank { null },
+            replyMomentUid = extractString(fields, "reply_moment").ifBlank { null },
+            thumbnailUrl = thumbnailUrl,
+            reactions = reactions
+        )
     }
 
     private fun parseFirebaseError(respStr: String): String {

@@ -222,7 +222,11 @@ fun ProfileScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Mời bạn bè tham gia Locket!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text("locket.cam/${user.username}", color = LocketTextDim, fontSize = 13.sp)
+                        // Chi hien link moi khi co username that; username trong thi
+                        // khong hien "locket.cam/" trong (bug anh chup man hinh).
+                        if (user.username.isNotBlank()) {
+                            Text("locket.cam/${user.username}", color = LocketTextDim, fontSize = 13.sp)
+                        }
                     }
                     IconButton(onClick = { showQrModal = true }) {
                         Icon(Icons.Default.Share, null, tint = Color.White)

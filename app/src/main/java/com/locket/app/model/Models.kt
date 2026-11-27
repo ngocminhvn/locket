@@ -40,6 +40,38 @@ data class Conversation(
     val unreadCount: Int = 0
 )
 
+/**
+ * Tin nhan chat that (1-1), khop field cua document Firestore
+ * `conversations/{id}/messages` nhu app goc map trong `toMessage`
+ * (bundle goc orig/evidence_goc/decompiled.js, ham toMessage):
+ * - body: noi dung tin nhan
+ * - sender: uid nguoi gui
+ * - created_at: Timestamp -> createdAtMs
+ * - client_token: token client gui kem (nullable)
+ * - reply_moment: uid moment duoc tra loi (nullable)
+ * - thumbnail_url: anh thumbnail kem theo (nullable)
+ * - reactions: [{sender, emoji, created_at}] (nullable)
+ * - deleted_moment: (nullable)
+ */
+data class MessageReaction(
+    val senderUid: String,
+    val emoji: String,
+    val createdAtMs: Long = 0L
+)
+
+data class ChatMessage(
+    val id: String,
+    val conversationId: String,
+    val senderUid: String,
+    val isMe: Boolean,
+    val text: String,
+    val createdAtMs: Long = 0L,
+    val clientToken: String? = null,
+    val replyMomentUid: String? = null,
+    val thumbnailUrl: String? = null,
+    val reactions: List<MessageReaction> = emptyList()
+)
+
 data class CalendarDay(
     val dayNumber: Int,
     val hasMoment: Boolean = false,

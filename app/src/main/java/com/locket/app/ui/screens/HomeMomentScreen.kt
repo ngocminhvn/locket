@@ -271,9 +271,22 @@ fun HomeMomentScreen(
                     IconButton(
                         onClick = {
                             if (currentMoment != null) {
-                                viewModel.sendChatMessage(currentMoment.userUid, messageText)
-                                Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
-                                messageText = ""
+                                // Tra loi moment: gui kem moment_uid that (shape goc
+                                // sendChatMessageV2 co moment_uid); chi xoa o nhap
+                                // + toast khi server tra 200.
+                                val text = messageText
+                                viewModel.sendChatMessage(
+                                    receiverUid = currentMoment.userUid,
+                                    message = text,
+                                    momentUid = currentMoment.id,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
+                                        messageText = ""
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    }
+                                )
                             }
                         },
                         modifier = Modifier.size(36.dp)

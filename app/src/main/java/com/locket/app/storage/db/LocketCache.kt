@@ -1,5 +1,6 @@
 package com.locket.app.storage.db
 
+import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.model.Moment
@@ -33,6 +34,9 @@ class LocketCache(
     fun observeConversations(): Flow<List<Conversation>> =
         dao.observeConversations().map { list -> list.map { it.toModel() } }
 
+    fun observeChatMessages(conversationId: String): Flow<List<ChatMessage>> =
+        dao.observeChatMessages(conversationId).map { list -> list.map { it.toModel() } }
+
     suspend fun saveMoments(moments: List<Moment>) {
         dao.replaceMoments(moments.map { it.toEntity() })
         // Dual-write: widget van doc cache JSON cu trong prefs.
@@ -46,6 +50,22 @@ class LocketCache(
 
     suspend fun saveConversations(conversations: List<Conversation>) {
         dao.replaceConversations(conversations.map { it.toEntity() })
+    }
+
+    /**
+     * Luu tin nhan chat: UPSERT theo id that, khong xoa toan bo — fetch chi
+     * lay 100 tin moi nhat, xoa het se lam mat tin cu hon chua tai lai.
+     * Tin da xoa tren server (deleteChatMessage) van nam lai trong cache
+     * cho den khi clearAll (logout) — ghi nhan la han che, chua xu ly.
+     */
+    suspend fun saveChatMessages(messages: List<ChatMessage>) {
+        if (messages.isNotEmpty()) {
+            dao.insertChatMessages(messages.map { it.toEntity() })
+        }
+    }
+
+    suspend fun clearChatMessages(conversationId: String) {
+        dao.clearChatMessages(conversationId)
     }
 
     suspend fun clearAll() {

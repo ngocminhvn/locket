@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
+import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.model.Moment
@@ -12,6 +13,7 @@ import com.locket.app.model.User
 import com.locket.app.storage.SessionManager
 import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -41,6 +43,18 @@ class LocketViewModel(
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations.asStateFlow()
+
+    // Tin nhan that cua cuoc tro chuyen dang mo (Room cache-first + sync tu Firestore).
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _activeConversationId = MutableStateFlow<String?>(null)
+    val activeConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
+
+    private val _isChatLoading = MutableStateFlow(false)
+    val isChatLoading: StateFlow<Boolean> = _isChatLoading.asStateFlow()
+
+    private var chatMessagesJob: Job? = null
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -168,20 +182,73 @@ class LocketViewModel(
 
             // 4. Fetch live conversations
             if (currentUid.isNotBlank()) {
-                val convRes = apiClient.fetchConversations(currentUid)
-                val liveConvs = convRes.getOrNull()
-                if (liveConvs != null) {
-                    val friendsMap = currentFriendsList.associateBy { it.uid }
-                    val resolvedConvs = liveConvs.map { c ->
-                        val f = friendsMap[c.friend.uid]
-                        if (f != null) c.copy(friend = f) else c
-                    }
-                    _conversations.value = resolvedConvs
-                    cache.saveConversations(resolvedConvs)
-                }
+                refreshConversations()
             }
 
             _isSyncing.value = false
+        }
+    }
+
+    /** Chi tai lai danh sach tro chuyen (dung khi quay lai man danh sach). */
+    suspend fun refreshConversations() {
+        val currentUid = sessionManager.currentUser.uid
+        if (currentUid.isBlank()) return
+        val convRes = apiClient.fetchConversations(currentUid)
+        val liveConvs = convRes.getOrNull() ?: return
+        val friendsMap = _friends.value.associateBy { it.uid }
+        val resolvedConvs = liveConvs.map { c ->
+            val f = friendsMap[c.friend.uid]
+            if (f != null) c.copy(friend = f) else c
+        }
+        _conversations.value = resolvedConvs
+        cache.saveConversations(resolvedConvs)
+    }
+
+    /**
+     * Mo 1 cuoc tro chuyen theo uid ban be: tim id that tu danh sach
+     * conversations (Room), hien cache Room ngay, fetch tin that tu
+     * Firestore, luu Room, danh dau da doc.
+     * Chua co cuoc tro chuyen that (mo tu danh sach ban be) -> khong co id,
+     * hien trang trong that; gui tin se tao cuoc tro chuyen tren server.
+     */
+    fun openChat(friendUid: String) {
+        viewModelScope.launch {
+            _isChatLoading.value = true
+            if (_conversations.value.isEmpty()) {
+                refreshConversations()
+            }
+            val convId = _conversations.value.firstOrNull { it.friend.uid == friendUid }?.id
+            _activeConversationId.value = convId
+            chatMessagesJob?.cancel()
+            if (convId.isNullOrBlank()) {
+                _chatMessages.value = emptyList()
+                _isChatLoading.value = false
+                return@launch
+            }
+            chatMessagesJob = viewModelScope.launch {
+                cache.observeChatMessages(convId).collect { _chatMessages.value = it }
+            }
+            fetchChatMessagesAndMarkRead(convId)
+            _isChatLoading.value = false
+        }
+    }
+
+    /** Tai lai tin nhan that cua cuoc tro chuyen dang mo + danh dau da doc. */
+    fun refreshChat(conversationId: String? = _activeConversationId.value) {
+        val convId = conversationId ?: return
+        viewModelScope.launch { fetchChatMessagesAndMarkRead(convId) }
+    }
+
+    private suspend fun fetchChatMessagesAndMarkRead(convId: String) {
+        apiClient.fetchChatMessages(convId).onSuccess { messages ->
+            cache.saveChatMessages(messages)
+        }
+        apiClient.markConversationAsRead(convId).onSuccess {
+            val updated = _conversations.value.map {
+                if (it.id == convId) it.copy(unreadCount = 0) else it
+            }
+            _conversations.value = updated
+            cache.saveConversations(updated)
         }
     }
 
@@ -244,10 +311,51 @@ class LocketViewModel(
         }
     }
 
-    fun sendChatMessage(receiverUid: String, message: String) {
+    /**
+     * Gui tin nhan that qua sendChatMessageV2. Chi bao thanh cong khi server
+     * tra 200; tin hien len man hinh la tin that tai lai tu server (co id /
+     * timestamp that), KHONG tu them tin local. momentUid: dinh kem tin vao
+     * 1 moment (tra loi moment tu Home).
+     */
+    fun sendChatMessage(
+        receiverUid: String,
+        message: String,
+        momentUid: String? = null,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            apiClient.sendChatMessage(receiverUid, message)
-            syncAllData()
+            val res = apiClient.sendChatMessage(receiverUid, message, momentUid)
+            if (res.isSuccess) {
+                refreshConversations()
+                // Neu dang mo dung cuoc tro chuyen nay thi tai lai tin that ngay.
+                val convId = _conversations.value.firstOrNull { it.friend.uid == receiverUid }?.id
+                if (convId != null && convId == _activeConversationId.value) {
+                    fetchChatMessagesAndMarkRead(convId)
+                }
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
+            }
+        }
+    }
+
+    /** Reaction len 1 tin nhan chat that (message id that, khong id gia). */
+    fun reactToChatMessage(
+        conversationId: String,
+        messageId: String,
+        emoji: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.sendChatMessageReaction(conversationId, messageId, emoji)
+            if (res.isSuccess) {
+                fetchChatMessagesAndMarkRead(conversationId)
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi gửi reaction")
+            }
         }
     }
 
@@ -330,6 +438,10 @@ class LocketViewModel(
     fun logout() {
         sessionManager.logout()
         viewModelScope.launch { cache.clearAll() }
+        chatMessagesJob?.cancel()
+        _chatMessages.value = emptyList()
+        _activeConversationId.value = null
+        _isChatLoading.value = false
         _currentUser.value = sessionManager.currentUser
         _isLoggedIn.value = false
         _friends.value = emptyList()

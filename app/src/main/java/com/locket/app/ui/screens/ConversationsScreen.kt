@@ -42,6 +42,12 @@ fun ConversationsScreen(
 
     var showNewChatDialog by remember { mutableStateOf(false) }
 
+    // Quay lai man danh sach: tai lai conversations that (REST, tuong duong
+    // polling cua onSnapshot goc) de preview/so chua doc khong bi cu.
+    LaunchedEffect(Unit) {
+        viewModel.refreshConversations()
+    }
+
     // Conversations strictly from live server data or friends list (No demo data)
     val conversations = remember(liveConversations, friends) {
         if (liveConversations.isNotEmpty()) {
@@ -51,7 +57,9 @@ fun ConversationsScreen(
                 Conversation(
                     id = friend.uid,
                     friend = friend,
-                    lastMessage = "Bắt đầu cuộc trò chuyện",
+                    // Chua co cuoc tro chuyen that: preview de trong that,
+                    // khong bia chuoi "Bat dau cuoc tro chuyen" lam tin cuoi.
+                    lastMessage = "",
                     timeAgo = ""
                 )
             }
@@ -157,7 +165,9 @@ fun ConversationsScreen(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = conv.friend.displayName,
+                                // Ten that; chua resolve duoc thi hien username, roi UID that —
+                                // khong de trong (bug anh chup man hinh: hang khong ten).
+                                text = conv.friend.displayName.ifBlank { conv.friend.username.ifBlank { conv.friend.uid } },
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
@@ -171,11 +181,24 @@ fun ConversationsScreen(
                             )
                         }
 
-                        Text(
-                            text = conv.timeAgo,
-                            color = LocketTextDim,
-                            fontSize = 13.sp
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = conv.timeAgo,
+                                color = LocketTextDim,
+                                fontSize = 13.sp
+                            )
+                            // Chua doc that (is_read == false tren server): cham vang.
+                            if (conv.unreadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .background(LocketYellow, CircleShape)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -215,9 +238,18 @@ fun ConversationsScreen(
             NewChatDialog(
                 friends = friends,
                 onSendMessage = { receiverUid, msg ->
-                    viewModel.sendChatMessage(receiverUid, msg)
-                    Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
-                    showNewChatDialog = false
+                    // Chi bao "da gui" khi server tra 200; loi thi bao loi that.
+                    viewModel.sendChatMessage(
+                        receiverUid = receiverUid,
+                        message = msg,
+                        onSuccess = {
+                            Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
+                            showNewChatDialog = false
+                        },
+                        onError = { err ->
+                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                        }
+                    )
                 },
                 onDismiss = { showNewChatDialog = false }
             )
