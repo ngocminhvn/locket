@@ -30,6 +30,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import android.net.Uri
+import coil.request.ImageRequest
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +66,7 @@ internal class MomentReviewSlots(
 internal fun rememberMomentReviewSlots(
     bitmap: Bitmap,
     previewBitmap: Bitmap = bitmap,
+    snapshotFile: File? = null,
     videoFile: File?,
     friends: List<Friend>,
     replyToFriend: Friend?,
@@ -131,6 +135,7 @@ internal fun rememberMomentReviewSlots(
                     withContext(Dispatchers.IO) {
                         context.contentResolver.openOutputStream(uri)?.use { out ->
                             if (videoFile != null) videoFile.inputStream().use { it.copyTo(out) }
+                            else if (snapshotFile?.isFile == true) snapshotFile.inputStream().use { it.copyTo(out) }
                             else check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out))
                         } ?: error("Không mở được tệp")
                     }
@@ -180,7 +185,24 @@ internal fun rememberMomentReviewSlots(
                         } },
                         onRelease = { it.stopPlayback() }
                     )
-                } else Image(remember(previewBitmap) { previewBitmap.asImageBitmap() }, "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else {
+                    val painter = remember(previewBitmap) { BitmapPainter(previewBitmap.asImageBitmap()) }
+                    if (snapshotFile == null) {
+                        Image(painter, "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    } else {
+                        AsyncImage(
+                            model = remember(snapshotFile, context) {
+                                ImageRequest.Builder(context).data(Uri.fromFile(snapshotFile))
+                                    .crossfade(false).build()
+                            },
+                            contentDescription = "Ảnh vừa chụp",
+                            placeholder = painter,
+                            error = painter,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
 
                 HorizontalPager(
                     state = pager,

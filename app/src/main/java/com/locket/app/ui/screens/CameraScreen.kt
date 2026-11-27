@@ -33,7 +33,10 @@ import androidx.compose.ui.semantics.*
 import android.media.MediaMetadataRetriever
 import android.widget.VideoView
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.Dispatchers
+import com.locket.app.ui.encodeMomentThumbnail
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -468,7 +471,10 @@ fun CameraScreen(
                 if (frame == null || !hasPreviewPixels(frame)) {
                     Toast.makeText(context, "Không lấy được khung camera, hãy thử lại", Toast.LENGTH_SHORT).show()
                 } else {
-                    result = cameraSquare720(frame, frontCamera && !cameraPreferences.mirror)
+                    result = if (frontCamera && !cameraPreferences.mirror) {
+                        Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height,
+                            Matrix().apply { setScale(-1f, 1f) }, true)
+                    } else frame
                     // Publish immediately; do not queue a second capture or JPEG encode.
                     capturedBitmap = result
                     android.util.Log.d("LocketCamera", "preview capture ${SystemClock.elapsedRealtime() - started}ms, ${result.width}x${result.height}")
@@ -494,7 +500,7 @@ fun CameraScreen(
                 try {
                     val full = imageProxyToBitmap(image, mirrorPhoto)
                     try {
-                        photo = cameraSquare720(full)
+                        photo = full
                     } finally {
                         if (photo !== full) full.recycle()
                     }
@@ -653,12 +659,53 @@ fun CameraScreen(
     }
 
     val review = capturedBitmap?.let { bitmap ->
+        val isPhoto = capturedVideo == null
+        val prepared = remember(bitmap, isPhoto) {
+            if (isPhoto) CompletableDeferred<ByteArray>() else null
+        }
+        var snapshotFile by remember(bitmap, isPhoto) { mutableStateOf<File?>(null) }
+        LaunchedEffect(bitmap, prepared) {
+            if (prepared == null) return@LaunchedEffect
+            var temp: File? = null
+            try {
+                // Display the frozen real frame immediately while its JPEG
+                // snapshot and independent upload thumbnail are prepared.
+                try {
+                    withContext(Dispatchers.IO) {
+                        val file = File.createTempFile("locket-snapshot-", ".jpg", context.cacheDir)
+                        temp = file
+                        file.outputStream().use { out ->
+                            check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out))
+                        }
+                    }
+                    snapshotFile = temp
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    temp?.delete()
+                    temp = null
+                    android.util.Log.w("LocketCamera", "JPEG snapshot cache failed", e)
+                }
+                try {
+                    prepared.complete(withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) })
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    prepared.completeExceptionally(e)
+                }
+                awaitCancellation()
+            } finally {
+                if (!prepared.isCompleted) prepared.cancel()
+                temp?.delete()
+            }
+        }
         val moments by viewModel.moments.collectAsState()
         val ownStreak = remember(moments, currentUser.uid) {
             viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
         }
         rememberMomentReviewSlots(
             bitmap = bitmap,
+            snapshotFile = snapshotFile,
             videoFile = capturedVideo,
             friends = friends,
             replyToFriend = replyToFriend,
@@ -675,6 +722,7 @@ fun CameraScreen(
                 viewModel.postMoment(
                     bitmap = bitmap,
                     videoFile = capturedVideo,
+                    preparedThumbnail = prepared,
                     caption = caption,
                     recipients = recipients,
                     onSuccess = {

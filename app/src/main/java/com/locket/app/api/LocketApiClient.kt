@@ -2118,12 +2118,15 @@ class LocketApiClient(
 
     suspend fun uploadMomentThumbnail(
         imageBytes: ByteArray,
-        isCameraRoll: Boolean = false
+        isCameraRoll: Boolean = false,
+        webp: Boolean = false
     ): UploadResult = withContext(Dispatchers.IO) {
         val token = getToken()
         val uid = getUid() ?: "anonymous"
         val randomId = generateRandomId(20)
-        val encodedPath = "users%2F$uid%2Fmoments%2Fthumbnails%2F$randomId.jpg"
+        val extension = if (webp) "webp" else "jpg"
+        val mime = if (webp) "image/webp" else "image/jpeg"
+        val encodedPath = "users%2F$uid%2Fmoments%2Fthumbnails%2F$randomId.$extension"
         val md5Hex = computeMd5(imageBytes, isCameraRoll)
 
         if (token.isNullOrBlank()) {
@@ -2135,11 +2138,11 @@ class LocketApiClient(
 
         try {
             val uploadUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o?uploadType=media&name=$encodedPath"
-            val body = imageBytes.toRequestBody("image/jpeg".toMediaType())
+            val body = imageBytes.toRequestBody(mime.toMediaType())
             val request = Request.Builder()
                 .url(uploadUrl)
                 .addHeader("Authorization", "Bearer $token")
-                .addHeader("Content-Type", "image/jpeg")
+                .addHeader("Content-Type", mime)
                 .addHeader("Cache-Control", "public, max-age=604800")
                 .post(body)
                 .build()

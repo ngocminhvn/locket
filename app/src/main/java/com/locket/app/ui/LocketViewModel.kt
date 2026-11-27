@@ -20,6 +20,7 @@ import com.locket.app.storage.SessionManager
 import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -709,12 +710,18 @@ class LocketViewModel(
         recipients: List<String> = emptyList(),
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
-        videoFile: File? = null
+        videoFile: File? = null,
+        preparedThumbnail: Deferred<ByteArray>? = null
     ) {
         viewModelScope.launch {
             _isSyncing.value = true
+            val webp = videoFile == null
             val bytes = try {
-                withContext(Dispatchers.Default) {
+                if (webp) {
+                    preparedThumbnail?.await() ?: withContext(Dispatchers.Default) {
+                        encodeMomentThumbnail(bitmap)
+                    }
+                } else withContext(Dispatchers.Default) {
                     ByteArrayOutputStream().use { stream ->
                         check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
                         stream.toByteArray()
@@ -730,7 +737,7 @@ class LocketViewModel(
             }
 
             // 1. Upload to Firebase Storage
-            val uploadRes = apiClient.uploadMomentThumbnail(bytes)
+            val uploadRes = apiClient.uploadMomentThumbnail(bytes, webp = webp)
             if (uploadRes.success && uploadRes.downloadUrl != null) {
                 val md5 = uploadRes.md5 ?: apiClient.computeMd5(bytes)
 
