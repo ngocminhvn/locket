@@ -53,7 +53,7 @@ import java.util.Locale
  * gui qua sendChatMessageV2, danh dau da doc qua markAsRead.
  * Khong dung tin nhan dung tu moment, khong them tin local khi gui.
  * Cuon len dau danh sach thi tai them tin cu (nextPageToken); khi dang mo
- * chat thi polling nhe moi ~8s de tin moi ve gan realtime hon — chua phai
+ * chat thi polling nhe moi ~12s de tin moi ve gan realtime hon — chua phai
  * realtime that (Firestore :listen streaming chua lam).
  * Nhan giu 1 tin: reaction (bam dung emoji da react thi go), thu hoi tin
  * cua minh (deleteChatMessage — goc goi la "unsend"), bao cao tin nguoi
@@ -144,7 +144,7 @@ fun ChatDetailScreen(
         }
     }
 
-    // Polling nhe khi dang mo chat: refresh moi ~8s de tin moi ve gan
+    // Polling nhe khi dang mo chat: refresh moi ~12s de tin moi ve gan
     // realtime hon. Dung khi roi man vi LaunchedEffect bi huy.
     LaunchedEffect(activeConversationId) {
         val convId = activeConversationId ?: return@LaunchedEffect

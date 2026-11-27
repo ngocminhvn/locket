@@ -683,7 +683,7 @@ class LocketApiClient(
         return fallback
     }
 
-    suspend fun fetchFriends(userUid: String): Result<List<Friend>> = withContext(Dispatchers.IO) {
+    suspend fun fetchFriends(userUid: String, cached: List<Friend> = emptyList()): Result<List<Friend>> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
             return@withContext Result.failure(Exception("Chưa đăng nhập"))
@@ -720,12 +720,20 @@ class LocketApiClient(
                 return@withContext Result.success(emptyList())
             }
 
-            val friendsList = mutableListOf<Friend>()
+            val cachedByUid = cached.associateBy { it.uid }
+            val reusable = friendUids.mapNotNull { uid ->
+                cachedByUid[uid]?.takeIf {
+                    it.displayName.isNotBlank() && it.displayName != uid &&
+                        nameCache[nameKey(uid)]?.expiresAt?.let { expiry -> expiry > nameNow() } == true
+                }
+            }
+            val friendsList = reusable.toMutableList()
+            val reusedIds = reusable.map { it.uid }.toSet()
 
             // 1. Try callable fetchUsers (chia nho: server chi nhan toi da 20 uid/call,
             // 21+ tra "Malformed request", da verify live voi 23 ban)
             val allUsers = mutableListOf<com.google.gson.JsonElement>()
-            for (batch in friendUids.chunked(10)) {
+            for (batch in friendUids.filterNot { it in reusedIds }.chunked(10)) {
                 val payload = JsonObject().apply {
                     add("data", JsonObject().apply {
                         add("user_uids", gson.toJsonTree(batch))
@@ -818,8 +826,16 @@ class LocketApiClient(
                 }
             }
 
-            Result.success(friendsList)
-        } catch (e: Exception) {
+            if (getUid() == userUid) seedUserNames(friendsList.filterNot { it.uid in reusedIds }, fresh = true)
+            Result.success(friendsList.map { friend ->
+                val previous = cachedByUid[friend.uid]
+                if (previous != null && (friend.displayName.isBlank() || friend.displayName == friend.uid))
+                    friend.copy(displayName = previous.displayName, username = previous.username,
+                        avatarUrl = previous.avatarUrl.ifBlank { friend.avatarUrl })
+                else friend
+            })
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             Result.failure(e)
         }
     }

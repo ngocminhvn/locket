@@ -84,6 +84,7 @@ class LocketViewModel(
     private var activeFriendUid: String? = null
     private var lastConversationSync = 0L
     private val chatRefreshedAt = mutableMapOf<String, Long>()
+    private val chatPagination = mutableMapOf<String, String?>()
     private val chatMarkedThrough = mutableMapOf<String, String>()
     private fun now() = android.os.SystemClock.elapsedRealtime()
     private fun activeAccount(uid: String) = _isLoggedIn.value && uid == sessionManager.currentUser.uid
@@ -394,12 +395,17 @@ class LocketViewModel(
         // Cache-first: chuyen cache JSON cu sang Room 1 lan (neu chua),
         // roi UI doc truc tiep Flow tu Room — mo app la thay du lieu ngay,
         // khong cho mang. Sync chay nen o duoi, xong moi ghi de Room.
+        val startupAccount = sessionManager.currentUser.uid
         viewModelScope.launch {
             cache.migrateLegacyCacheIfNeeded()
-            if (isLoggedIn) {
-                _moments.value = cache.observeMoments().first()
-                _friends.value = cache.observeFriends().first()
-                _conversations.value = cache.observeConversations().first()
+            if (activeAccount(startupAccount) && startupAccount.isNotBlank()) {
+                val savedMoments = cache.observeMoments().first()
+                val savedFriends = cache.observeFriends().first()
+                val savedConversations = cache.observeConversations().first()
+                if (!activeAccount(startupAccount)) return@launch
+                _moments.value = savedMoments
+                _friends.value = savedFriends
+                _conversations.value = savedConversations
                 apiClient.seedUserNames(_friends.value)
                 apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
                 prefetchUpcomingMoments(_moments.value, -1)
@@ -487,9 +493,9 @@ class LocketViewModel(
                         }
                     }
                     launch {
-                        apiClient.fetchFriends(account).onSuccess { live ->
+                        apiClient.fetchFriends(account, _friends.value).onSuccess { live ->
                             if (activeAccount(account)) {
-                                apiClient.seedUserNames(live, fresh = true)
+                                apiClient.seedUserNames(live)
                                 if (live != _friends.value) {
                                     cache.saveFriends(live)
                                     if (activeAccount(account)) _friends.value = live
@@ -597,6 +603,7 @@ class LocketViewModel(
         _activeConversationId.value = null
         _chatMessages.value = emptyList()
         _isChatLoading.value = false
+        _isLoadingOlderChat.value = false
     }
 
     fun openChat(friendUid: String) {
@@ -618,16 +625,23 @@ class LocketViewModel(
                 val id = convId ?: return@launch
                 if (!activeAccount(account) || activeFriendUid != friendUid) return@launch
                 _activeConversationId.value = id
-                chatNextPageToken = null
-                _chatHasMoreOlder.value = true
+                val initialized = chatPagination.containsKey(id)
+                chatNextPageToken = chatPagination[id]
+                _chatHasMoreOlder.value = !initialized || chatNextPageToken != null
                 _isLoadingOlderChat.value = false
-                _chatMessages.value = cache.observeChatMessages(id).first()
+                val saved = cache.observeChatMessages(id).first()
+                if (!activeAccount(account) || activeFriendUid != friendUid) return@launch
+                _chatMessages.value = saved
                 chatMessagesJob = viewModelScope.launch {
                     cache.observeChatMessages(id).collect { if (_activeConversationId.value == id) _chatMessages.value = it }
                 }
                 // Cache is displayed before any network response.
                 if (_chatMessages.value.isNotEmpty()) _isChatLoading.value = false
-                fetchChatMessagesAndMarkRead(id, resetPagination = true)
+                val recentlyRefreshed = chatRefreshedAt[id]?.let { now() - it < 15_000L } == true
+                val unread = _conversations.value.any { it.id == id && it.unreadCount > 0 }
+                if (!initialized || !recentlyRefreshed || unread || saved.isEmpty()) {
+                    fetchChatMessagesAndMarkRead(id, resetPagination = !initialized, incremental = initialized)
+                }
             } finally {
                 if (activeFriendUid == friendUid) _isChatLoading.value = false
             }
@@ -657,6 +671,7 @@ class LocketViewModel(
             cache.saveChatMessages(page.messages)
             if (resetPagination) {
                 chatNextPageToken = page.nextPageToken
+                chatPagination[convId] = page.nextPageToken
                 _chatHasMoreOlder.value = page.nextPageToken != null
             }
             chatRefreshedAt[convId] = now()
@@ -808,6 +823,7 @@ class LocketViewModel(
                     }
                 }
                 chatNextPageToken = page.nextPageToken
+                chatPagination[conversationId] = page.nextPageToken
                 _chatHasMoreOlder.value = page.nextPageToken != null
                 onLoaded(fresh.size)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1285,6 +1301,7 @@ class LocketViewModel(
         viewedMomentUids.clear()
         lastConversationSync = 0L
         chatRefreshedAt.clear()
+        chatPagination.clear()
         chatMarkedThrough.clear()
         ownHistoryJob?.cancel()
         ownHistoryCursor = null
