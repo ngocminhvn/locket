@@ -31,6 +31,7 @@ import android.media.MediaMetadataRetriever
 import android.widget.VideoView
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.*
@@ -171,6 +172,7 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var capturedPreview by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
     val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect {
@@ -180,6 +182,7 @@ fun CameraScreen(
 
     fun clearCapture() {
         capturedBitmap = null
+        capturedPreview = null
         capturedVideo?.delete()
         capturedVideo = null
     }
@@ -438,21 +441,43 @@ fun CameraScreen(
         if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
         val mirrorPhoto = frontCamera && cameraPreferences.mirror
-        capture.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
+        val mainExecutor = ContextCompat.getMainExecutor(context)
+        val previewSize = previewView.width.coerceIn(720, 1080)
+        // CameraX delivers the JPEG to a worker, not the UI thread. Only publish
+        // Compose state once the proxy has been closed and the preview is ready.
+        capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
+                var full: Bitmap? = null
+                var preview: Bitmap? = null
+                var failure: Exception? = null
                 try {
-                    val bitmap = imageProxyToBitmap(image, mirrorPhoto)
-                    if (screenActive) capturedBitmap = bitmap
+                    full = imageProxyToBitmap(image, mirrorPhoto)
+                    preview = cameraReviewBitmap(full, previewSize)
                 } catch (e: Exception) {
-                    if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
+                    failure = e
                 } finally {
                     image.close()
+                }
+                val photo = full
+                val displayPhoto = preview
+                val error = failure
+                mainExecutor.execute {
                     capturingPhoto = false
+                    if (screenActive && error == null && photo != null && displayPhoto != null) {
+                        capturedPreview = displayPhoto
+                        capturedBitmap = photo
+                    } else {
+                        if (displayPhoto !== photo) displayPhoto?.recycle()
+                        photo?.recycle()
+                        if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${error?.message ?: "lỗi không xác định"}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             override fun onError(exception: ImageCaptureException) {
-                capturingPhoto = false
-                if (screenActive) Toast.makeText(context, "Lỗi chụp: ${exception.message}", Toast.LENGTH_SHORT).show()
+                mainExecutor.execute {
+                    capturingPhoto = false
+                    if (screenActive) Toast.makeText(context, "Lỗi chụp: ${exception.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         })
     }
@@ -946,9 +971,12 @@ fun CameraScreen(
 
         capturedBitmap?.let { bitmap ->
             val moments by viewModel.moments.collectAsState()
-            val ownStreak = viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
+            val ownStreak = remember(moments, currentUser.uid) {
+                viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
+            }
             SendMomentScreen(
                 bitmap = bitmap,
+                previewBitmap = capturedPreview ?: bitmap,
                 videoFile = capturedVideo,
                 friends = friends,
                 replyToFriend = replyToFriend,
@@ -1013,25 +1041,33 @@ private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
     val top = (rect.top * scaleY).toInt().coerceIn(0, source.height - 1)
     val right = (rect.right * scaleX).toInt().coerceIn(left + 1, source.width)
     val bottom = (rect.bottom * scaleY).toInt().coerceIn(top + 1, source.height)
-    val cropped = Bitmap.createBitmap(source, left, top, right - left, bottom - top)
-    if (cropped !== source) source.recycle()
+    // Center-crop in sensor coordinates first (square is rotation invariant).
+    // Combine rotation and optional horizontal mirror in one bitmap operation.
+    val side = minOf(right - left, bottom - top)
+    val x = left + (right - left - side) / 2
+    val y = top + (bottom - top - side) / 2
+    val transform = Matrix().apply {
+        postRotate(image.imageInfo.rotationDegrees.toFloat())
+        if (mirror) postScale(-1f, 1f)
+    }
+    return try {
+        Bitmap.createBitmap(source, x, y, side, side, transform, true).also {
+            if (it !== source) source.recycle()
+        }
+    } catch (e: Exception) {
+        source.recycle()
+        throw e
+    }
+}
 
-    val rotation = image.imageInfo.rotationDegrees
-    val upright = if (rotation != 0) {
-        Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height,
-            Matrix().apply { postRotate(rotation.toFloat()) }, true)
-    } else cropped
-    if (upright !== cropped) cropped.recycle()
 
-    // Front PreviewView is mirrored by CameraX; match that orientation in the
-    // saved photo, not merely in the review UI. Rear camera remains unmirrored.
-    val size = minOf(upright.width, upright.height)
-    val square = Bitmap.createBitmap(upright, (upright.width - size) / 2,
-        (upright.height - size) / 2, size, size)
-    if (square !== upright) upright.recycle()
-    if (!mirror) return square
-    val mirrored = Bitmap.createBitmap(square, 0, 0, square.width, square.height,
-        Matrix().apply { setScale(-1f, 1f) }, true)
-    if (mirrored !== square) square.recycle()
-    return mirrored
+// Only the on-screen review is downscaled. The original square bitmap still
+// goes to save and upload, without a new JPEG compression pass.
+private fun cameraReviewBitmap(bitmap: Bitmap, maxSize: Int): Bitmap {
+    val largest = maxOf(bitmap.width, bitmap.height)
+    if (largest <= maxSize) return bitmap
+    val scale = maxSize.toFloat() / largest
+    return Bitmap.createScaledBitmap(bitmap,
+        (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+        (bitmap.height * scale).roundToInt().coerceAtLeast(1), true)
 }
