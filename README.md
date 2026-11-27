@@ -51,4 +51,8 @@ For comprehensive system architecture, API specifications, and guidelines for AI
 ---
 
 ## 📄 License
-This project is licensed under the terms included in the [LICENSE](LICENSE) file.
+The project's own source code, to the extent the project has the rights to license it, is distributed under the **GNU General Public License v3.0 only (GPL-3.0-only)**. See [LICENSE](LICENSE).
+
+Earlier versions released under Apache-2.0 remain available under their original license; previously granted rights are not revoked. The original [Apache-2.0 license text](LICENSES/Apache-2.0.txt) is retained for applicable material. Third-party dependencies, fonts, and other assets retain their respective licenses.
+
+This is an unofficial client; no rights to Locket's trademarks, proprietary assets, or services are granted by this license.
