@@ -2,6 +2,7 @@ package com.locket.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -77,6 +78,31 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(isLoggedIn) {
                     if (!isLoggedIn) {
                         currentScreen = "welcome"
+                    }
+                }
+
+                // Android Back (button or system edge gesture): secondary screens
+                // return to the main camera. At the camera let Android handle
+                // Back normally. HomePagerScreen handles feed pages itself;
+                // child dialogs and camera review keep their own Back priority.
+                BackHandler(
+                    enabled = showProfileScreen || showFriendsModal ||
+                        currentScreen == "login" ||
+                        (isLoggedIn && currentScreen !in listOf("camera", "feed", "welcome"))
+                ) {
+                    if (!isLoggedIn) {
+                        showProfileScreen = false
+                        showFriendsModal = false
+                        currentScreen = "welcome"
+                    } else {
+                        showProfileScreen = false
+                        showFriendsModal = false
+                        activeChatFriend = null
+                        selectedGridIndex = 0
+                        homeTabSwipeEnabled = true
+                        viewModel.setReplyToFriend(null)
+                        viewModel.selectFriend(null)
+                        currentScreen = "camera"
                     }
                 }
 
