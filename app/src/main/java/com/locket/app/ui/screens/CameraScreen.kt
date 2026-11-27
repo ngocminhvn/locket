@@ -13,10 +13,13 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Rational
+import android.util.Size
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.camera.video.*
@@ -159,7 +162,7 @@ fun CameraScreen(
     var screenActive by remember { mutableStateOf(true) }
     val previewView = remember(context) {
         PreviewView(context).apply {
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
@@ -172,7 +175,6 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var capturedPreview by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
     val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect {
@@ -182,7 +184,6 @@ fun CameraScreen(
 
     fun clearCapture() {
         capturedBitmap = null
-        capturedPreview = null
         capturedVideo?.delete()
         capturedVideo = null
     }
@@ -201,7 +202,7 @@ fun CameraScreen(
     val requestedExtension = if (videoSession) ExtensionMode.NONE else cameraPreferences.extension
     val requestedVideoHdr = videoSession && cameraPreferences.videoHdr
     DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView, requestedExtension,
-        requestedVideoHdr, cameraPreferences.quality, cameraPreferences.stabilization,
+        requestedVideoHdr, cameraPreferences.stabilization,
         cameraPreferences.selfieFlash, cameraPreferences.mirror, activity) {
         var active = true
         var provider: ProcessCameraProvider? = null
@@ -246,13 +247,17 @@ fun CameraScreen(
                 fun bind(selector: CameraSelector, extension: Boolean, hdr: Boolean, advanced: Boolean, includeVideo: Boolean): Camera {
                     val info = cameraProvider.getCameraInfo(selector)
                     val preview = Preview.Builder().setTargetRotation(rotation).apply {
+                        if (!extension && advanced) setResolutionSelector(cameraPhotoResolutionSelector())
                         if (advanced && cameraPreferences.stabilization && !extension &&
                             Preview.getPreviewCapabilities(info).isStabilizationSupported) setPreviewStabilizationEnabled(true)
                     }.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
                     val photo = ImageCapture.Builder()
                         .setTargetRotation(rotation)
-                        .setCaptureMode(if (cameraPreferences.quality) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                         .setFlashMode(ImageCapture.FLASH_MODE_OFF)
+                        .apply {
+                            if (!extension && advanced) setResolutionSelector(cameraPhotoResolutionSelector())
+                        }
                         .build()
                     if (frontCamera && !extension && cameraPreferences.selfieFlash && activity != null) {
                         previewView.screenFlash?.let { photo.setScreenFlash(it) }
@@ -440,35 +445,69 @@ fun CameraScreen(
         val capture = imageCapture
         if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
+
+        // Normal photos are the actual displayed preview frame: its crop,
+        // zoom, rotation and color are already applied by CameraX.
+        // Do not trigger a second, high-resolution still capture.
+        val wantsStill = capture.flashMode != ImageCapture.FLASH_MODE_OFF ||
+            flashMode != ImageCapture.FLASH_MODE_OFF || extensionActive || cameraPreferences.quality
+        val frame = if (!wantsStill &&
+            previewView.previewStreamState.value == PreviewView.StreamState.STREAMING) {
+            try { previewView.bitmap } catch (_: Exception) { null }
+        } else null
+        if (frame != null && hasPreviewPixels(frame)) {
+            val unmirror = frontCamera && !cameraPreferences.mirror
+            scope.launch {
+                var photo: Bitmap? = null
+                try {
+                    photo = withContext(Dispatchers.Default) { cameraSquare720(frame, unmirror) }
+                    if (screenActive) {
+                        capturedBitmap = photo
+                        photo = null // UI owns the bitmap from this point.
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    if (photo !== frame && capturedBitmap !== frame && !frame.isRecycled) frame.recycle()
+                    photo?.takeIf { !it.isRecycled }?.recycle()
+                    capturingPhoto = false
+                }
+            }
+            return
+        }
+        frame?.recycle()
+
+        // Keep a real still capture for hardware/screen flash, explicitly
+        // selected sensor/extension capture, or an unavailable preview frame.
+        // The fallback has the same 720 px output and JPEG upload policy.
         val mirrorPhoto = frontCamera && cameraPreferences.mirror
         val mainExecutor = ContextCompat.getMainExecutor(context)
-        val previewSize = previewView.width.coerceIn(720, 1080)
-        // CameraX delivers the JPEG to a worker, not the UI thread. Only publish
-        // Compose state once the proxy has been closed and the preview is ready.
         capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
-                var full: Bitmap? = null
-                var preview: Bitmap? = null
+                var photo: Bitmap? = null
                 var failure: Exception? = null
                 try {
-                    full = imageProxyToBitmap(image, mirrorPhoto)
-                    preview = cameraReviewBitmap(full, previewSize)
+                    val full = imageProxyToBitmap(image, mirrorPhoto)
+                    try {
+                        photo = cameraSquare720(full)
+                    } finally {
+                        if (photo !== full) full.recycle()
+                    }
                 } catch (e: Exception) {
                     failure = e
                 } finally {
                     image.close()
                 }
-                val photo = full
-                val displayPhoto = preview
+                val result = photo
                 val error = failure
                 mainExecutor.execute {
                     capturingPhoto = false
-                    if (screenActive && error == null && photo != null && displayPhoto != null) {
-                        capturedPreview = displayPhoto
-                        capturedBitmap = photo
+                    if (screenActive && result != null && error == null) {
+                        capturedBitmap = result
                     } else {
-                        if (displayPhoto !== photo) displayPhoto?.recycle()
-                        photo?.recycle()
+                        result?.recycle()
                         if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${error?.message ?: "lỗi không xác định"}", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -617,7 +656,6 @@ fun CameraScreen(
         }
         rememberMomentReviewSlots(
             bitmap = bitmap,
-            previewBitmap = capturedPreview ?: bitmap,
             videoFile = capturedVideo,
             friends = friends,
             replyToFriend = replyToFriend,
@@ -1084,13 +1122,32 @@ private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
 }
 
 
-// Only the on-screen review is downscaled. The original square bitmap still
-// goes to save and upload at full cropped resolution.
-private fun cameraReviewBitmap(bitmap: Bitmap, maxSize: Int): Bitmap {
-    val largest = maxOf(bitmap.width, bitmap.height)
-    if (largest <= maxSize) return bitmap
-    val scale = maxSize.toFloat() / largest
-    return Bitmap.createScaledBitmap(bitmap,
-        (bitmap.width * scale).roundToInt().coerceAtLeast(1),
-        (bitmap.height * scale).roundToInt().coerceAtLeast(1), true)
+private const val PHOTO_SIDE = 720
+
+private fun cameraPhotoResolutionSelector(): ResolutionSelector =
+    ResolutionSelector.Builder()
+        .setResolutionStrategy(
+            ResolutionStrategy(Size(960, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+        )
+        .build()
+
+// CameraX may return an empty transparent bitmap when the surface copy fails.
+// Opaque black is a valid camera frame, e.g. in a dark room.
+private fun hasPreviewPixels(bitmap: Bitmap): Boolean =
+    bitmap.width > 0 && bitmap.height > 0 &&
+        (bitmap.getPixel(bitmap.width / 2, bitmap.height / 2) ushr 24 != 0 ||
+            bitmap.getPixel(bitmap.width / 4, bitmap.height / 4) ushr 24 != 0 ||
+            bitmap.getPixel(bitmap.width * 3 / 4, bitmap.height * 3 / 4) ushr 24 != 0)
+
+private fun cameraSquare720(bitmap: Bitmap, mirror: Boolean = false): Bitmap {
+    val side = minOf(bitmap.width, bitmap.height)
+    val target = minOf(PHOTO_SIDE, side)
+    val scale = target.toFloat() / side
+    val matrix = Matrix().apply {
+        setScale(if (mirror) -scale else scale, scale)
+    }
+    return Bitmap.createBitmap(
+        bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2,
+        side, side, matrix, true
+    )
 }

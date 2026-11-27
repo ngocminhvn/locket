@@ -716,7 +716,7 @@ class LocketViewModel(
             val bytes = try {
                 withContext(Dispatchers.Default) {
                     ByteArrayOutputStream().use { stream ->
-                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, if (videoFile == null) 100 else 85, stream))
+                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
                         stream.toByteArray()
                     }
                 }

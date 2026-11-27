@@ -393,7 +393,7 @@ private fun CameraSettingsDialog(onClose: () -> Unit) {
                 }
                 CameraOption("Flash màn hình", hint(caps?.front, "Chiếu sáng khi chụp camera trước"), settings.selfieFlash,
                     caps?.front == true || settings.selfieFlash) { save(settings.copy(selfieFlash = it)) }
-                CameraOption("Ưu tiên chất lượng ảnh", "Tắt để ưu tiên tốc độ chụp", settings.quality, true) {
+                CameraOption("Chụp bằng cảm biến", "Tắt để lấy đúng frame xem trước; cả hai tối đa 720px", settings.quality, true) {
                     save(settings.copy(quality = it))
                 }
                 CameraOption("Tăng sáng khi thiếu sáng", hint(caps?.lowLight, "Low Light Boost trên camera hỗ trợ"), settings.lowLight,

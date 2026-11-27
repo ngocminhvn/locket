@@ -131,7 +131,7 @@ internal fun rememberMomentReviewSlots(
                     withContext(Dispatchers.IO) {
                         context.contentResolver.openOutputStream(uri)?.use { out ->
                             if (videoFile != null) videoFile.inputStream().use { it.copyTo(out) }
-                            else check(bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out))
+                            else check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out))
                         } ?: error("Không mở được tệp")
                     }
                     Toast.makeText(context, "Đã lưu", Toast.LENGTH_SHORT).show()
