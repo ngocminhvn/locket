@@ -9,6 +9,17 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.core.DynamicRange
+import androidx.camera.extensions.ExtensionMode
+import androidx.camera.extensions.ExtensionsManager
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.Recorder
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -189,6 +200,14 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     var release by remember { mutableStateOf<UpdateRelease?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var downloaded by remember { mutableStateOf<File?>(null) }
+    var showCameraSettings by remember { mutableStateOf(false) }
+    ProfileSettingsRow(
+        icon = { Icon(Icons.Default.CameraAlt, null, tint = Color(0xFFCCCCCC)) },
+        title = "Cài đặt Camera",
+        trailing = { Icon(Icons.Default.ChevronRight, null, tint = LocketTextDim) },
+        onClick = { showCameraSettings = true }
+    )
+    if (showCameraSettings) CameraSettingsDialog { showCameraSettings = false }
 
     ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Phiên bản ứng dụng", version)
     ModRow({ Icon(Icons.Default.SystemUpdate, null, tint = Color.White) }, "Kiểm tra cập nhật",
@@ -267,4 +286,151 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
 private fun ModRow(icon: @Composable () -> Unit, title: String, subtitle: String? = null,
     enabled: Boolean = true, onClick: (() -> Unit)? = null) {
     ProfileSettingsRow(icon = icon, title = title, subtitle = subtitle, enabled = enabled, onClick = onClick)
+}
+
+
+// Local camera preferences: independent of the authenticated account, with real
+// device capability checks. Defaults preserve the existing capture behaviour.
+internal data class CameraPreferences(
+    val mirror: Boolean = true,
+    val selfieFlash: Boolean = false,
+    val quality: Boolean = false,
+    val lowLight: Boolean = false,
+    val stabilization: Boolean = false,
+    val videoHdr: Boolean = false,
+    val extension: Int = ExtensionMode.NONE
+)
+private fun cameraPrefs(context: Context) = context.applicationContext.getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
+private fun readCameraPreferences(context: Context): CameraPreferences {
+    val p = cameraPrefs(context)
+    return CameraPreferences(
+        mirror = p.getBoolean("mirror", true),
+        selfieFlash = p.getBoolean("selfie_flash", false),
+        quality = p.getBoolean("quality", false),
+        lowLight = p.getBoolean("low_light", false),
+        stabilization = p.getBoolean("stabilization", false),
+        videoHdr = p.getBoolean("video_hdr", false),
+        extension = p.getInt("extension", ExtensionMode.NONE)
+    )
+}
+private fun saveCameraPreferences(context: Context, value: CameraPreferences) {
+    cameraPrefs(context).edit().putBoolean("mirror", value.mirror)
+        .putBoolean("selfie_flash", value.selfieFlash).putBoolean("quality", value.quality)
+        .putBoolean("low_light", value.lowLight).putBoolean("stabilization", value.stabilization)
+        .putBoolean("video_hdr", value.videoHdr).putInt("extension", value.extension).apply()
+}
+@Composable
+internal fun rememberCameraPreferences(): State<CameraPreferences> {
+    val context = LocalContext.current.applicationContext
+    val prefs = remember(context) { cameraPrefs(context) }
+    val state = remember(prefs) { mutableStateOf(readCameraPreferences(context)) }
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            state.value = readCameraPreferences(context)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        state.value = readCameraPreferences(context)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    return state
+}
+private val cameraExtensionOptions = listOf(
+    ExtensionMode.HDR to "HDR",
+    ExtensionMode.NIGHT to "Chụp ban đêm",
+    ExtensionMode.BOKEH to "Xóa phông",
+    ExtensionMode.FACE_RETOUCH to "Làm đẹp khuôn mặt",
+    ExtensionMode.AUTO to "Chế độ tự động"
+)
+private data class CameraFeatureSupport(
+    val front: Boolean, val lowLight: Boolean, val stabilization: Boolean,
+    val videoHdr: Boolean, val extensions: Set<Int>, val extensionQueryOk: Boolean
+)
+@Composable
+private fun CameraSettingsDialog(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val settings by rememberCameraPreferences()
+    var support by remember { mutableStateOf<CameraFeatureSupport?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        try {
+            val provider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context).get() }
+            val selectors = listOf(CameraSelector.DEFAULT_FRONT_CAMERA, CameraSelector.DEFAULT_BACK_CAMERA)
+                .filter { provider.hasCamera(it) }
+            val infos = selectors.map { provider.getCameraInfo(it) }
+            val manager = try {
+                withContext(Dispatchers.IO) { ExtensionsManager.getInstanceAsync(context, provider).get() }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
+            support = CameraFeatureSupport(
+                front = CameraSelector.DEFAULT_FRONT_CAMERA in selectors,
+                lowLight = infos.any { it.isLowLightBoostSupported },
+                stabilization = infos.any { Preview.getPreviewCapabilities(it).isStabilizationSupported },
+                videoHdr = infos.any { DynamicRange.HLG_10_BIT in Recorder.getVideoCapabilities(it).supportedDynamicRanges },
+                extensions = cameraExtensionOptions.map { it.first }.filter { mode ->
+                    manager != null && selectors.any { selector -> manager.isExtensionAvailable(selector, mode) }
+                }.toSet(),
+                extensionQueryOk = manager != null
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { failed = true }
+    }
+    fun save(value: CameraPreferences) = saveCameraPreferences(context, value)
+    val caps = support
+    val unavailable = if (failed) "Không kiểm tra được thiết bị" else "Đang kiểm tra thiết bị..."
+    fun hint(supported: Boolean?, text: String): String = when (supported) {
+        true -> text
+        false -> "Thiết bị không hỗ trợ"
+        null -> unavailable
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Cài đặt Camera", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                CameraOption("Lật ảnh selfie", "Lưu ảnh giống khung xem trước", settings.mirror, true) {
+                    save(settings.copy(mirror = it))
+                }
+                CameraOption("Flash màn hình", hint(caps?.front, "Chiếu sáng khi chụp camera trước"), settings.selfieFlash,
+                    caps?.front == true || settings.selfieFlash) { save(settings.copy(selfieFlash = it)) }
+                CameraOption("Ưu tiên chất lượng ảnh", "Tắt để ưu tiên tốc độ chụp", settings.quality, true) {
+                    save(settings.copy(quality = it))
+                }
+                CameraOption("Tăng sáng khi thiếu sáng", hint(caps?.lowLight, "Low Light Boost trên camera hỗ trợ"), settings.lowLight,
+                    caps?.lowLight == true || settings.lowLight) { save(settings.copy(lowLight = it)) }
+                CameraOption("Chống rung xem trước", hint(caps?.stabilization, "Ổn định khung hình khi thiết bị hỗ trợ"), settings.stabilization,
+                    caps?.stabilization == true || settings.stabilization) { save(settings.copy(stabilization = it)) }
+                CameraOption("Video HDR", hint(caps?.videoHdr, "HLG 10-bit khi quay video"), settings.videoHdr,
+                    caps?.videoHdr == true || settings.videoHdr) { save(settings.copy(videoHdr = it)) }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = Color.White.copy(alpha = 0.15f))
+                Text("Chế độ xử lý ảnh", color = LocketYellow, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("Chọn một chế độ. Áp dụng khi chụp ảnh; video dùng camera thường.", color = LocketTextDim, fontSize = 12.sp)
+                cameraExtensionOptions.forEach { (mode, title) ->
+                    val supported = caps?.let { if (it.extensionQueryOk) mode in it.extensions else null }
+                    val selected = settings.extension == mode
+                    CameraOption(title, hint(supported, "Xử lý ảnh bằng camera của hãng"), selected,
+                        supported == true || selected) { enabled ->
+                        save(settings.copy(extension = if (enabled) mode else ExtensionMode.NONE))
+                    }
+                }
+                Text("Tùy chọn chỉ áp dụng trên camera trước/sau và cấu hình được hỗ trợ. Nếu không tương thích, ứng dụng dùng camera thường.",
+                    color = LocketTextDim, fontSize = 12.sp)
+            }
+        },
+        containerColor = Color(0xFF242426),
+        titleContentColor = Color.White,
+        textContentColor = Color.White,
+        confirmButton = { TextButton(onClick = onClose) { Text("Xong", color = LocketYellow) } }
+    )
+}
+@Composable
+private fun CameraOption(title: String, subtitle: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(title, color = if (enabled) Color.White else LocketTextDim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = LocketTextDim, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LocketYellow))
+    }
 }
