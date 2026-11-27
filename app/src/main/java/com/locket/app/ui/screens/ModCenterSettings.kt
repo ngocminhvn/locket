@@ -1,6 +1,8 @@
 package com.locket.app.ui.screens
 
 import android.content.Context
+import android.content.ClipData
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -34,12 +36,13 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 private const val REPO = "https://github.com/ngocminhvn/locket"
 private val updateClient = OkHttpClient.Builder()
     .connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
-private data class UpdateRelease(val version: String, val build: Long, val url: String, val size: Long)
+private data class UpdateRelease(val version: String, val build: Long, val url: String, val size: Long, val sha256: String?)
 
 @Suppress("DEPRECATION")
 private fun installedBuild(context: Context): Long {
@@ -49,7 +52,7 @@ private fun installedBuild(context: Context): Long {
 
 private suspend fun latestRelease(): UpdateRelease? = withContext(Dispatchers.IO) {
     val req = Request.Builder().url("https://api.github.com/repos/ngocminhvn/locket/releases/latest")
-        .header("Accept", "application/vnd.github+json").build()
+        .header("Accept", "application/vnd.github+json").header("Cache-Control", "no-cache").build()
     updateClient.newCall(req).execute().use { response ->
         if (response.code == 404) return@withContext null
         check(response.isSuccessful) { "GitHub HTTP ${response.code}" }
@@ -63,7 +66,29 @@ private suspend fun latestRelease(): UpdateRelease? = withContext(Dispatchers.IO
             .firstOrNull { it.get("name").asString == name } ?: error("Bản phát hành chưa có APK")
         val url = asset.get("browser_download_url").asString
         check(url.startsWith("$REPO/releases/download/$tag/")) { "Nguồn APK không hợp lệ" }
-        UpdateRelease(version, build, url, asset.get("size").asLong)
+        val size = asset.get("size").asLong
+        val manifestAsset = json.getAsJsonArray("assets").map { it.asJsonObject }
+            .firstOrNull { it.get("name").asString == "update.json" }
+        val assetDigest = asset.get("digest")?.takeUnless { it.isJsonNull }?.asString
+            ?.removePrefix("sha256:")?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
+        val sha256 = if (manifestAsset != null) {
+            val manifestUrl = manifestAsset.get("browser_download_url").asString
+            check(manifestUrl == "$REPO/releases/download/$tag/update.json") { "Nguồn update.json không hợp lệ" }
+            updateClient.newCall(Request.Builder().url(manifestUrl).header("Cache-Control", "no-cache").build())
+                .execute().use { manifestResponse ->
+                    check(manifestResponse.isSuccessful) { "Không đọc được update.json (HTTP ${manifestResponse.code})" }
+                    val manifest = JsonParser.parseString(manifestResponse.body?.string().orEmpty()).asJsonObject
+                    check(manifest.get("versionCode").asLong == build &&
+                        manifest.get("versionName").asString == version &&
+                        manifest.get("apkUrl").asString == url &&
+                        manifest.get("sizeBytes").asLong == size) { "Thông tin bản cập nhật không khớp" }
+                    val hash = manifest.get("sha256").asString
+                    check(hash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
+                    check(assetDigest == null || assetDigest.equals(hash, ignoreCase = true)) { "SHA-256 của Release không khớp" }
+                    hash
+                }
+        } else assetDigest // Compatibility with releases predating update.json.
+        UpdateRelease(version, build, url, size, sha256)
     }
 }
 
@@ -78,8 +103,14 @@ private fun verifyUpdate(context: Context, apk: File, build: Long) {
     check(code == build && code > installedBuild(context)) { "Sai phiên bản APK" }
     val currentCerts = if (Build.VERSION.SDK_INT >= 28) installed.signingInfo?.apkContentsSigners else installed.signatures
     val newCerts = if (Build.VERSION.SDK_INT >= 28) archive.signingInfo?.apkContentsSigners else archive.signatures
-    check(!currentCerts.isNullOrEmpty() && !newCerts.isNullOrEmpty() &&
-        currentCerts.toSet() == newCerts.toSet()) { "APK khác chữ ký. Không thể cập nhật đè bản đang dùng." }
+    // Some Android builds do not return signingInfo for an archive.
+    // Missing metadata is not a mismatch. Android's package installer is
+    // the final authority for signature verification, as in TKB.
+    if (!currentCerts.isNullOrEmpty() && !newCerts.isNullOrEmpty()) {
+        check(currentCerts.toSet() == newCerts.toSet()) {
+            "Chứng chỉ ký APK khác bản đang cài. Android không cho cập nhật đè."
+        }
+    }
 }
 
 private suspend fun downloadUpdate(context: Context, release: UpdateRelease, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
@@ -87,7 +118,8 @@ private suspend fun downloadUpdate(context: Context, release: UpdateRelease, pro
     val partial = File(dir, "Locket-${release.version}.partial.apk")
     val apk = File(dir, "Locket-${release.version}.apk")
     try {
-        updateClient.newCall(Request.Builder().url(release.url).build()).execute().use { response ->
+        val digest = MessageDigest.getInstance("SHA-256")
+        updateClient.newCall(Request.Builder().url(release.url).header("Cache-Control", "no-cache").build()).execute().use { response ->
             check(response.isSuccessful) { "Tải APK thất bại (HTTP ${response.code})" }
             val body = response.body ?: error("Không nhận được APK")
             val total = release.size.takeIf { it > 0 } ?: body.contentLength()
@@ -100,12 +132,17 @@ private suspend fun downloadUpdate(context: Context, release: UpdateRelease, pro
                         val n = input.read(buffer)
                         if (n < 0) break
                         output.write(buffer, 0, n)
+                        digest.update(buffer, 0, n)
                         received += n
                         if (total > 0) withContext(Dispatchers.Main) { progress((received.toFloat() / total).coerceIn(0f, 1f)) }
                     }
                     check(total <= 0 || received == total) { "APK tải chưa đủ" }
                 }
             }
+        }
+        val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        release.sha256?.let { expected ->
+            check(expected.equals(hash, ignoreCase = true)) { "SHA-256 không khớp. Đã hủy file tải." }
         }
         verifyUpdate(context, partial, release.build)
         apk.delete()
@@ -120,8 +157,18 @@ private fun installUpdate(context: Context, file: File) {
         return
     }
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
-    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    val clip = ClipData.newUri(context.contentResolver, "Locket update", uri)
+    var lastError: Exception? = null
+    for (action in listOf(Intent.ACTION_VIEW, Intent.ACTION_INSTALL_PACKAGE)) {
+        try {
+            context.startActivity(Intent(action).setDataAndType(uri, "application/vnd.android.package-archive")
+                .setClipData(clip)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (e: ActivityNotFoundException) { lastError = e }
+        catch (e: SecurityException) { lastError = e }
+    }
+    throw IllegalStateException("Không mở được trình cài đặt APK", lastError)
 }
 
 @Composable
