@@ -96,9 +96,6 @@ fun HomePagerScreen(
 
     VerticalPager(
         state = pagerState,
-        // Giu page ke duoc compose truoc 1 trang: AsyncImage cua trang ke
-        // bat dau tai som hon, khong doi toi luc vuot toi moi tai.
-        beyondBoundsPageCount = 1,
         userScrollEnabled = pagerState.currentPage != 0 || cameraSwipeEnabled,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
             // Native upward swipe reveals the next page. Also accept pulling
