@@ -30,6 +30,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import android.net.Uri
+import coil.request.ImageRequest
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -183,14 +186,22 @@ internal fun rememberMomentReviewSlots(
                         onRelease = { it.stopPlayback() }
                     )
                 } else {
-                    // Do not replace the frozen preview with a decoded JPEG:
-                    // compression, resampling and color conversion may change it.
-                    Image(
-                        bitmap = remember(previewBitmap) { previewBitmap.asImageBitmap() },
-                        contentDescription = "Ảnh vừa chụp",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    val painter = remember(previewBitmap) { BitmapPainter(previewBitmap.asImageBitmap()) }
+                    if (snapshotFile == null) {
+                        Image(painter, "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    } else {
+                        AsyncImage(
+                            model = remember(snapshotFile, context) {
+                                ImageRequest.Builder(context).data(Uri.fromFile(snapshotFile))
+                                    .crossfade(false).build()
+                            },
+                            contentDescription = "Ảnh vừa chụp",
+                            placeholder = painter,
+                            error = painter,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
 
                 HorizontalPager(

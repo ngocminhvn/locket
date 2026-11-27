@@ -732,11 +732,7 @@ class LocketViewModel(
     val momentUploadFailures = _momentUploadFailures.asStateFlow()
 
     internal fun prepareMomentThumbnail(bitmap: Bitmap): Deferred<ByteArray> =
-        viewModelScope.async(Dispatchers.Default) {
-            // Give the frozen preview a chance to render before CPU encoding.
-            kotlinx.coroutines.delay(80)
-            encodeMomentThumbnail(bitmap)
-        }
+        viewModelScope.async(Dispatchers.Default) { encodeMomentThumbnail(bitmap) }
 
     internal fun enqueueMoment(
         bitmap: Bitmap,
