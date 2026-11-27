@@ -32,6 +32,20 @@ data class Friend(
     val isBestFriend: Boolean = true
 )
 
+/**
+ * Loi moi ket ban den (inbox): 1 nguoi gui xin ket ban.
+ * Nguon that: document Firestore `users/{uid}/incoming_friend_requests`,
+ * field da xac minh trong bundle goc: `requesting_user` = uid nguoi gui
+ * (decompiled.js, ham _temp11/_temp13, dong 1227798/1227824).
+ * Goc khong doc field ngay gio nao trong doc nay nen model khong co ngay gio.
+ */
+data class FriendRequest(
+    val uid: String,
+    val username: String = "",
+    val displayName: String = "",
+    val avatarUrl: String = ""
+)
+
 data class Conversation(
     val id: String,
     val friend: Friend,

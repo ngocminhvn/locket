@@ -8,6 +8,7 @@ import com.google.gson.JsonObject
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
+import com.locket.app.model.FriendRequest
 import com.locket.app.model.MessageReaction
 import com.locket.app.model.Moment
 import com.locket.app.model.User
@@ -588,6 +589,136 @@ class LocketApiClient(
                 Result.success(true)
             } else {
                 val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi xóa bạn"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Inbox loi moi ket ban den: list documents Firestore REST
+     * `users/{uid}/incoming_friend_requests` (database mac dinh, KHONG phai
+     * database `locket` nhu history).
+     * Goc: listener onSnapshot tren collection nay (bundle ~1229541, ham
+     * _temp11/_temp13 dong 1227798/1227824): doc chi doc field
+     * `requesting_user` = uid nguoi gui; khong doc field ngay gio nao,
+     * khong dung id doc — nen ham nay lay uid tu field do (phong thu dung
+     * id doc khi field vang mat). Ten/avatar resolve qua resolveUserNames
+     * (fetchUsers batch 10) da co; uid nao khong resolve duoc thi fallback
+     * doc users/{uid} nhu fetchFriends, cuoi cung hien uid that.
+     * Khong cache Room: REST moi lan mo man Ban be la du.
+     */
+    suspend fun fetchIncomingFriendRequests(): Result<List<FriendRequest>> = withContext(Dispatchers.IO) {
+        val token = getToken()
+        val uid = getUid()
+        if (token.isNullOrBlank() || uid.isNullOrBlank()) {
+            return@withContext Result.failure(Exception("Chưa đăng nhập"))
+        }
+
+        try {
+            val url = "$FIRESTORE_BASE_URL/users/$uid/incoming_friend_requests"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+
+            val response = client.newCall(req).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("Lỗi Firestore incoming_friend_requests: HTTP ${response.code}"))
+            }
+
+            val json = gson.fromJson(response.body?.string(), JsonObject::class.java)
+            val documents = json.getAsJsonArray("documents") ?: JsonArray()
+
+            val senderUids = mutableListOf<String>()
+            for (docElem in documents) {
+                val doc = docElem.asJsonObject
+                val fields = doc.getAsJsonObject("fields")
+                val senderUid = extractString(fields, "requesting_user")
+                    .ifBlank { doc.get("name")?.asString?.substringAfterLast("/") ?: "" }
+                if (senderUid.isNotBlank()) {
+                    senderUids.add(senderUid)
+                }
+            }
+
+            val distinctUids = senderUids.distinct()
+            if (distinctUids.isEmpty()) {
+                return@withContext Result.success(emptyList())
+            }
+
+            val names = resolveUserNames(distinctUids)
+            val requests = distinctUids.map { senderUid ->
+                val resolved = names[senderUid]
+                if (resolved != null) {
+                    FriendRequest(uid = senderUid, displayName = resolved.first, avatarUrl = resolved.second)
+                } else {
+                    val docFriend = fetchUserProfileFromDoc(senderUid)
+                    if (docFriend != null) {
+                        FriendRequest(
+                            uid = senderUid,
+                            username = docFriend.username,
+                            displayName = docFriend.displayName,
+                            avatarUrl = docFriend.avatarUrl
+                        )
+                    } else {
+                        FriendRequest(uid = senderUid, displayName = senderUid)
+                    }
+                }
+            }
+
+            Result.success(requests)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Chap nhan loi moi ket ban: callable acceptFriendRequest {user_uid}
+     * (spec JSON: verified static, request_fields [user_uid]; callsite goc
+     * ~1587081 va ~1612173, sau do goc logAcceptedFriendRequest).
+     */
+    suspend fun acceptFriendRequest(userUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("user_uid", userUid)
+                })
+            }
+            val resp = callEndpoint("acceptFriendRequest", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi chấp nhận kết bạn"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Tu choi loi moi ket ban den: callable deleteFriendRequest
+     * {user_uid, direction: "incoming"}.
+     * Gia tri direction da xac minh tai callsite goc ~1117715 (tu choi loi
+     * moi den, kem logRejectedFriendRequest); "outgoing" la huy loi moi da
+     * gui (~1612627, kem logRevokedFriendRequest) nen khong dung o day.
+     * Spec JSON: verified static, request_fields [user_uid, direction].
+     */
+    suspend fun declineFriendRequest(userUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("user_uid", userUid)
+                    addProperty("direction", "incoming")
+                })
+            }
+            val resp = callEndpoint("deleteFriendRequest", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi từ chối kết bạn"
                 Result.failure(Exception(err))
             }
         } catch (e: Exception) {

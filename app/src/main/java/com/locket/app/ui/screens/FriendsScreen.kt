@@ -39,10 +39,12 @@ fun FriendsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val friends by viewModel.friends.collectAsState()
+    val incomingRequests by viewModel.incomingFriendRequests.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.syncAllData()
+        viewModel.refreshIncomingFriendRequests()
     }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -280,6 +282,114 @@ fun FriendsScreen(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            // Loi moi ket ban den (inbox that: users/{uid}/incoming_friend_requests).
+            // Khong co loi moi thi khong hien section.
+            if (incomingRequests.isNotEmpty()) {
+                Text(
+                    text = "Lời mời kết bạn (${incomingRequests.size})",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    incomingRequests.forEach { request ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C2C2E))
+                                    .border(2.dp, LocketYellow, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (request.avatarUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = request.avatarUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = request.displayName.ifBlank { request.username.ifBlank { request.uid } },
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                if (request.username.isNotBlank() && request.username != request.displayName) {
+                                    Text(
+                                        text = "@${request.username}",
+                                        color = LocketTextDim,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.acceptFriendRequest(request.uid,
+                                        onDone = {
+                                            Toast.makeText(context, "Đã kết bạn với ${request.displayName.ifBlank { request.uid }}", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, "Lỗi chấp nhận: $err", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Chấp nhận", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Button(
+                                onClick = {
+                                    viewModel.declineFriendRequest(request.uid,
+                                        onDone = {
+                                            Toast.makeText(context, "Đã từ chối lời mời kết bạn", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, "Lỗi từ chối: $err", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2C2E)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Từ chối", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+            }
 
             // Friends List Title
             Text(

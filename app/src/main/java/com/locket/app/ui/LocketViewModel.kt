@@ -10,6 +10,7 @@ import com.locket.app.api.LocketApiClient
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
+import com.locket.app.model.FriendRequest
 import com.locket.app.model.Moment
 import com.locket.app.model.User
 import com.locket.app.storage.SessionManager
@@ -38,6 +39,11 @@ class LocketViewModel(
 
     private val _friends = MutableStateFlow<List<Friend>>(sessionManager.getFriends())
     val friends: StateFlow<List<Friend>> = _friends.asStateFlow()
+
+    // Loi moi ket ban den (inbox): REST moi lan mo man Ban be, khong cache
+    // Room. Nguon that: Firestore users/{uid}/incoming_friend_requests.
+    private val _incomingFriendRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
+    val incomingFriendRequests: StateFlow<List<FriendRequest>> = _incomingFriendRequests.asStateFlow()
 
     private val _moments = MutableStateFlow<List<Moment>>(sessionManager.getSavedMoments())
     val moments: StateFlow<List<Moment>> = _moments.asStateFlow()
@@ -538,6 +544,62 @@ class LocketViewModel(
         }
     }
 
+    /** Tai lai inbox loi moi ket ban (goi khi mo man Ban be). Loi thi giu danh sach cu. */
+    fun refreshIncomingFriendRequests() {
+        viewModelScope.launch {
+            apiClient.fetchIncomingFriendRequests().onSuccess { requests ->
+                if (_isLoggedIn.value) _incomingFriendRequests.value = requests
+            }
+        }
+    }
+
+    /**
+     * Chap nhan loi moi ket ban: goi acceptFriendRequest {user_uid}, xong
+     * bo nguoi gui khoi inbox va tai lai danh sach ban be that (nguoi vua
+     * chap nhan gio la ban).
+     */
+    fun acceptFriendRequest(
+        userUid: String,
+        onDone: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.acceptFriendRequest(userUid)
+            if (res.isSuccess) {
+                _incomingFriendRequests.value = _incomingFriendRequests.value.filter { it.uid != userUid }
+                apiClient.fetchFriends(sessionManager.currentUser.uid).onSuccess { liveFriends ->
+                    if (liveFriends.isNotEmpty()) {
+                        _friends.value = liveFriends
+                        cache.saveFriends(liveFriends)
+                    }
+                }
+                onDone()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi chấp nhận kết bạn")
+            }
+        }
+    }
+
+    /**
+     * Tu choi loi moi ket ban: goi deleteFriendRequest
+     * {user_uid, direction: "incoming"}, xong bo nguoi gui khoi inbox.
+     */
+    fun declineFriendRequest(
+        userUid: String,
+        onDone: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.declineFriendRequest(userUid)
+            if (res.isSuccess) {
+                _incomingFriendRequests.value = _incomingFriendRequests.value.filter { it.uid != userUid }
+                onDone()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi từ chối kết bạn")
+            }
+        }
+    }
+
     fun loginWithEmail(email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             _isSyncing.value = true
@@ -619,6 +681,7 @@ class LocketViewModel(
         _currentUser.value = sessionManager.currentUser
         _isLoggedIn.value = false
         _friends.value = emptyList()
+        _incomingFriendRequests.value = emptyList()
         _moments.value = emptyList()
         _conversations.value = emptyList()
     }
