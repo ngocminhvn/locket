@@ -54,6 +54,7 @@ private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, STREAK, 
 @Composable
 fun SendMomentScreen(
     bitmap: Bitmap,
+    previewBitmap: Bitmap = bitmap,
     videoFile: File?,
     friends: List<Friend>,
     replyToFriend: Friend?,
@@ -173,7 +174,7 @@ fun SendMomentScreen(
                     } },
                     onRelease = { it.stopPlayback() }
                 )
-            } else Image(bitmap.asImageBitmap(), "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else Image(remember(previewBitmap) { previewBitmap.asImageBitmap() }, "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
 
             HorizontalPager(
                 state = pager,
