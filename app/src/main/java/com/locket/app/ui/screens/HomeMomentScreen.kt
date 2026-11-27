@@ -4,8 +4,6 @@ import android.widget.Toast
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import android.widget.VideoView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.*
@@ -36,23 +34,19 @@ import com.locket.app.ui.theme.*
 @Composable
 fun HomeMomentScreen(
     viewModel: LocketViewModel,
-    initialMomentIndex: Int = 0,
+    currentMoment: Moment?,
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
     onOpenProfile: () -> Unit
 ) {
     val context = LocalContext.current
-    val moments by viewModel.filteredMoments.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    var currentIndex by remember { mutableIntStateOf(initialMomentIndex.coerceAtLeast(0)) }
-    LaunchedEffect(selectedFriend) { if (selectedFriend != null) currentIndex = 0 }
     var showFriendFilter by remember { mutableStateOf(false) }
 
-    val currentMoment = if (moments.isNotEmpty()) moments[currentIndex.coerceIn(0, moments.size - 1)] else null
-    var messageText by remember { mutableStateOf("") }
-    var floatingReaction by remember { mutableStateOf<String?>(null) }
+    var messageText by remember(currentMoment?.id) { mutableStateOf("") }
+    var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
 
     val topBarTitle = if (selectedFriend == null) {
         "Tất cả bạn bè"
@@ -90,17 +84,6 @@ fun HomeMomentScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.0f)
-                    .pointerInput(moments.size) {
-                        var distance = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { distance = 0f },
-                            onDragEnd = {
-                                val max = (moments.size - 1).coerceAtLeast(0)
-                                if (distance < -48.dp.toPx()) currentIndex = (currentIndex + 1).coerceAtMost(max)
-                                if (distance > 48.dp.toPx()) currentIndex = (currentIndex - 1).coerceAtLeast(0)
-                            }
-                        ) { change, amount -> distance += amount; change.consume() }
-                    }
                     .clip(RoundedCornerShape(36.dp))
                     .background(Color(0xFF1E1E1E))
                     .clickable {
@@ -359,7 +342,7 @@ fun HomeMomentScreen(
             FriendFilterSheet(
                 friends = friends,
                 selectedFriend = selectedFriend,
-                onSelectFriend = { viewModel.selectFriend(it) },
+                onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
                 onDismiss = { showFriendFilter = false }
             )
         }

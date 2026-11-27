@@ -15,7 +15,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.camera.video.*
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.*
 import android.media.MediaMetadataRetriever
@@ -64,7 +63,8 @@ fun CameraScreen(
     viewModel: LocketViewModel,
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    onSwipeEnabledChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -129,6 +129,8 @@ fun CameraScreen(
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captionText by remember { mutableStateOf("") }
     var isPosting by remember { mutableStateOf(false) }
+    val canSwipe = recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
+    SideEffect { onSwipeEnabledChange(canSwipe) }
 
     fun clearCapture() {
         capturedBitmap = null
@@ -292,7 +294,6 @@ fun CameraScreen(
             onNavigate("latest")
         }
     }
-    val latestAction by rememberUpdatedState(openLatest)
     val tapShutter by rememberUpdatedState<() -> Unit>({
         if (videoMode) {
             if (recording == null) startVideo() else recording?.stop()
@@ -324,16 +325,7 @@ fun CameraScreen(
             .background(LocketBlack)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                var distance = 0f
-                detectVerticalDragGestures(
-                    onDragStart = { distance = 0f },
-                    onDragEnd = { if (distance > 64.dp.toPx()) latestAction() }
-                ) { change, amount ->
-                    distance += amount
-                    change.consume()
-                }
-            },
+            modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top Bar (Matches 02-camera.jpg with real friend count and user avatar)
