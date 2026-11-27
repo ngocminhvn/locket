@@ -1,9 +1,11 @@
-use crate::models::{FeedDelta, Moment};
+use crate::models::{ChatMessage, ChatPage, FeedDelta, HistoryPage, Moment};
 use crate::CoreError;
 
 const MAGIC: &[u8; 4] = b"LKT1";
 const SCHEMA_VERSION: u16 = 1;
 const FEED_RECORD: u8 = 1;
+const HISTORY_RECORD: u8 = 2;
+const CHAT_RECORD: u8 = 3;
 const MAX_RECORDS: usize = 100_000;
 const MAX_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -22,6 +24,60 @@ pub fn encode_feed(feed: &FeedDelta) -> Result<Vec<u8>, CoreError> {
         encode_moment(&mut out, moment)?;
     }
     Ok(out)
+}
+
+pub fn encode_history(page: &HistoryPage) -> Result<Vec<u8>, CoreError> {
+    let mut out = header(HISTORY_RECORD);
+    put_optional_string(&mut out, page.next_timestamp.as_deref())?;
+    put_optional_string(&mut out, page.next_document.as_deref())?;
+    put_count(&mut out, page.moments.len())?;
+    for moment in &page.moments {
+        encode_moment(&mut out, moment)?;
+    }
+    Ok(out)
+}
+
+pub fn encode_chat(page: &ChatPage) -> Result<Vec<u8>, CoreError> {
+    let mut out = header(CHAT_RECORD);
+    put_optional_string(&mut out, page.next_page_token.as_deref())?;
+    put_count(&mut out, page.messages.len())?;
+    for message in &page.messages {
+        encode_chat_message(&mut out, message)?;
+    }
+    Ok(out)
+}
+
+fn header(record_type: u8) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&SCHEMA_VERSION.to_be_bytes());
+    out.push(record_type);
+    out
+}
+
+fn put_count(out: &mut Vec<u8>, count: usize) -> Result<(), CoreError> {
+    if count > MAX_RECORDS {
+        return Err(CoreError::Limit("too many records"));
+    }
+    out.extend_from_slice(&(count as u32).to_be_bytes());
+    Ok(())
+}
+
+fn encode_chat_message(out: &mut Vec<u8>, value: &ChatMessage) -> Result<(), CoreError> {
+    put_string(out, &value.id)?;
+    put_string(out, &value.sender_uid)?;
+    put_string(out, &value.body)?;
+    out.extend_from_slice(&value.created_at_ms.to_be_bytes());
+    put_optional_string(out, value.client_token.as_deref())?;
+    put_optional_string(out, value.reply_moment_uid.as_deref())?;
+    put_optional_string(out, value.thumbnail_url.as_deref())?;
+    put_count(out, value.reactions.len())?;
+    for reaction in &value.reactions {
+        put_string(out, &reaction.sender_uid)?;
+        put_string(out, &reaction.emoji)?;
+        out.extend_from_slice(&reaction.created_at_ms.to_be_bytes());
+    }
+    Ok(())
 }
 
 fn encode_moment(out: &mut Vec<u8>, value: &Moment) -> Result<(), CoreError> {

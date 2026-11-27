@@ -1316,11 +1316,23 @@ class LocketApiClient(
             val request = Request.Builder().url(url)
                 .addHeader("Authorization", "Bearer $token")
                 .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
-            val rows = client.newCall(request).execute().use { response ->
+            val responseBytes = client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("Không tải được lịch sử (HTTP ${response.code})")
-                gson.fromJson(response.body?.string().orEmpty(), JsonArray::class.java)
-                    ?: error("Phản hồi lịch sử trống")
+                response.body?.bytes() ?: byteArrayOf()
             }
+            if (RustLocketCore.isAvailable) {
+                val page = RustLocketCore.parseHistory(responseBytes, uid, ownOnly)
+                val next = page.nextTimestamp?.let { date ->
+                    HistoryCursor(date, requireNotNull(page.nextDocument))
+                }
+                val names = if (ownOnly) emptyMap() else cachedUserNames(page.moments.map { it.userUid })
+                val resolved = page.moments.map { moment ->
+                    names[moment.userUid]?.let { name -> moment.copy(userName = name.first, userAvatarUrl = name.second) } ?: moment
+                }
+                return@withContext Result.success(HistoryPage(resolved, next))
+            }
+            val rows = gson.fromJson(responseBytes.toString(Charsets.UTF_8), JsonArray::class.java)
+                ?: error("Phản hồi lịch sử trống")
             val documents = rows.mapNotNull { row ->
                 row.asJsonObject.get("document")?.takeIf { it.isJsonObject }?.asJsonObject
             }
@@ -1873,11 +1885,17 @@ class LocketApiClient(
                 .addHeader("Authorization", "Bearer $token")
                 .get()
                 .build()
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                return@withContext Result.failure(Exception("Lỗi Firestore messages: HTTP ${resp.code}"))
+            val responseBytes = client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Lỗi Firestore messages: HTTP ${response.code}"))
+                }
+                response.body?.bytes() ?: byteArrayOf()
             }
-            val json = gson.fromJson(resp.body?.string(), JsonObject::class.java)
+            if (RustLocketCore.isAvailable) {
+                val page = RustLocketCore.parseChat(responseBytes, conversationId, myUid)
+                return@withContext Result.success(ChatMessagesPage(page.messages, page.nextPageToken))
+            }
+            val json = gson.fromJson(responseBytes.toString(Charsets.UTF_8), JsonObject::class.java)
             val documents = json.getAsJsonArray("documents") ?: JsonArray()
             val messages = mutableListOf<ChatMessage>()
             for (docElem in documents) {
@@ -1888,6 +1906,8 @@ class LocketApiClient(
             val deduped = messages.distinctBy { it.id }.sortedBy { it.createdAtMs }
             val nextPageToken = json.get("nextPageToken")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
             Result.success(ChatMessagesPage(deduped, nextPageToken))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

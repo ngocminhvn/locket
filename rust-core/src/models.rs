@@ -16,3 +16,35 @@ pub struct FeedDelta {
     pub sync_token: Option<String>,
     pub moments: Vec<Moment>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryPage {
+    pub moments: Vec<Moment>,
+    pub next_timestamp: Option<String>,
+    pub next_document: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    pub sender_uid: String,
+    pub emoji: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub id: String,
+    pub sender_uid: String,
+    pub body: String,
+    pub created_at_ms: i64,
+    pub client_token: Option<String>,
+    pub reply_moment_uid: Option<String>,
+    pub thumbnail_url: Option<String>,
+    pub reactions: Vec<Reaction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatPage {
+    pub messages: Vec<ChatMessage>,
+    pub next_page_token: Option<String>,
+}

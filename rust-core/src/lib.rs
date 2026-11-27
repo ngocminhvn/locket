@@ -5,4 +5,4 @@ pub mod history;
 pub mod models;
 pub mod wire;
 
-pub use api::{parse_feed_response, CoreError};
+pub use api::{parse_chat_response, parse_feed_response, parse_history_response, CoreError};

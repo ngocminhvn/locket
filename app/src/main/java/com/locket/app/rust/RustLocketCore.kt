@@ -1,6 +1,8 @@
 package com.locket.app.rust
 
 import com.locket.app.model.Moment
+import com.locket.app.model.ChatMessage
+import com.locket.app.model.MessageReaction
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 
@@ -9,6 +11,8 @@ object RustLocketCore {
     val isAvailable: Boolean = runCatching { System.loadLibrary("locket_core") }.isSuccess
 
     private external fun parseFeedNative(responseBody: ByteArray): ByteArray
+    private external fun parseHistoryNative(responseBody: ByteArray, ownUid: String, ownOnly: Boolean, limit: Int): ByteArray
+    private external fun parseChatNative(responseBody: ByteArray): ByteArray
 
     data class FeedDelta(
         val notModified: Boolean,
@@ -19,6 +23,19 @@ object RustLocketCore {
     fun parseFeed(responseBody: ByteArray, nowSeconds: Long = System.currentTimeMillis() / 1000): FeedDelta {
         check(isAvailable) { "locket_core native library is unavailable" }
         return FeedWireDecoder.decode(parseFeedNative(responseBody), nowSeconds)
+    }
+
+    data class HistoryPage(val moments: List<Moment>, val nextTimestamp: String?, val nextDocument: String?)
+    data class ChatPage(val messages: List<ChatMessage>, val nextPageToken: String?)
+
+    fun parseHistory(responseBody: ByteArray, ownUid: String, ownOnly: Boolean, limit: Int = 24, nowSeconds: Long = System.currentTimeMillis() / 1000): HistoryPage {
+        check(isAvailable)
+        return FeedWireDecoder.decodeHistory(parseHistoryNative(responseBody, ownUid, ownOnly, limit), nowSeconds)
+    }
+
+    fun parseChat(responseBody: ByteArray, conversationId: String, myUid: String): ChatPage {
+        check(isAvailable)
+        return FeedWireDecoder.decodeChat(parseChatNative(responseBody), conversationId, myUid)
     }
 }
 
@@ -60,6 +77,53 @@ internal object FeedWireDecoder {
             require(input.read() == -1) { "Trailing Rust wire bytes" }
             RustLocketCore.FeedDelta(notModified, syncToken, moments)
         }
+
+    fun decodeHistory(bytes: ByteArray, nowSeconds: Long): RustLocketCore.HistoryPage =
+        reader(bytes, 2) { input ->
+            val timestamp = input.optionalUtf8()
+            val document = input.optionalUtf8()
+            require((timestamp == null) == (document == null)) { "Incomplete history cursor" }
+            val count = input.count()
+            val moments = List(count) { input.moment(nowSeconds) }
+            require(input.read() == -1) { "Trailing Rust wire bytes" }
+            RustLocketCore.HistoryPage(moments, timestamp, document)
+        }
+
+    fun decodeChat(bytes: ByteArray, conversationId: String, myUid: String): RustLocketCore.ChatPage =
+        reader(bytes, 3) { input ->
+            val token = input.optionalUtf8()
+            val messages = List(input.count()) {
+                val id = input.utf8()
+                val sender = input.utf8()
+                val body = input.utf8()
+                val created = input.readLong()
+                val clientToken = input.optionalUtf8()
+                val reply = input.optionalUtf8()
+                val thumbnail = input.optionalUtf8()
+                val reactions = List(input.count()) {
+                    MessageReaction(input.utf8(), input.utf8(), input.readLong())
+                }
+                ChatMessage(id, conversationId, sender, sender == myUid, body, created, clientToken, reply, thumbnail, reactions)
+            }
+            require(input.read() == -1) { "Trailing Rust wire bytes" }
+            RustLocketCore.ChatPage(messages, token)
+        }
+
+    private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T =
+        DataInputStream(ByteArrayInputStream(bytes)).use { input ->
+            require(input.readNBytes(4).contentEquals("LKT1".toByteArray(Charsets.US_ASCII)))
+            require(input.readUnsignedShort() == 1)
+            require(input.readUnsignedByte() == recordType)
+            block(input)
+        }
+
+    private fun DataInputStream.count(): Int = readInt().also { require(it in 0..MAX_RECORDS) }
+
+    private fun DataInputStream.moment(nowSeconds: Long): Moment {
+        val id = utf8(); val owner = utf8(); val thumbnail = utf8(); val video = optionalUtf8(); val caption = utf8()
+        val seconds = readLong(); val nanos = readInt(); require(nanos in 0..999_999_999); val md5 = utf8()
+        return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds), emptyMap(), md5)
+    }
 
     private fun DataInputStream.optionalUtf8(): String? = when (readUnsignedByte()) {
         0 -> null
