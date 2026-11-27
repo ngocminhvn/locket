@@ -137,7 +137,7 @@ export ANDROID_HOME=/path/to/android-sdk
 The resulting APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ### 5.2 GitHub Actions CI
-The workflow `.github/workflows/build.yml` triggers on push to `main` or manual `workflow_dispatch`. It:
+The workflow `.github/workflows/build.yml` is manual-only (`workflow_dispatch`). Do not add push, pull request, scheduled, or other automatic build triggers. Start a build only when the repository owner explicitly requests one. It:
 1. Sets up JDK 17 (Temurin).
 2. Sets up Android SDK.
 3. Builds `./gradlew assembleDebug`.
