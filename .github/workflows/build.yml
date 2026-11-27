@@ -29,7 +29,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0 ndk;27.2.12479018'
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0 build-tools;35.0.0 ndk;27.2.12479018'
 
       - name: Set up Rust Android toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -85,7 +85,7 @@ jobs:
           apk="app/build/outputs/apk/release/app-release.apk"
           signer="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           "$signer" verify --verbose --print-certs "$apk"
-          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -c -v 4 "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$apk"
           certificate() {
             "$signer" verify --print-certs "$1" |
               sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1

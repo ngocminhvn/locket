@@ -12,5 +12,15 @@ cd "$REPO_ROOT/rust-core"
 cargo ndk --platform 26 -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
   -o "$REPO_ROOT/app/src/main/jniLibs" build --release --locked
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-  test -s "$REPO_ROOT/app/src/main/jniLibs/$abi/liblocket_core.so" || { echo "Missing Rust library for $abi" >&2; exit 1; }
+  library="$REPO_ROOT/app/src/main/jniLibs/$abi/liblocket_core.so"
+  test -s "$library" || { echo "Missing Rust library for $abi" >&2; exit 1; }
+  if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+    readelf="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+    test -x "$readelf" || { echo "llvm-readelf not found in Android NDK" >&2; exit 1; }
+    "$readelf" -lW "$library" | awk '$1 == "LOAD" && $NF != "0x4000" { exit 1 }' || {
+      echo "ELF load segments are not 16 KiB aligned for $abi" >&2
+      exit 1
+    }
+  fi
 done
+echo "OK: Rust libraries compiled for all four Android ABIs"

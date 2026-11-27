@@ -29,6 +29,7 @@ import androidx.core.content.FileProvider
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.locket.app.ui.LocketViewModel
+import com.locket.app.rust.RustLocketCore
 import com.locket.app.ui.theme.LocketTextDim
 import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.Dispatchers
@@ -79,15 +80,18 @@ private suspend fun latestRelease(): UpdateRelease? = withContext(Dispatchers.IO
             updateClient.newCall(Request.Builder().url(manifestUrl).header("Cache-Control", "no-cache").build())
                 .execute().use { manifestResponse ->
                     check(manifestResponse.isSuccessful) { "Không đọc được update.json (HTTP ${manifestResponse.code})" }
-                    val manifest = JsonParser.parseString(manifestResponse.body?.string().orEmpty()).asJsonObject
-                    check(manifest.get("versionCode").asLong == build &&
-                        manifest.get("versionName").asString == version &&
-                        manifest.get("apkUrl").asString == url &&
-                        manifest.get("sizeBytes").asLong == size) { "Thông tin bản cập nhật không khớp" }
-                    val hash = manifest.get("sha256").asString
-                    check(hash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
-                    check(assetDigest == null || assetDigest.equals(hash, ignoreCase = true)) { "SHA-256 của Release không khớp" }
-                    hash
+                    val manifestBytes = manifestResponse.body?.bytes() ?: byteArrayOf()
+                    if (RustLocketCore.isAvailable) {
+                        RustLocketCore.verifyUpdateManifest(manifestBytes, build, version, url, size, assetDigest)
+                    } else {
+                        val manifest = JsonParser.parseString(manifestBytes.toString(Charsets.UTF_8)).asJsonObject
+                        check(manifest.get("versionCode").asLong == build && manifest.get("versionName").asString == version &&
+                            manifest.get("apkUrl").asString == url && manifest.get("sizeBytes").asLong == size) { "Thông tin bản cập nhật không khớp" }
+                        manifest.get("sha256").asString.also { hash ->
+                            check(hash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
+                            check(assetDigest == null || assetDigest.equals(hash, ignoreCase = true)) { "SHA-256 của Release không khớp" }
+                        }
+                    }
                 }
         } else assetDigest // Compatibility with releases predating update.json.
         UpdateRelease(version, build, url, size, sha256)

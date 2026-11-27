@@ -203,3 +203,42 @@ pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_needsFullChatRefr
         }
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_verifyUpdateManifestNative(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    input: JByteArray<'_>,
+    build: jni::sys::jlong,
+    version: JString<'_>,
+    url: JString<'_>,
+    size: jni::sys::jlong,
+    asset_digest: JString<'_>,
+) -> jni::sys::jstring {
+    let result = env
+        .convert_byte_array(&input)
+        .map_err(|_| crate::CoreError::Invalid("cannot read JNI byte array"))
+        .and_then(|bytes| {
+            let version = java_string(&mut env, &version)?;
+            let url = java_string(&mut env, &url)?;
+            let digest = java_string(&mut env, &asset_digest)?;
+            crate::update::verify_manifest(
+                &bytes,
+                build,
+                &version,
+                &url,
+                size,
+                (!digest.is_empty()).then_some(digest.as_str()),
+            )
+        });
+    match result {
+        Ok(value) => env
+            .new_string(value)
+            .map(JString::into_raw)
+            .unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", error.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}

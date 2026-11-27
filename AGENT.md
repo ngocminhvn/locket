@@ -153,3 +153,18 @@ When modifying this repository:
 3. **Verify API responses** against the specifications in `Locket-API-Spec-1.247.3.md` and `locket-api-1.247.3.json`.
 4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` modifier rather than flat generic backgrounds for cards and bottom navigation.
 5. **Keep Signup disabled** in `WelcomeScreen.kt`.
+
+### Rust core rules
+
+- Business parsing/policy lives in `rust-core`; Android HTTP, Room, UI, media,
+  widget, secure storage, package verification and installation stay Kotlin.
+- Run `cargo test --manifest-path rust-core/Cargo.toml --locked` and Android
+  unit/Kotlin compilation with JDK 17 after boundary changes.
+- Build JNI only through `scripts/build-rust-android.sh`; never commit `target/`
+  or generated `app/src/main/jniLibs/*.so`.
+- Keep the `LKT1` protocol versioned and bounded. JNI input errors must not
+  panic or become successful empty data.
+- Do not migrate Room to rusqlite without comparable device benchmarks and a
+  one-writer transactional migration/rollback plan.
+- The GitHub workflow must remain `workflow_dispatch`; do not run it unless the
+  repository owner explicitly asks for an APK build.
