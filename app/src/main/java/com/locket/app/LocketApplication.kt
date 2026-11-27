@@ -35,12 +35,9 @@ class LocketApplication : Application(), ImageLoaderFactory {
 
     /**
      * Coil dung chung 1 ImageLoader cho ca app (ke ca widget) voi disk
-     * cache ro rang 250 MB.
-     *
-     * respectCacheHeaders(false): URL thumbnail cua Locket la immutable
-     * (ten file random + download token on dinh, file khong bao gio bi
-     * ghi de) nen cache theo URL la du; phu thuoc header Cache-Control
-     * cua server (max-age=0) se khien Coil tai lai anh moi lan mo app.
+     * cache ro rang 250 MB, ton trong Cache-Control cua server.
+     * (Coil 2 khong co API respectCacheHeaders tren DiskCache.Builder —
+     * chi co o Coil 3 — nen khong goi o day.)
      */
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
@@ -48,7 +45,6 @@ class LocketApplication : Application(), ImageLoaderFactory {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("coil"))
                     .maxSizeBytes(250L * 1024 * 1024)
-                    .respectCacheHeaders(false)
                     .build()
             }
             .build()
