@@ -2,6 +2,10 @@ package com.locket.app.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.ContextWrapper
+import android.app.Activity
+import androidx.camera.extensions.ExtensionMode
+import androidx.camera.extensions.ExtensionsManager
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -87,6 +91,12 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    val cameraPreferences by rememberCameraPreferences()
+    val activity = remember(context) {
+        generateSequence(context) { (it as? ContextWrapper)?.baseContext }
+            .filterIsInstance<Activity>().firstOrNull()
+    }
+    var extensionActive by remember { mutableStateOf(false) }
 
     val currentUser by viewModel.currentUser.collectAsState()
     val friends by viewModel.friends.collectAsState()
@@ -179,8 +189,12 @@ fun CameraScreen(
         }
     }
 
-    // Rebind whenever the selected lens changes; AndroidView.factory runs only once.
-    DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView) {
+    // Video keeps its own standard session when a photo extension is selected.
+    val requestedExtension = if (videoMode) ExtensionMode.NONE else cameraPreferences.extension
+    val requestedVideoHdr = videoMode && cameraPreferences.videoHdr
+    DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView, requestedExtension,
+        requestedVideoHdr, cameraPreferences.quality, cameraPreferences.stabilization,
+        cameraPreferences.selfieFlash, cameraPreferences.mirror, activity) {
         var active = true
         var provider: ProcessCameraProvider? = null
         boundCamera = null
@@ -196,76 +210,102 @@ fun CameraScreen(
         videoCapture = null
         hasFlash = false
         cameraError = null
-        if (hasCameraPermission) {
-            val future = ProcessCameraProvider.getInstance(context)
-            future.addListener({
-                if (active) {
+        extensionActive = false
+        val job = if (hasCameraPermission) scope.launch {
+            try {
+                val cameraProvider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context).get() }
+                if (!active) return@launch
+                provider = cameraProvider
+                if (!cameraProvider.hasCamera(cameraSelector)) {
+                    cameraError = "Thiết bị không có camera này"
+                    return@launch
+                }
+                var selected = cameraSelector
+                if (requestedExtension != ExtensionMode.NONE) {
                     try {
-                        val cameraProvider = future.get()
-                        provider = cameraProvider
-                        if (!cameraProvider.hasCamera(cameraSelector)) {
-                            cameraError = "Thiết bị không có camera này"
-                        } else {
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
-                            }
-                            val rotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
-                            // Match the square FILL_CENTER preview with the actual captured sensor region.
-                            val viewPort = ViewPort.Builder(Rational(1, 1), rotation)
-                                .setScaleType(ViewPort.FILL_CENTER)
-                                .build()
-                            val photo = ImageCapture.Builder()
-                                .setTargetRotation(rotation)
-                                .setFlashMode(if (frontCamera) ImageCapture.FLASH_MODE_OFF else flashMode)
-                                .build()
-                            val video = VideoCapture.withOutput(
-                                Recorder.Builder().setQualitySelector(
-                                    QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD))
-                                ).build()
-                            )
-                            cameraProvider.unbindAll()
-                            val camera = try {
-                                val group = UseCaseGroup.Builder()
-                                    .setViewPort(viewPort)
-                                    .addUseCase(preview)
-                                    .addUseCase(photo)
-                                    .addUseCase(video)
-                                    .build()
-                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
-                                    .also { videoCapture = video }
-                            } catch (_: IllegalArgumentException) {
-                                // Some cameras cannot bind three use cases at once.
-                                cameraProvider.unbindAll()
-                                val group = UseCaseGroup.Builder()
-                                    .setViewPort(viewPort)
-                                    .addUseCase(preview)
-                                    .addUseCase(photo)
-                                    .build()
-                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
-                            }
-                            boundCamera = camera
-                            zoomLimits = camera.cameraInfo.zoomState.value
-                            cameraZoomRatio = zoomLimits?.zoomRatio ?: 1f
-                            val exposure = camera.cameraInfo.exposureState
-                            exposureIndex = exposure.exposureCompensationIndex
-                            exposureRange = if (exposure.isExposureCompensationSupported &&
-                                exposure.exposureCompensationRange.upper > exposure.exposureCompensationRange.lower) {
-                                exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper
-                            } else null
-                            hasFlash = camera.cameraInfo.hasFlashUnit()
-                            imageCapture = photo
+                        val manager = withContext(Dispatchers.IO) { ExtensionsManager.getInstanceAsync(context, cameraProvider).get() }
+                        if (!active) return@launch
+                        if (manager.isExtensionAvailable(cameraSelector, requestedExtension)) {
+                            selected = manager.getExtensionEnabledCameraSelector(cameraSelector, requestedExtension)
                         }
-                    } catch (e: Exception) {
-                        cameraError = "Không thể mở camera: ${e.localizedMessage ?: "lỗi không xác định"}"
+                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { selected = cameraSelector }
+                }
+                val rotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+                val viewPort = ViewPort.Builder(Rational(1, 1), rotation).setScaleType(ViewPort.FILL_CENTER).build()
+                previewView.setScreenFlashWindow(activity?.window)
+                fun bind(selector: CameraSelector, extension: Boolean, hdr: Boolean, advanced: Boolean, includeVideo: Boolean): Camera {
+                    val info = cameraProvider.getCameraInfo(selector)
+                    val preview = Preview.Builder().apply {
+                        if (advanced && cameraPreferences.stabilization && !extension &&
+                            Preview.getPreviewCapabilities(info).isStabilizationSupported) setPreviewStabilizationEnabled(true)
+                    }.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+                    val photo = ImageCapture.Builder()
+                        .setTargetRotation(rotation)
+                        .setCaptureMode(if (cameraPreferences.quality) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setFlashMode(ImageCapture.FLASH_MODE_OFF)
+                        .build()
+                    if (frontCamera && !extension && cameraPreferences.selfieFlash && activity != null) {
+                        previewView.screenFlash?.let { photo.setScreenFlash(it) }
+                    }
+                    val group = UseCaseGroup.Builder().setViewPort(viewPort).addUseCase(preview).addUseCase(photo)
+                    val video = if (includeVideo && !extension) {
+                        val recorder = Recorder.Builder().setQualitySelector(
+                            QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD))
+                        ).build()
+                        VideoCapture.Builder(recorder).apply {
+                            setMirrorMode(if (cameraPreferences.mirror) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF)
+                            if (hdr && DynamicRange.HLG_10_BIT in Recorder.getVideoCapabilities(info).supportedDynamicRanges) {
+                                setDynamicRange(DynamicRange.HLG_10_BIT)
+                            }
+                        }.build().also { group.addUseCase(it) }
+                    } else null
+                    cameraProvider.unbindAll()
+                    return cameraProvider.bindToLifecycle(lifecycleOwner, selector, group.build()).also {
+                        imageCapture = photo
+                        videoCapture = video
+                        extensionActive = extension
                     }
                 }
-            }, ContextCompat.getMainExecutor(context))
-        }
+                val camera = if (selected != cameraSelector) {
+                    try { bind(selected, true, false, false, false) }
+                    catch (_: Exception) {
+                        try { bind(cameraSelector, false, false, true, true) }
+                        catch (_: Exception) {
+                            try { bind(cameraSelector, false, false, false, true) }
+                            catch (_: Exception) { bind(cameraSelector, false, false, false, false) }
+                        }
+                    }
+                } else {
+                    try { bind(cameraSelector, false, requestedVideoHdr, true, true) }
+                    catch (_: Exception) {
+                        try { bind(cameraSelector, false, false, false, true) }
+                        catch (_: Exception) { bind(cameraSelector, false, false, false, false) }
+                    }
+                }
+                boundCamera = camera
+                zoomLimits = camera.cameraInfo.zoomState.value
+                cameraZoomRatio = zoomLimits?.zoomRatio ?: 1f
+                val exposure = camera.cameraInfo.exposureState
+                exposureIndex = exposure.exposureCompensationIndex
+                exposureRange = if (exposure.isExposureCompensationSupported &&
+                    exposure.exposureCompensationRange.upper > exposure.exposureCompensationRange.lower) {
+                    exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper
+                } else null
+                hasFlash = camera.cameraInfo.hasFlashUnit()
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                if (active) cameraError = "Không thể mở camera: ${e.localizedMessage ?: "lỗi không xác định"}"
+            }
+        } else null
         onDispose {
             active = false
+            job?.cancel()
             provider?.unbindAll()
+            previewView.setScreenFlashWindow(null)
         }
     }
+
     // Observe hardware zoom changes; do not carry front-camera limits to the rear lens.
     DisposableEffect(boundCamera, lifecycleOwner) {
         val camera = boundCamera
@@ -343,8 +383,23 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(flashMode, hasFlash, imageCapture) {
-        imageCapture?.flashMode = if (hasFlash) flashMode else ImageCapture.FLASH_MODE_OFF
+    LaunchedEffect(flashMode, hasFlash, imageCapture, frontCamera, cameraPreferences.selfieFlash, extensionActive) {
+        val capture = imageCapture ?: return@LaunchedEffect
+        capture.flashMode = when {
+            frontCamera && !extensionActive && cameraPreferences.selfieFlash && capture.screenFlash != null &&
+                flashMode != ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_SCREEN
+            !frontCamera && hasFlash -> flashMode
+            else -> ImageCapture.FLASH_MODE_OFF
+        }
+    }
+    LaunchedEffect(boundCamera, cameraPreferences.lowLight, requestedVideoHdr, extensionActive, flashMode) {
+        val camera = boundCamera ?: return@LaunchedEffect
+        if (!camera.cameraInfo.isLowLightBoostSupported || extensionActive) return@LaunchedEffect
+        val enable = cameraPreferences.lowLight && !requestedVideoHdr && flashMode == ImageCapture.FLASH_MODE_OFF
+        val future = camera.cameraControl.enableLowLightBoostAsync(enable)
+        future.addListener({ try { future.get() } catch (_: Exception) {
+            // Some stream combinations cannot enable low-light boost.
+        } }, ContextCompat.getMainExecutor(context))
     }
     LaunchedEffect(recording) {
         val activeRecording = recording ?: return@LaunchedEffect
@@ -366,7 +421,7 @@ fun CameraScreen(
         val capture = imageCapture
         if (capture == null || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
-        val mirrorPhoto = frontCamera
+        val mirrorPhoto = frontCamera && cameraPreferences.mirror
         capture.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 try {
@@ -457,7 +512,10 @@ fun CameraScreen(
             if (recording == null) startVideo() else recording?.stop()
         } else takePhoto()
     })
-    val beginHold by rememberUpdatedState<() -> Unit>({ startVideo() })
+    val beginHold by rememberUpdatedState<() -> Unit>({
+        if (extensionActive) Toast.makeText(context, "Chuyển sang chế độ Video để quay khi dùng hiệu ứng ảnh", Toast.LENGTH_SHORT).show()
+        else startVideo()
+    })
     val endHold by rememberUpdatedState<() -> Unit>({ recording?.stop() })
 
     // Gallery Picker launcher
@@ -630,12 +688,12 @@ fun CameraScreen(
                         if (pinchingCamera) {
                             Text(formatCameraZoom(cameraZoomRatio), color = Color.White, fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 66.dp)
                                     .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                                     .padding(horizontal = 12.dp, vertical = 6.dp))
                         } else {
                             Row(
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 66.dp)
                                     .background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(3.dp),
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -700,8 +758,11 @@ fun CameraScreen(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(Color(0x66000000))
-                        .clickable(enabled = hasFlash && recording == null) {
-                            flashMode = when (flashMode) {
+                        .clickable(enabled = (hasFlash || (frontCamera && cameraPreferences.selfieFlash && !extensionActive && activity != null)) &&
+                            recording == null && !capturingPhoto) {
+                            flashMode = if (frontCamera && cameraPreferences.selfieFlash) {
+                                if (flashMode == ImageCapture.FLASH_MODE_OFF) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+                            } else when (flashMode) {
                                 ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
                                 ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_AUTO
                                 else -> ImageCapture.FLASH_MODE_OFF
@@ -758,7 +819,7 @@ fun CameraScreen(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(if (!videoMode) LocketYellow else Color.Transparent)
-                            .clickable(enabled = recording == null) { videoMode = false },
+                            .clickable(enabled = recording == null && !capturingPhoto && !processingVideo) { videoMode = false },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -773,7 +834,7 @@ fun CameraScreen(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(if (videoMode) LocketYellow else Color.Transparent)
-                            .clickable(enabled = recording == null) {
+                            .clickable(enabled = recording == null && !capturingPhoto && !processingVideo) {
                                 videoMode = true
                                 if (!hasAudioPermission) audioPermission.launch(Manifest.permission.RECORD_AUDIO)
                             },
