@@ -128,7 +128,6 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var captionText by remember { mutableStateOf("") }
     var isPosting by remember { mutableStateOf(false) }
     val canSwipe = recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect { onSwipeEnabledChange(canSwipe) }
@@ -137,7 +136,6 @@ fun CameraScreen(
         capturedBitmap = null
         capturedVideo?.delete()
         capturedVideo = null
-        captionText = ""
     }
 
     DisposableEffect(Unit) {
@@ -572,202 +570,43 @@ fun CameraScreen(
             )
         }
 
-        // Post Moment Review Dialog Sheet (Uploads directly via Locket API)
-        if (capturedBitmap != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xCC000000)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .liquidGlassEffect(RoundedCornerShape(32.dp), backgroundColor = Color(0xF018181A))
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Gửi khoảnh khắc",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(
-                            onClick = {
-                                if (!isPosting) {
-                                    clearCapture()
-                                    viewModel.setReplyToFriend(null)
-                                }
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Hủy",
-                                tint = Color.White
-                            )
-                        }
+        capturedBitmap?.let { bitmap ->
+            val moments by viewModel.moments.collectAsState()
+            val ownStreak = viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
+            SendMomentScreen(
+                bitmap = bitmap,
+                videoFile = capturedVideo,
+                friends = friends,
+                replyToFriend = replyToFriend,
+                streak = ownStreak,
+                isPosting = isPosting,
+                onCancel = {
+                    if (!isPosting) {
+                        clearCapture()
+                        viewModel.setReplyToFriend(null)
                     }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Photo Preview in Squircle
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1.0f)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(Color.Black)
-                    ) {
-                        val videoFile = capturedVideo
-                        if (videoFile != null) {
-                            AndroidView(
-                                modifier = Modifier.fillMaxSize(),
-                                factory = { ctx -> VideoView(ctx).apply {
-                                    setVideoPath(videoFile.absolutePath)
-                                    setOnPreparedListener { player -> player.isLooping = true; start() }
-                                    setOnErrorListener { _, _, _ ->
-                                        Toast.makeText(ctx, "Không phát được video", Toast.LENGTH_SHORT).show()
-                                        true
-                                    }
-                                } },
-                                onRelease = { it.stopPlayback() }
-                            )
-                        } else capturedBitmap?.let { bmp ->
-                            androidx.compose.foundation.Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = "Captured",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Caption Input
-                    OutlinedTextField(
-                        value = captionText,
-                        onValueChange = { captionText = it },
-                        placeholder = { Text("Thêm chú thích...", color = LocketTextDim) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = LocketYellow,
-                            unfocusedBorderColor = Color(0x44FFFFFF),
-                            focusedContainerColor = Color(0x33000000),
-                            unfocusedContainerColor = Color(0x33000000)
-                        ),
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Dang tra loi rieng 1 ban: anh nay chi gui cho ban do
-                    replyToFriend?.let { target ->
-                        val firstName = target.displayName.trim().split("\\s+".toRegex()).lastOrNull()
-                            ?: target.displayName
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Reply,
-                                contentDescription = null,
-                                tint = LocketYellow,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = "Đang trả lời $firstName",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = { viewModel.setReplyToFriend(null) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Hủy trả lời riêng",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // Post Button (Calls real Locket API postMomentV2)
-                    Button(
-                        onClick = {
-                            val bmp = capturedBitmap ?: return@Button
-                            isPosting = true
-                            viewModel.postMoment(
-                                bitmap = bmp,
-                                videoFile = capturedVideo,
-                                caption = captionText,
-                                recipients = replyToFriend?.let { listOf(it.uid) } ?: emptyList(),
-                                onSuccess = {
-                                    isPosting = false
-                                    clearCapture()
-                                    viewModel.setReplyToFriend(null)
-                                    Toast.makeText(context, "Đã gửi khoảnh khắc lên Locket thành công! 💛", Toast.LENGTH_LONG).show()
-                                    onNavigate("feed")
-                                },
-                                onError = { err ->
-                                    isPosting = false
-                                    Toast.makeText(context, "Lỗi đăng: $err", Toast.LENGTH_LONG).show()
-                                }
-                            )
+                },
+                onSend = { caption, recipients ->
+                    isPosting = true
+                    viewModel.postMoment(
+                        bitmap = bitmap,
+                        videoFile = capturedVideo,
+                        caption = caption,
+                        recipients = recipients,
+                        onSuccess = {
+                            isPosting = false
+                            clearCapture()
+                            viewModel.setReplyToFriend(null)
+                            Toast.makeText(context, "Đã gửi khoảnh khắc", Toast.LENGTH_SHORT).show()
+                            onNavigate("feed")
                         },
-                        enabled = !isPosting,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LocketYellow,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(26.dp)
-                    ) {
-                        if (isPosting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = Color.Black,
-                                strokeWidth = 2.5.dp
-                            )
-                        } else {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text(
-                                    text = "Gửi khoảnh khắc 💛",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        onError = { error ->
+                            isPosting = false
+                            Toast.makeText(context, "Lỗi gửi: $error", Toast.LENGTH_LONG).show()
                         }
-                    }
+                    )
                 }
-            }
+            )
         }
     }
 }
