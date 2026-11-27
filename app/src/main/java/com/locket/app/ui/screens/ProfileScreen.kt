@@ -4,6 +4,19 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapShader
+import android.graphics.LinearGradient
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.Canvas as AndroidCanvas
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -18,6 +31,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -34,6 +48,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -42,9 +57,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
+import com.google.zxing.qrcode.encoder.Encoder
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.liquidGlassEffect
@@ -599,6 +617,7 @@ private fun BlockedUsersBottomSheet(
  * qua MediaStore va bao ket qua that; "Sao chép" copy link moi that.
  * Messenger/Zalo van la Toast cho — ngoai pham vi batch nay.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QrShareBottomSheet(
     user: com.locket.app.model.User,
@@ -610,180 +629,230 @@ private fun QrShareBottomSheet(
     val inviteLink by viewModel.inviteLink.collectAsState()
     val inviteLinkLoading by viewModel.inviteLinkLoading.collectAsState()
     var isSavingQr by remember { mutableStateOf(false) }
+    var qrBitmap by remember(inviteLink, user.profilePictureUrl) { mutableStateOf<Bitmap?>(null) }
+    var rendering by remember(inviteLink, user.profilePictureUrl) { mutableStateOf(false) }
+    var renderError by remember(inviteLink, user.profilePictureUrl) { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadInviteLink { err ->
-            Toast.makeText(context, "Lỗi tạo link mời: $err", Toast.LENGTH_LONG).show()
+    fun loadLink() = viewModel.loadInviteLink { err ->
+        Toast.makeText(context, "Lỗi tạo link mời: $err", Toast.LENGTH_LONG).show()
+    }
+    LaunchedEffect(Unit) { loadLink() }
+    LaunchedEffect(inviteLink, user.profilePictureUrl) {
+        val link = inviteLink?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        rendering = true
+        try {
+            val avatar = if (user.profilePictureUrl.isNotBlank()) {
+                try {
+                    val result = context.imageLoader.execute(ImageRequest.Builder(context)
+                        .data(user.profilePictureUrl).size(320).allowHardware(false).build())
+                    (result as? SuccessResult)?.drawable?.toBitmap()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) { null }
+            } else null
+            qrBitmap = withContext(Dispatchers.Default) { generateProfileQrCard(link, avatar) }
+            renderError = qrBitmap == null
+        } finally { rendering = false }
+    }
+
+    fun shareLink(packageName: String?) {
+        val link = inviteLink?.takeIf { it.isNotBlank() } ?: return
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, link)
+        try {
+            if (packageName != null) context.startActivity(Intent(send).setPackage(packageName))
+            else context.startActivity(Intent.createChooser(send, "Chia sẻ hồ sơ"))
+        } catch (_: android.content.ActivityNotFoundException) {
+            try { context.startActivity(Intent.createChooser(send, "Chia sẻ hồ sơ")) }
+            catch (_: android.content.ActivityNotFoundException) {
+                Toast.makeText(context, "Không có ứng dụng chia sẻ", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    // QR that tu link moi; null = chua co link (dang tai hoac loi).
-    val qrBitmap = remember(inviteLink) {
-        inviteLink?.let { generateQrBitmap(it, 512) }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xCC000000))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.BottomCenter
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color(0xFF242424),
+        scrimColor = Color.Black.copy(alpha = 0.65f),
+        shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp),
+        dragHandle = {
+            Box(Modifier.padding(vertical = 12.dp).size(width = 34.dp, height = 5.dp)
+                .background(Color(0xFF666666), RoundedCornerShape(3.dp)))
+        }
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = false) {}
-                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(Color(0xFF141416))
-                .padding(24.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 22.dp, bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
-                modifier = Modifier
-                    .size(width = 40.dp, height = 4.dp)
-                    .background(Color(0xFF48484A), RoundedCornerShape(2.dp))
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Box(
-                modifier = Modifier
-                    .size(280.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(LocketYellow)
-                    .padding(24.dp),
+                Modifier.fillMaxWidth(0.75f).widthIn(max = 340.dp).aspectRatio(0.875f)
+                    .shadow(16.dp, RoundedCornerShape(32.dp), ambientColor = LocketYellow, spotColor = LocketYellow)
+                    .clip(RoundedCornerShape(32.dp)).background(LocketYellow),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier.size(170.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (qrBitmap != null) {
-                            Image(
-                                bitmap = qrBitmap.asImageBitmap(),
-                                contentDescription = "Mã QR mời bạn bè",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else if (inviteLinkLoading) {
-                            CircularProgressIndicator(color = Color.Black)
-                        } else {
-                            // Chua co link (loi mang/server): giu icon cu lam
-                            // placeholder, khong ve QR gia tu chuoi rong.
-                            Icon(
-                                imageVector = Icons.Default.QrCode2,
-                                contentDescription = "QR Code",
-                                tint = Color.Black,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .border(2.dp, LocketYellow, CircleShape)
-                                .background(Color.White),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (user.profilePictureUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = user.profilePictureUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(Icons.Default.Person, null, tint = Color.Black, modifier = Modifier.size(30.dp))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("Add me on", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text("💛 Locket", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                val card = qrBitmap
+                if (card != null) {
+                    Image(card.asImageBitmap(), "Mã QR mời bạn bè", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                } else if (inviteLinkLoading || rendering) {
+                    CircularProgressIndicator(color = Color.Black)
+                } else {
+                    Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (renderError) "Không tạo được mã QR" else "Chưa có link mời", color = Color.Black)
+                        if (!renderError) TextButton(onClick = { loadLink() }) { Text("Thử lại", color = Color.Black) }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(Modifier.height(22.dp))
             Text("Share your profile!", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 26.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 ShareActionItem("Save QR", Icons.Default.Download) {
-                    val bitmap = qrBitmap
-                    if (bitmap == null) {
-                        Toast.makeText(context, "Chưa tạo được mã QR, thử lại sau", Toast.LENGTH_SHORT).show()
-                        return@ShareActionItem
-                    }
+                    val bitmap = qrBitmap ?: return@ShareActionItem
                     if (isSavingQr) return@ShareActionItem
                     isSavingQr = true
                     scope.launch {
-                        val saved = withContext(Dispatchers.IO) {
-                            saveQrBitmapToGallery(context, bitmap)
-                        }
-                        isSavingQr = false
-                        saved.onSuccess { fileName ->
-                            Toast.makeText(context, "Đã lưu mã QR ($fileName) vào Thư viện", Toast.LENGTH_SHORT).show()
-                        }.onFailure { err ->
-                            Toast.makeText(context, "Lỗi lưu mã QR: ${err.message}", Toast.LENGTH_LONG).show()
-                        }
+                        try {
+                            val saved = withContext(Dispatchers.IO) { saveQrBitmapToGallery(context, bitmap) }
+                            saved.onSuccess {
+                                Toast.makeText(context, "Đã lưu QR vào Thư viện", Toast.LENGTH_SHORT).show()
+                            }.onFailure { err ->
+                                Toast.makeText(context, "Lỗi lưu mã QR: ${err.message}", Toast.LENGTH_LONG).show()
+                            }
+                        } finally { isSavingQr = false }
                     }
                 }
                 ShareActionItem("Sao chép", Icons.Default.Link) {
-                    val link = inviteLink
-                    if (link.isNullOrBlank()) {
-                        Toast.makeText(context, "Chưa tạo được link mời, thử lại sau", Toast.LENGTH_SHORT).show()
-                        return@ShareActionItem
-                    }
+                    val link = inviteLink?.takeIf { it.isNotBlank() } ?: return@ShareActionItem
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Locket invite link", link))
                     Toast.makeText(context, "Đã sao chép link mời", Toast.LENGTH_SHORT).show()
                 }
-                ShareActionItem("Messenger", Icons.Default.Chat) {
-                    Toast.makeText(context, "Chia sẻ Messenger", Toast.LENGTH_SHORT).show()
-                }
-                ShareActionItem("Zalo", Icons.Default.Share) {
-                    Toast.makeText(context, "Chia sẻ Zalo", Toast.LENGTH_SHORT).show()
-                }
+                ShareActionItem("Messenger", Icons.Default.Chat) { shareLink("com.facebook.orca") }
+                ShareActionItem("Zalo", Icons.Default.Share) { shareLink("com.zing.zalo") }
+                ShareActionItem("Instagram", Icons.Default.CameraAlt) { shareLink("com.instagram.android") }
+                ShareActionItem("Khác", Icons.Default.Share) { shareLink(null) }
             }
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
-/** Ve QR that tu 1 chuoi (link moi) bang ZXing — khong phai icon tinh. */
-private fun generateQrBitmap(content: String, size: Int): Bitmap? {
+/**
+ * Render the real invite URL as a yellow QR card. Validate the rendered
+ * artwork (including the avatar) with ZXing before showing or saving it.
+ * If the avatar obscures too many modules, shrink it or use square modules.
+ */
+private fun generateProfileQrCard(content: String, avatar: Bitmap?): Bitmap? {
     return try {
-        val hints = mapOf(
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-            EncodeHintType.MARGIN to 1
-        )
-        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        for (x in 0 until size) {
-            for (y in 0 until size) {
-                bitmap.setPixel(
-                    x, y,
-                    if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-                )
+        val code = Encoder.encode(content, ErrorCorrectionLevel.H,
+            mapOf(EncodeHintType.CHARACTER_SET to "UTF-8"))
+        val matrix = code.matrix ?: return null
+        val n = matrix.width
+        val width = 840
+        val height = 960
+        val module = 700f / (n + 8)
+        val qrSize = module * n
+        val startX = (width - qrSize) / 2f
+        val startY = 36f + 4 * module
+        val black = android.graphics.Color.BLACK
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        fun render(dots: Boolean, avatarFraction: Float): Bitmap {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = AndroidCanvas(bitmap)
+            paint.shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(),
+                intArrayOf(0xFFFF9C00.toInt(), 0xFFFFCF00.toInt(), 0xFFFFA000.toInt()), null, Shader.TileMode.CLAMP)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+            val background = paint.shader
+            paint.shader = null
+            paint.color = black
+            fun inFinder(x: Int, y: Int): Boolean =
+                (x < 7 && y < 7) || (x >= n - 7 && y < 7) || (x < 7 && y >= n - 7)
+
+            for (y in 0 until n) for (x in 0 until n) {
+                if (matrix.get(x, y).toInt() != 1 || (dots && inFinder(x, y))) continue
+                val px = startX + x * module
+                val py = startY + y * module
+                // Timing and format information remain solid to preserve detection.
+                if (!dots || x == 6 || y == 6 || x == 8 || y == 8) {
+                    canvas.drawRect(px, py, px + module, py + module, paint)
+                } else canvas.drawCircle(px + module / 2, py + module / 2, module * 0.46f, paint)
             }
+            if (dots) {
+                for ((x, y) in listOf(0 to 0, (n - 7) to 0, 0 to (n - 7))) {
+                    val px = startX + x * module
+                    val py = startY + y * module
+                    paint.color = black
+                    canvas.drawRoundRect(RectF(px, py, px + 7 * module, py + 7 * module), module * 1.7f, module * 1.7f, paint)
+                    paint.shader = background
+                    canvas.drawRoundRect(RectF(px + module, py + module, px + 6 * module, py + 6 * module), module, module, paint)
+                    paint.shader = null
+                    paint.color = black
+                    canvas.drawRoundRect(RectF(px + 2 * module, py + 2 * module, px + 5 * module, py + 5 * module), module * 0.7f, module * 0.7f, paint)
+                }
+            }
+
+            if (avatar != null && avatarFraction > 0f) {
+                val cx = width / 2f
+                val cy = startY + qrSize / 2f
+                val radius = qrSize * avatarFraction / 2f
+                paint.shader = background
+                canvas.drawCircle(cx, cy, radius + module * 0.8f, paint)
+                val shader = BitmapShader(avatar, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                val scale = (radius * 2f) / minOf(avatar.width, avatar.height)
+                shader.setLocalMatrix(Matrix().apply {
+                    setScale(scale, scale)
+                    postTranslate(cx - avatar.width * scale / 2f, cy - avatar.height * scale / 2f)
+                })
+                paint.shader = shader
+                canvas.drawCircle(cx, cy, radius, paint)
+                paint.shader = null
+            }
+            paint.color = black
+            paint.textSize = 45f
+            paint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            paint.textAlign = Paint.Align.LEFT
+            val left = "Add me on "
+            val right = " Locket"
+            val iconSize = 52f
+            val total = paint.measureText(left) + iconSize + paint.measureText(right)
+            val x = (width - total) / 2
+            val baseline = 874f
+            canvas.drawText(left, x, baseline, paint)
+            val iconX = x + paint.measureText(left)
+            canvas.drawRoundRect(RectF(iconX, baseline - 43f, iconX + iconSize, baseline + 9f), 13f, 13f, paint)
+            paint.color = 0xFFFFC000.toInt()
+            val heart = android.graphics.Path().apply {
+                moveTo(iconX + 26f, baseline - 3f)
+                cubicTo(iconX - 5f, baseline - 24f, iconX + 15f, baseline - 44f, iconX + 26f, baseline - 28f)
+                cubicTo(iconX + 37f, baseline - 44f, iconX + 57f, baseline - 24f, iconX + 26f, baseline - 3f)
+                close()
+            }
+            canvas.drawPath(heart, paint)
+            paint.color = black
+            canvas.drawText(right, iconX + iconSize, baseline, paint)
+            return bitmap
         }
-        bitmap
-    } catch (e: Exception) {
+
+        fun valid(bitmap: Bitmap): Boolean = try {
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            QRCodeReader().decode(BinaryBitmap(HybridBinarizer(
+                RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
+            ))).text == content
+        } catch (_: Exception) { false }
+
+        for ((dots, fraction) in listOf(true to 0.30f, true to 0.24f, true to 0.17f,
+            true to 0f, false to 0.20f, false to 0f)) {
+            val bitmap = render(dots, fraction)
+            if (valid(bitmap)) return bitmap
+            bitmap.recycle()
+        }
         null
-    }
+    } catch (_: Exception) { null }
 }
 
 /**
@@ -905,12 +974,12 @@ private fun EditNameDialog(
 
 @Composable
 private fun ShareActionItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(60.dp).clickable(onClick = onClick)) {
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(56.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF242426)),
+                .background(Color(0xFF414143)),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, null, tint = Color.White, modifier = Modifier.size(24.dp))
