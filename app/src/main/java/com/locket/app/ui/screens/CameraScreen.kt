@@ -143,7 +143,11 @@ fun CameraScreen(
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var videoMode by remember { mutableStateOf(false) }
+    var videoSession by remember { mutableStateOf(false) }
+    var boundVideoSession by remember { mutableStateOf(false) }
+    var holdingShutter by remember { mutableStateOf(false) }
+    var resumeZoom by remember { mutableStateOf<Float?>(null) }
+    var audioPermissionAsked by remember { mutableStateOf(false) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
     var recordingStartedAt by remember { mutableLongStateOf(0L) }
@@ -168,7 +172,7 @@ fun CameraScreen(
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
-    val canSwipe = !pinchingCamera && !exposureDragging && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
+    val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect {
         onSwipeEnabledChange(canSwipe)
         onReviewVisibleChange(capturedBitmap != null)
@@ -184,14 +188,15 @@ fun CameraScreen(
         screenActive = true
         onDispose {
             screenActive = false
+            holdingShutter = false
             recording?.stop()
             if (!isPosting) capturedVideo?.delete()
         }
     }
 
     // Video keeps its own standard session when a photo extension is selected.
-    val requestedExtension = if (videoMode) ExtensionMode.NONE else cameraPreferences.extension
-    val requestedVideoHdr = videoMode && cameraPreferences.videoHdr
+    val requestedExtension = if (videoSession) ExtensionMode.NONE else cameraPreferences.extension
+    val requestedVideoHdr = videoSession && cameraPreferences.videoHdr
     DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView, requestedExtension,
         requestedVideoHdr, cameraPreferences.quality, cameraPreferences.stabilization,
         cameraPreferences.selfieFlash, cameraPreferences.mirror, activity) {
@@ -211,6 +216,7 @@ fun CameraScreen(
         hasFlash = false
         cameraError = null
         extensionActive = false
+        boundVideoSession = false
         val job = if (hasCameraPermission) scope.launch {
             try {
                 val cameraProvider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context).get() }
@@ -293,6 +299,16 @@ fun CameraScreen(
                     exposure.exposureCompensationRange.lower..exposure.exposureCompensationRange.upper
                 } else null
                 hasFlash = camera.cameraInfo.hasFlashUnit()
+                resumeZoom?.let { ratio ->
+                    val limits = camera.cameraInfo.zoomState.value
+                    if (limits != null) {
+                        val target = ratio.coerceIn(limits.minZoomRatio, limits.maxZoomRatio)
+                        cameraZoomRatio = target
+                        camera.cameraControl.setZoomRatio(target)
+                    }
+                    resumeZoom = null
+                }
+                boundVideoSession = videoSession
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
                 if (active) cameraError = "Không thể mở camera: ${e.localizedMessage ?: "lỗi không xác định"}"
@@ -419,7 +435,7 @@ fun CameraScreen(
 
     fun takePhoto() {
         val capture = imageCapture
-        if (capture == null || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
+        if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
         val mirrorPhoto = frontCamera && cameraPreferences.mirror
         capture.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
@@ -441,10 +457,19 @@ fun CameraScreen(
         })
     }
 
+    fun restorePhotoSession() {
+        if (videoSession) {
+            resumeZoom = boundCamera?.cameraInfo?.zoomState?.value?.zoomRatio ?: resumeZoom
+            videoSession = false
+        }
+    }
+
     fun startVideo() {
-        if (recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
+        if (!holdingShutter || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         val capture = videoCapture
         if (capture == null) {
+            holdingShutter = false
+            restorePhotoSession()
             Toast.makeText(context, "Camera này chưa sẵn sàng quay video", Toast.LENGTH_SHORT).show()
             return
         }
@@ -459,10 +484,13 @@ fun CameraScreen(
             recording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
                 if (event is VideoRecordEvent.Start) {
                     recordingStartedAt = SystemClock.elapsedRealtime()
+                    if (!holdingShutter) recording?.stop()
                 }
                 if (event is VideoRecordEvent.Finalize) {
                     recordingStartedAt = 0L
                     recording = null
+                    holdingShutter = false
+                    if (screenActive) restorePhotoSession()
                     if (!screenActive || event.hasError()) {
                         file.delete()
                         if (screenActive) Toast.makeText(context, "Không thể quay video (${event.error})", Toast.LENGTH_SHORT).show()
@@ -497,26 +525,48 @@ fun CameraScreen(
             }
         } catch (e: Exception) {
             file.delete()
+            holdingShutter = false
+            restorePhotoSession()
             Toast.makeText(context, "Lỗi quay video: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
+    // A hold can temporarily switch from photo extensions to a normal video
+    // session (or HDR video). Never start recording after the finger is lifted.
+    LaunchedEffect(holdingShutter, videoSession, boundVideoSession, boundCamera, videoCapture, cameraError) {
+        if (!holdingShutter || recording != null) return@LaunchedEffect
+        if (videoSession && !boundVideoSession && cameraError == null) return@LaunchedEffect
+        if (boundCamera == null && cameraError == null) return@LaunchedEffect
+        startVideo()
+    }
     val openLatest = {
-        if (recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null) {
+        if (!holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null) {
             viewModel.selectFriend(null)
             onNavigate("latest")
         }
     }
-    val tapShutter by rememberUpdatedState<() -> Unit>({
-        if (videoMode) {
-            if (recording == null) startVideo() else recording?.stop()
-        } else takePhoto()
-    })
+    val tapShutter by rememberUpdatedState<() -> Unit>({ takePhoto() })
     val beginHold by rememberUpdatedState<() -> Unit>({
-        if (extensionActive) Toast.makeText(context, "Chuyển sang chế độ Video để quay khi dùng hiệu ứng ảnh", Toast.LENGTH_SHORT).show()
-        else startVideo()
+        if (recording == null && !holdingShutter && !processingVideo && !capturingPhoto &&
+            capturedBitmap == null && boundCamera != null) {
+            if (!hasAudioPermission && !audioPermissionAsked) {
+                audioPermissionAsked = true
+                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            } else {
+                holdingShutter = true
+                if (cameraPreferences.extension != ExtensionMode.NONE || cameraPreferences.videoHdr) {
+                    resumeZoom = cameraZoomRatio
+                    videoSession = true
+                }
+            }
+        }
     })
-    val endHold by rememberUpdatedState<() -> Unit>({ recording?.stop() })
+    val endHold by rememberUpdatedState<() -> Unit>({
+        holdingShutter = false
+        val activeRecording = recording
+        if (activeRecording != null) activeRecording.stop()
+        else restorePhotoSession()
+    })
 
     // Gallery Picker launcher
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -688,12 +738,12 @@ fun CameraScreen(
                         if (pinchingCamera) {
                             Text(formatCameraZoom(cameraZoomRatio), color = Color.White, fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 66.dp)
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
                                     .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                                     .padding(horizontal = 12.dp, vertical = 6.dp))
                         } else {
                             Row(
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 66.dp)
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
                                     .background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(3.dp),
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -759,7 +809,7 @@ fun CameraScreen(
                         .clip(CircleShape)
                         .background(Color(0x66000000))
                         .clickable(enabled = (hasFlash || (frontCamera && cameraPreferences.selfieFlash && !extensionActive && activity != null)) &&
-                            recording == null && !capturingPhoto) {
+                            !holdingShutter && recording == null && !capturingPhoto) {
                             flashMode = if (frontCamera && cameraPreferences.selfieFlash) {
                                 if (flashMode == ImageCapture.FLASH_MODE_OFF) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
                             } else when (flashMode) {
@@ -784,67 +834,21 @@ fun CameraScreen(
                     )
                 }
 
-                // Replace the photo/video selector with a live timer during recording.
-                if (recording != null) {
+                // Keep zoom at the bottom; move the recording status out of its way.
+                if (recording != null || holdingShutter) {
                     Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 16.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0xD92C2C2E))
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+                            .clip(RoundedCornerShape(24.dp)).background(Color(0xD92C2C2E))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Box(Modifier.size(9.dp).background(Color(0xFFFF453A), CircleShape))
                         Text(
-                            text = java.lang.String.format(java.util.Locale.ROOT, "%d.%d s",
-                                recordingElapsedMs / 1000,
-                                recordingElapsedMs / 100 % 10),
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
-                        .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = Color(0xD92C2C2E))
-                        .padding(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (!videoMode) LocketYellow else Color.Transparent)
-                            .clickable(enabled = recording == null && !capturingPhoto && !processingVideo) { videoMode = false },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Ảnh",
-                            tint = if (!videoMode) Color.Black else Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (videoMode) LocketYellow else Color.Transparent)
-                            .clickable(enabled = recording == null && !capturingPhoto && !processingVideo) {
-                                videoMode = true
-                                if (!hasAudioPermission) audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = "Video",
-                            tint = if (videoMode) Color.Black else Color.White,
-                            modifier = Modifier.size(20.dp)
+                            text = if (recordingStartedAt == 0L) "Đang chuẩn bị..." else
+                                java.lang.String.format(java.util.Locale.ROOT, "%d.%d s",
+                                    recordingElapsedMs / 1000, recordingElapsedMs / 100 % 10),
+                            color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -864,7 +868,7 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clickable(enabled = recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
+                        .clickable(enabled = !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -881,7 +885,7 @@ fun CameraScreen(
                         .size(98.dp)
                         .border(4.dp, if (recording != null) Color.Red else LocketYellow, CircleShape)
                         .semantics {
-                            contentDescription = if (videoMode) "Quay video" else "Chụp ảnh, giữ để quay video"
+                            contentDescription = "Chụp ảnh, giữ để quay video"
                             onClick { tapShutter(); true }
                         }
                         .pointerInput(Unit) {
@@ -898,7 +902,7 @@ fun CameraScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Box(Modifier.size(if (recording != null) 40.dp else 82.dp)
-                        .background(if (recording != null || videoMode) Color.Red else Color.White,
+                        .background(if (recording != null || holdingShutter) Color.Red else Color.White,
                             if (recording != null) RoundedCornerShape(10.dp) else CircleShape))
                 }
 
@@ -906,7 +910,7 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clickable(enabled = recording == null && !processingVideo && !capturingPhoto) {
+                        .clickable(enabled = !holdingShutter && recording == null && !processingVideo && !capturingPhoto) {
                             frontCamera = !frontCamera
                             flashMode = ImageCapture.FLASH_MODE_OFF
                         },
