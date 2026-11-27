@@ -49,7 +49,24 @@ class LocketCache(
     }
 
     suspend fun saveConversations(conversations: List<Conversation>) {
-        dao.replaceConversations(conversations.map { it.toEntity() })
+        // Sua hang UID cu: neu displayName dang la UID nhung bang friends
+        // co ten that thi thay bang ten that — khong de hang UID nam lai
+        // trong cache roi hien ra du sync moi da resolve duoc.
+        val repaired = conversations.map { c ->
+            if (c.friend.displayName.isBlank() || c.friend.displayName == c.friend.uid) {
+                val cached = dao.getFriend(c.friend.uid)?.toModel()
+                if (cached != null && cached.displayName.isNotBlank() && cached.displayName != cached.uid) {
+                    c.copy(
+                        friend = c.friend.copy(
+                            displayName = cached.displayName,
+                            username = cached.username.ifBlank { c.friend.username },
+                            avatarUrl = cached.avatarUrl.ifBlank { c.friend.avatarUrl }
+                        )
+                    )
+                } else c
+            } else c
+        }
+        dao.replaceConversations(repaired.map { it.toEntity() })
     }
 
     /**

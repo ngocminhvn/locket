@@ -243,6 +243,9 @@ interface LocketDao {
     @Query("SELECT * FROM conversations")
     fun observeConversations(): Flow<List<ConversationEntity>>
 
+    @Query("SELECT * FROM friends WHERE uid = :uid LIMIT 1")
+    suspend fun getFriend(uid: String): FriendEntity?
+
     @Query("SELECT COUNT(*) FROM moments")
     suspend fun momentCount(): Int
 

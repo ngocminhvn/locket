@@ -485,6 +485,53 @@ class LocketApiClient(
         result
     }
 
+    /**
+     * Fallback (c): doc Firestore users/{uid} — dung khi fetchUsers khong
+     * tra ten cho uid do (giong fallback cua fetchFriends).
+     * Field da xac minh trong bundle goc: schema user (zod, ~637800) co
+     * uid/first_name/last_name/username/profile_picture_url; ham
+     * fetchUserByUidWithCache (~1025296) tra first_name/last_name/
+     * profile_picture_url. Tra null neu doc khong ton tai, request loi,
+     * hoac khong co ten/username/avatar nao dung duoc.
+     */
+    private suspend fun fetchUserProfileFromDoc(uid: String): Friend? {
+        if (uid.isBlank()) return null
+        val token = getToken()
+        if (token.isNullOrBlank()) return null
+        return try {
+            val url = "$FIRESTORE_BASE_URL/users/$uid"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return null
+            val doc = gson.fromJson(resp.body?.string(), JsonObject::class.java)
+            val fields = doc.getAsJsonObject("fields") ?: return null
+            val first = extractString(fields, "first_name").trim()
+            val last = extractString(fields, "last_name").trim()
+            val username = extractString(fields, "username").trim()
+            val avatar = extractString(fields, "profile_picture_url")
+            val displayName = when {
+                first.isNotEmpty() && last.isNotEmpty() -> "$first $last"
+                first.isNotEmpty() -> first
+                last.isNotEmpty() -> last
+                username.isNotEmpty() -> username
+                else -> ""
+            }
+            if (displayName.isBlank() && username.isBlank() && avatar.isBlank()) return null
+            Friend(
+                uid = uid,
+                username = username.ifBlank { uid },
+                displayName = displayName.ifBlank { username.ifBlank { uid } },
+                avatarUrl = avatar
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun searchUserByUsername(username: String): Result<User?> = withContext(Dispatchers.IO) {
         try {
             val payload = JsonObject().apply {
@@ -812,14 +859,22 @@ class LocketApiClient(
                 )
             }
 
-            // Resolve ten that — khong gan uid lam ten nua
+            // Resolve ten that — khong gan uid lam ten nua.
+            // Chuoi fallback: (b) fetchUsers (batch 10) -> (c) Firestore
+            // users/{uid} doc (xem fetchUserProfileFromDoc) -> (d) UID that.
+            // (a) Room friends cache do ViewModel overlay them sau khi goi ham nay.
             val names = resolveUserNames(convList.map { it.friend.uid }.distinct())
             val resolved = convList.map { c ->
                 val resolvedName = names[c.friend.uid]
                 if (resolvedName != null) {
                     c.copy(friend = c.friend.copy(displayName = resolvedName.first, avatarUrl = resolvedName.second))
                 } else {
-                    c.copy(friend = c.friend.copy(displayName = c.friend.uid))
+                    val docFriend = fetchUserProfileFromDoc(c.friend.uid)
+                    if (docFriend != null) {
+                        c.copy(friend = docFriend)
+                    } else {
+                        c.copy(friend = c.friend.copy(displayName = c.friend.uid))
+                    }
                 }
             }
 

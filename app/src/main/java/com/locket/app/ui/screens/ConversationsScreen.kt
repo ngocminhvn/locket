@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -167,10 +168,14 @@ fun ConversationsScreen(
                             Text(
                                 // Ten that; chua resolve duoc thi hien username, roi UID that —
                                 // khong de trong (bug anh chup man hinh: hang khong ten).
+                                // UID dai 28 ky tu khong duoc wrap xuong dong 2 (bug anh chup:
+                                // duoi UID "3"/"Yp1" hien ra nhu 1 dong ten rieng) — cat 1 dong.
                                 text = conv.friend.displayName.ifBlank { conv.friend.username.ifBlank { conv.friend.uid } },
                                 color = Color.White,
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(

@@ -196,13 +196,41 @@ class LocketViewModel(
         if (currentUid.isBlank()) return
         val convRes = apiClient.fetchConversations(currentUid)
         val liveConvs = convRes.getOrNull() ?: return
+        // (a) Room friends cache: chi dung ten/avatar that tu cache.
+        // Khong de muc cache ten-UID ghi de ten that vua resolve duoc,
+        // va nguoc lai: live chua resolve duoc thi lay ten that tu cache.
         val friendsMap = _friends.value.associateBy { it.uid }
         val resolvedConvs = liveConvs.map { c ->
-            val f = friendsMap[c.friend.uid]
-            if (f != null) c.copy(friend = f) else c
+            c.copy(friend = mergeConversationFriend(c.friend, friendsMap[c.friend.uid]))
         }
         _conversations.value = resolvedConvs
         cache.saveConversations(resolvedConvs)
+    }
+
+    /**
+     * Gop ten ban be tu 2 nguon (live fetchConversations + Room friends cache):
+     * lay displayName/username/avatar that tu bat cu nguon nao co; UID chi
+     * dung khi ca 2 nguon deu khong co ten that. Khong bao gio de muc
+     * cache ten-UID ghi de ten that vua resolve duoc.
+     */
+    private fun mergeConversationFriend(live: Friend, cached: Friend?): Friend {
+        if (cached == null) return live
+        val liveNameReal = live.displayName.isNotBlank() && live.displayName != live.uid
+        val cachedNameReal = cached.displayName.isNotBlank() && cached.displayName != cached.uid
+        val displayName = when {
+            liveNameReal -> live.displayName
+            cachedNameReal -> cached.displayName
+            else -> live.displayName
+        }
+        val liveUsernameReal = live.username.isNotBlank() && live.username != live.uid
+        val cachedUsernameReal = cached.username.isNotBlank() && cached.username != cached.uid
+        val username = when {
+            liveUsernameReal -> live.username
+            cachedUsernameReal -> cached.username
+            else -> live.username
+        }
+        val avatarUrl = live.avatarUrl.ifBlank { cached.avatarUrl }
+        return live.copy(displayName = displayName, username = username, avatarUrl = avatarUrl)
     }
 
     /**
