@@ -15,6 +15,18 @@ import androidx.compose.foundation.pager.rememberPagerState
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -41,11 +53,16 @@ class MainActivity : ComponentActivity() {
                 sessionManager.refreshToken = refreshToken
             }
         )
-        val viewModel = LocketViewModel(sessionManager, apiClient, (application as LocketApplication).cache)
+        val viewModel = ViewModelProvider(this, object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                LocketViewModel(sessionManager, apiClient, (application as LocketApplication).cache) as T
+        })[LocketViewModel::class.java]
 
         setContent {
             LocketTheme {
                 val isLoggedIn by viewModel.isLoggedInFlow.collectAsState()
+                val uploadFailures by viewModel.momentUploadFailures.collectAsState()
                 // Widget mo app dung man Home: intent extra "open_home" (LocketWidgetUpdater).
                 val openHome = intent.getBooleanExtra("open_home", false)
                 var currentScreen by remember { mutableStateOf(if (isLoggedIn) (if (openHome) "feed" else "camera") else "welcome") }
@@ -231,6 +248,23 @@ class MainActivity : ComponentActivity() {
                                         onOpenFriends = { showFriendsModal = true },
                                         onOpenProfile = { showProfileScreen = true }
                                     )
+                                }
+                            }
+                        }
+                    }
+                    if (isLoggedIn) uploadFailures.firstOrNull()?.let { failure ->
+                        Surface(
+                            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                                .padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(),
+                            tonalElevation = 6.dp
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text("Gửi khoảnh khắc thất bại")
+                                Text(failure.message.take(180))
+                                if (failure.mayHavePosted) Text("Kiểm tra lịch sử trước khi gửi lại để tránh đăng trùng.")
+                                Row(Modifier.align(Alignment.End)) {
+                                    TextButton(onClick = { viewModel.discardMomentUpload(failure.id) }) { Text("Bỏ") }
+                                    TextButton(onClick = { viewModel.retryMomentUpload(failure.id) }) { Text("Gửi lại") }
                                 }
                             }
                         }

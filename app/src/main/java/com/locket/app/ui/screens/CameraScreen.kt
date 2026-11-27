@@ -33,10 +33,8 @@ import androidx.compose.ui.semantics.*
 import android.media.MediaMetadataRetriever
 import android.widget.VideoView
 import java.io.File
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.Dispatchers
-import com.locket.app.ui.encodeMomentThumbnail
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -180,8 +178,7 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isPosting by remember { mutableStateOf(false) }
-    val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
+    val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null
     SideEffect {
         onSwipeEnabledChange(canSwipe)
         onReviewVisibleChange(capturedBitmap != null)
@@ -199,7 +196,7 @@ fun CameraScreen(
             screenActive = false
             holdingShutter = false
             recording?.stop()
-            if (!isPosting) capturedVideo?.delete()
+            capturedVideo?.delete()
         }
     }
 
@@ -661,7 +658,11 @@ fun CameraScreen(
     val review = capturedBitmap?.let { bitmap ->
         val isPhoto = capturedVideo == null
         val prepared = remember(bitmap, isPhoto) {
-            if (isPhoto) CompletableDeferred<ByteArray>() else null
+            if (isPhoto) viewModel.prepareMomentThumbnail(bitmap) else null
+        }
+        val transferred = remember(bitmap) { booleanArrayOf(false) }
+        DisposableEffect(prepared) {
+            onDispose { if (!transferred[0]) prepared?.cancel() }
         }
         var snapshotFile by remember(bitmap, isPhoto) { mutableStateOf<File?>(null) }
         LaunchedEffect(bitmap, prepared) {
@@ -686,16 +687,8 @@ fun CameraScreen(
                     temp = null
                     android.util.Log.w("LocketCamera", "JPEG snapshot cache failed", e)
                 }
-                try {
-                    prepared.complete(withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) })
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    prepared.completeExceptionally(e)
-                }
                 awaitCancellation()
             } finally {
-                if (!prepared.isCompleted) prepared.cancel()
                 temp?.delete()
             }
         }
@@ -710,33 +703,28 @@ fun CameraScreen(
             friends = friends,
             replyToFriend = replyToFriend,
             streak = ownStreak,
-            isPosting = isPosting,
+            isPosting = false,
             onCancel = {
-                if (!isPosting) {
-                    clearCapture()
-                    viewModel.setReplyToFriend(null)
-                }
+                clearCapture()
+                viewModel.setReplyToFriend(null)
             },
             onSend = { caption, recipients ->
-                isPosting = true
-                viewModel.postMoment(
-                    bitmap = bitmap,
-                    videoFile = capturedVideo,
-                    preparedThumbnail = prepared,
-                    caption = caption,
-                    recipients = recipients,
-                    onSuccess = {
-                        isPosting = false
-                        clearCapture()
-                        viewModel.setReplyToFriend(null)
-                        Toast.makeText(context, "Đã gửi khoảnh khắc", Toast.LENGTH_SHORT).show()
-                        onNavigate("feed")
-                    },
-                    onError = { error ->
-                        isPosting = false
-                        Toast.makeText(context, "Lỗi gửi: $error", Toast.LENGTH_LONG).show()
-                    }
-                )
+                if (viewModel.enqueueMoment(
+                        bitmap = bitmap,
+                        videoFile = capturedVideo,
+                        preparedThumbnail = prepared,
+                        caption = caption,
+                        recipients = recipients
+                    )) {
+                    // Transfer ownership before removing the review from Compose.
+                    transferred[0] = true
+                    capturedVideo = null
+                    clearCapture()
+                    viewModel.setReplyToFriend(null)
+                    Toast.makeText(context, "Đã thêm vào hàng đợi gửi", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Hàng đợi đầy hoặc chưa đăng nhập", Toast.LENGTH_SHORT).show()
+                }
             }
         )
     }

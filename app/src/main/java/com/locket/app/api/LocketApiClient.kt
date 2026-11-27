@@ -2119,10 +2119,13 @@ class LocketApiClient(
     suspend fun uploadMomentThumbnail(
         imageBytes: ByteArray,
         isCameraRoll: Boolean = false,
-        webp: Boolean = false
+        webp: Boolean = false,
+        expectedUid: String? = null
     ): UploadResult = withContext(Dispatchers.IO) {
         val token = getToken()
         val uid = getUid() ?: "anonymous"
+        if (expectedUid != null && uid != expectedUid)
+            return@withContext UploadResult(success = false, errorMessage = "Phiên đăng nhập đã thay đổi")
         val randomId = generateRandomId(20)
         val extension = if (webp) "webp" else "jpg"
         val mime = if (webp) "image/webp" else "image/jpeg"
@@ -2170,9 +2173,11 @@ class LocketApiClient(
         }
     }
 
-    suspend fun uploadMomentVideo(file: File): UploadResult = withContext(Dispatchers.IO) {
+    suspend fun uploadMomentVideo(file: File, expectedUid: String? = null): UploadResult = withContext(Dispatchers.IO) {
         val uid = getUid()
         val token = getToken()
+        if (expectedUid != null && uid != expectedUid)
+            return@withContext UploadResult(success = false, errorMessage = "Phiên đăng nhập đã thay đổi")
         if (uid.isNullOrBlank() || token.isNullOrBlank() || !file.isFile || file.length() == 0L) {
             return@withContext UploadResult(false, errorMessage = "Video không hợp lệ hoặc chưa đăng nhập")
         }
@@ -2213,9 +2218,12 @@ class LocketApiClient(
         // bundle ~1257420-1257480: last_updated_yyyymmdd !== today ->
         // {update_streak_for_yyyymmdd: today}, nguoc lai khong co field).
         // null = hom nay da ghi nhan roi, khong gui field.
-        updateStreakForYyyymmdd: String? = null
+        updateStreakForYyyymmdd: String? = null,
+        expectedUid: String? = null
     ): PostResult = withContext(Dispatchers.IO) {
         val token = getToken()
+        if (expectedUid != null && getUid() != expectedUid)
+            return@withContext PostResult(success = false, errorMessage = "Phiên đăng nhập đã thay đổi")
         if (token.isNullOrBlank()) {
             return@withContext PostResult(
                 success = false,

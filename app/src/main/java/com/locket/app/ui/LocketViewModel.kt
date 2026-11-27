@@ -21,6 +21,8 @@ import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -704,85 +706,157 @@ class LocketViewModel(
         }
     }
 
-    fun postMoment(
+    // Real pending work, independent from camera/review composables. Never
+    // inject a synthetic posted moment into the feed.
+    data class MomentUploadFailure(val id: Long, val message: String, val mayHavePosted: Boolean)
+    private data class QueuedMoment(
+        val id: Long,
+        val owner: String,
+        val bitmap: Bitmap,
+        val video: File?,
+        val prepared: Deferred<ByteArray>?,
+        val caption: String,
+        val recipients: List<String>,
+        var bytes: ByteArray? = null,
+        var thumbnailUrl: String? = null,
+        var md5: String? = null,
+        var videoUrl: String? = null,
+        var attemptedPost: Boolean = false
+    )
+    private val pendingUploads = ArrayDeque<QueuedMoment>()
+    private val failedUploads = linkedMapOf<Long, QueuedMoment>()
+    private var activeUpload: QueuedMoment? = null
+    private var uploadJob: Job? = null
+    private var uploadSequence = 0L
+    private val _momentUploadFailures = MutableStateFlow<List<MomentUploadFailure>>(emptyList())
+    val momentUploadFailures = _momentUploadFailures.asStateFlow()
+
+    internal fun prepareMomentThumbnail(bitmap: Bitmap): Deferred<ByteArray> =
+        viewModelScope.async(Dispatchers.Default) { encodeMomentThumbnail(bitmap) }
+
+    internal fun enqueueMoment(
         bitmap: Bitmap,
         caption: String,
-        recipients: List<String> = emptyList(),
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-        videoFile: File? = null,
-        preparedThumbnail: Deferred<ByteArray>? = null
-    ) {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            val webp = videoFile == null
-            val bytes = try {
-                if (webp) {
-                    preparedThumbnail?.await() ?: withContext(Dispatchers.Default) {
-                        encodeMomentThumbnail(bitmap)
-                    }
-                } else withContext(Dispatchers.Default) {
-                    ByteArrayOutputStream().use { stream ->
-                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
-                        stream.toByteArray()
-                    }
+        recipients: List<String>,
+        videoFile: File?,
+        preparedThumbnail: Deferred<ByteArray>?
+    ): Boolean {
+        val owner = sessionManager.currentUser.uid
+        if (owner.isBlank() || !activeAccount(owner) ||
+            pendingUploads.size + failedUploads.size + (if (activeUpload != null) 1 else 0) >= 8) return false
+        pendingUploads.addLast(QueuedMoment(++uploadSequence, owner, bitmap, videoFile,
+            preparedThumbnail, caption, recipients.toList()))
+        drainMomentUploads()
+        return true
+    }
+
+    fun retryMomentUpload(id: Long) {
+        val item = failedUploads[id] ?: return
+        if (!activeAccount(item.owner)) return
+        failedUploads.remove(id)
+        _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
+        pendingUploads.addLast(item)
+        drainMomentUploads()
+    }
+
+    fun discardMomentUpload(id: Long) {
+        val item = failedUploads.remove(id) ?: return
+        releaseUpload(item)
+        _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
+    }
+
+    private fun releaseUpload(item: QueuedMoment) {
+        item.prepared?.cancel()
+        item.video?.delete()
+    }
+
+    private fun drainMomentUploads() {
+        if (uploadJob?.isActive == true) return
+        uploadJob = viewModelScope.launch {
+            while (pendingUploads.isNotEmpty()) {
+                val item = pendingUploads.removeFirst()
+                activeUpload = item
+                try {
+                    check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
+                    uploadQueuedMoment(item)
+                    releaseUpload(item)
+                    if (activeAccount(item.owner)) syncAllData()
+                } catch (e: CancellationException) {
+                    releaseUpload(item)
+                    throw e
+                } catch (e: Exception) {
+                    if (activeAccount(item.owner)) {
+                        failedUploads[item.id] = item
+                        _momentUploadFailures.update { list ->
+                            list + MomentUploadFailure(item.id, e.message ?: "Không gửi được khoảnh khắc", item.attemptedPost)
+                        }
+                    } else releaseUpload(item)
+                } finally {
+                    activeUpload = null
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                _isSyncing.value = false
-                throw e
-            } catch (e: Exception) {
-                _isSyncing.value = false
-                onError("Không thể mã hóa ảnh: ${e.message ?: "lỗi không xác định"}")
-                return@launch
-            }
-
-            // 1. Upload to Firebase Storage
-            val uploadRes = apiClient.uploadMomentThumbnail(bytes, webp = webp)
-            if (uploadRes.success && uploadRes.downloadUrl != null) {
-                val md5 = uploadRes.md5 ?: apiClient.computeMd5(bytes)
-
-                val videoUrl = if (videoFile != null) {
-                    val videoRes = apiClient.uploadMomentVideo(videoFile)
-                    if (!videoRes.success || videoRes.downloadUrl.isNullOrBlank()) {
-                        _isSyncing.value = false
-                        onError(videoRes.errorMessage ?: "Lỗi tải video")
-                        return@launch
-                    }
-                    videoRes.downloadUrl
-                } else null
-
-                // 2. Call postMomentV2 callable
-                // Streak server: chi gui update_streak_for_yyyymmdd khi ngay
-                // da luu != hom nay (getStreakUploadPayload, bundle
-                // ~1257420-1257480); chi luu ngay moi khi post thanh cong.
-                // calculateStreak local van giu lam fallback hien thi.
-                val today = todayYyyymmdd()
-                val updateStreakFor = today.takeIf { sessionManager.streakLastUpdatedYyyymmdd != it }
-                val postRes = apiClient.postMoment(
-                    thumbnailUrl = uploadRes.downloadUrl,
-                    caption = caption,
-                    recipients = recipients,
-                    md5 = md5,
-                    videoUrl = videoUrl,
-                    updateStreakForYyyymmdd = updateStreakFor
-                )
-
-                if (postRes.success) {
-                    if (updateStreakFor != null) sessionManager.streakLastUpdatedYyyymmdd = updateStreakFor
-                    // Fetch server records; never synthesize IDs, timestamps or local feed rows.
-                    videoFile?.delete()
-                    _isSyncing.value = false
-                    syncAllData()
-                    onSuccess()
-                } else {
-                    _isSyncing.value = false
-                    onError(postRes.errorMessage ?: "Lỗi đăng khoảnh khắc")
-                }
-            } else {
-                _isSyncing.value = false
-                onError(uploadRes.errorMessage ?: "Lỗi tải ảnh lên Storage")
             }
         }
+    }
+
+    private suspend fun uploadQueuedMoment(item: QueuedMoment) {
+        val webp = item.video == null
+        val bytes = item.bytes ?: (if (webp) {
+            try {
+                item.prepared?.await() ?: withContext(Dispatchers.Default) { encodeMomentThumbnail(item.bitmap) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                withContext(Dispatchers.Default) { encodeMomentThumbnail(item.bitmap) }
+            }
+        } else withContext(Dispatchers.Default) {
+            ByteArrayOutputStream().use { stream ->
+                check(item.bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
+                stream.toByteArray()
+            }
+        }).also { item.bytes = it }
+
+        check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
+        if (item.thumbnailUrl == null) {
+            val upload = apiClient.uploadMomentThumbnail(bytes, webp = webp, expectedUid = item.owner)
+            check(upload.success && !upload.downloadUrl.isNullOrBlank()) { upload.errorMessage ?: "Lỗi tải ảnh" }
+            item.thumbnailUrl = upload.downloadUrl
+            item.md5 = upload.md5 ?: apiClient.computeMd5(bytes)
+        }
+        if (item.video != null && item.videoUrl == null) {
+            check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
+            val upload = apiClient.uploadMomentVideo(item.video, expectedUid = item.owner)
+            check(upload.success && !upload.downloadUrl.isNullOrBlank()) { upload.errorMessage ?: "Lỗi tải video" }
+            item.videoUrl = upload.downloadUrl
+        }
+        check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
+        val today = todayYyyymmdd()
+        val streak = today.takeIf { sessionManager.streakLastUpdatedYyyymmdd != it }
+        item.attemptedPost = true
+        val post = apiClient.postMoment(
+            thumbnailUrl = checkNotNull(item.thumbnailUrl),
+            caption = item.caption,
+            recipients = item.recipients,
+            md5 = checkNotNull(item.md5),
+            videoUrl = item.videoUrl,
+            updateStreakForYyyymmdd = streak,
+            expectedUid = item.owner
+        )
+        check(post.success) { post.errorMessage ?: "Lỗi đăng khoảnh khắc" }
+        if (streak != null && activeAccount(item.owner)) sessionManager.streakLastUpdatedYyyymmdd = streak
+    }
+
+    private fun clearMomentUploads() {
+        uploadJob?.cancel()
+        pendingUploads.forEach(::releaseUpload)
+        pendingUploads.clear()
+        failedUploads.values.forEach(::releaseUpload)
+        failedUploads.clear()
+        _momentUploadFailures.value = emptyList()
+    }
+
+    override fun onCleared() {
+        clearMomentUploads()
+        super.onCleared()
     }
 
     fun reactToMoment(momentId: String, ownerUid: String, reaction: String) {
@@ -1321,6 +1395,7 @@ class LocketViewModel(
     }
 
     fun logout() {
+        clearMomentUploads()
         syncAgain = false
         syncJob?.cancel()
         closeChat()
