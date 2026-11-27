@@ -41,6 +41,9 @@ fun HistoryScreen(
 ) {
     val moments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val historyLoading by viewModel.historyLoading.collectAsState()
+    val historyHasMore by viewModel.historyHasMore.collectAsState()
+    val historyError by viewModel.historyError.collectAsState()
     var viewingMoment by remember { mutableStateOf<Moment?>(null) }
 
     // Group moments by "year-month-day"
@@ -82,6 +85,35 @@ fun HistoryScreen(
 
     val totalCount = moments.size
     val streak = remember(moments) { viewModel.calculateStreak(moments) }
+
+    // Lich su truoc day chi duoc tai khi vuot o HomePager / 1 lan trong
+    // syncAllData, nen mo thang man Ky niem co the chua co du lieu cac thang
+    // cu (chi hien cham tron du user co moment o thang do). Man nay tu tai
+    // them cac dot lich su cho den khi du phu 15 thang dang hien thi hoac
+    // het du lieu. Lich su sap xep moi-nhat-truoc nen khi moment cu nhat
+    // da tai ve cu hon dau thang cu nhat dang hien thi la du.
+    val earliestNeededTs = remember(calendarMonths) {
+        val oldest = calendarMonths.last()
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, oldest.year)
+            set(Calendar.MONTH, oldest.month - 1)
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis / 1000
+    }
+    val oldestLoadedTs = remember(moments) { moments.minOfOrNull { it.timestampSeconds } }
+    val allMonthsCovered = oldestLoadedTs != null && oldestLoadedTs < earliestNeededTs
+    val needsMoreHistory = viewModel.isLoggedIn && historyHasMore &&
+        historyError == null && !allMonthsCovered
+
+    LaunchedEffect(needsMoreHistory, historyLoading, historyError, moments.size) {
+        if (needsMoreHistory && !historyLoading) {
+            viewModel.loadOlderMoments()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -145,9 +177,24 @@ fun HistoryScreen(
 
             // Month Cards
             items(calendarMonths) { monthData ->
+                // Thang chua du du lieu khi lich su moi tai toi trong (hoac
+                // sau) dau thang do ma van con dot cu hon chua tai ve.
+                val monthStartTs = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, monthData.year)
+                    set(Calendar.MONTH, monthData.month - 1)
+                    set(Calendar.DAY_OF_MONTH, 1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis / 1000
+                val monthCovered = oldestLoadedTs != null && oldestLoadedTs < monthStartTs
+                val monthLoading = viewModel.isLoggedIn && historyHasMore &&
+                    historyError == null && !monthCovered
                 MonthCardDynamic(
                     monthData = monthData,
                     momentsByDate = momentsByDate,
+                    isLoading = monthLoading,
                     onMomentClick = { viewingMoment = it },
                     onTodayAddClick = { onNavigate("camera") }
                 )
@@ -159,6 +206,34 @@ fun HistoryScreen(
                     fontSize = 18.sp,
                     modifier = Modifier.padding(vertical = 12.dp)
                 )
+            }
+
+            // Trang thai tai lich su: dang tai thi hien spinner, loi thi hien
+            // nut thu lai. Khong de thang cu chi hien cham tron gay hieu
+            // nham la thang do khong co anh.
+            if (historyLoading || historyError != null) {
+                item {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        if (historyLoading) {
+                            CircularProgressIndicator(color = LocketYellow)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = "Đang tải ảnh cũ...", color = LocketTextDim, fontSize = 13.sp)
+                        }
+                        if (historyError != null) {
+                            Text(
+                                text = historyError ?: "",
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 13.sp
+                            )
+                            TextButton(onClick = { viewModel.loadOlderMoments() }) {
+                                Text("Thử lại", color = LocketYellow)
+                            }
+                        }
+                    }
+                }
             }
 
             // Stats Pill: "💛 {totalCount} Locket | 🔥 {streak} ngày chuỗi"
@@ -227,6 +302,7 @@ data class CalendarMonthData(
 private fun MonthCardDynamic(
     monthData: CalendarMonthData,
     momentsByDate: Map<String, List<Moment>>,
+    isLoading: Boolean = false,
     onMomentClick: (Moment) -> Unit,
     onTodayAddClick: () -> Unit
 ) {
@@ -250,6 +326,27 @@ private fun MonthCardDynamic(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
         )
+
+        // Thang chua tai du du lieu: bao dang tai thay vi de cham tron
+        // (cham tron chi co nghia "khong co anh" khi da tai het).
+        if (isLoading) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = LocketYellow,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Đang tải ảnh cũ...",
+                    color = LocketTextDim,
+                    fontSize = 12.sp
+                )
+            }
+        }
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             for (row in 0 until 5) {
