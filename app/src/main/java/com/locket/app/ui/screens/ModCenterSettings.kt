@@ -163,9 +163,11 @@ private fun installUpdate(context: Context, file: File) {
     var lastError: Exception? = null
     for (action in listOf(Intent.ACTION_VIEW, Intent.ACTION_INSTALL_PACKAGE)) {
         try {
-            context.startActivity(Intent(action).setDataAndType(uri, "application/vnd.android.package-archive")
-                .setClipData(clip)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent(action).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                setClipData(clip)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
             return
         } catch (e: ActivityNotFoundException) { lastError = e }
         catch (e: SecurityException) { lastError = e }
