@@ -177,59 +177,34 @@ fun LocketBottomBar(
     onNavigate: (String) -> Unit
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp),
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .liquidGlassEffect(RoundedCornerShape(32.dp))
-                .padding(horizontal = 18.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 7.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier.size(width = if (currentScreen == "history") 66.dp else 36.dp, height = 46.dp)
-                    .clip(CircleShape)
-                    .background(if (currentScreen == "history") Color(0x33FFFFFF) else Color.Transparent)
-                    .clickable { onNavigate("history") },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Apps, "Kỷ niệm",
-                    tint = if (currentScreen == "history") Color.White else LocketTextDim,
-                    modifier = Modifier.size(26.dp))
-            }
-
-            // Camera / Home button
-            Box(
-                modifier = Modifier
-                    .size(width = 66.dp, height = 46.dp)
-                    .clip(CircleShape)
-                    .background(if (currentScreen == "camera") Color(0x33FFFFFF) else Color.Transparent)
-                    .clickable { onNavigate("camera") },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Home,
-                    contentDescription = "Camera",
-                    tint = if (currentScreen == "camera") Color.White else LocketTextDim,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-
-            // Trò chuyện (Chat bubble)
-            IconButton(
-                onClick = { onNavigate("chat") },
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ChatBubble,
-                    contentDescription = "Trò chuyện",
-                    tint = if (currentScreen == "chat") Color.White else LocketTextDim,
-                    modifier = Modifier.size(24.dp)
-                )
+            // All three slots have the same fixed dimensions regardless of
+            // selection. Only the background and icon tint change.
+            listOf(
+                Triple("history", Icons.Default.Apps, "Kỷ niệm"),
+                Triple("camera", Icons.Default.Home, "Camera"),
+                Triple("chat", Icons.Default.ChatBubble, "Trò chuyện")
+            ).forEach { (screen, icon, label) ->
+                val active = currentScreen == screen
+                Box(
+                    Modifier.size(width = 64.dp, height = 46.dp)
+                        .clip(CircleShape)
+                        .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
+                        .clickable { onNavigate(screen) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = label,
+                        tint = if (active) Color.White else LocketTextDim,
+                        modifier = Modifier.size(26.dp))
+                }
             }
         }
     }

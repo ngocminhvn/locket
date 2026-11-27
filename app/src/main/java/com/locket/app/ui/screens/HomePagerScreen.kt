@@ -40,7 +40,8 @@ fun HomePagerScreen(
     initialMomentIndex: Int = 0,
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    onTabSwipeEnabledChange: (Boolean) -> Unit = {}
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -79,6 +80,10 @@ fun HomePagerScreen(
     val cameraSelected = pagerState.settledPage == 0
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
     val showChrome = !(cameraSelected && cameraReviewVisible)
+    SideEffect {
+        onTabSwipeEnabledChange(!showFriendFilter && !pagerState.isScrollInProgress &&
+            (!cameraSelected || (cameraSwipeEnabled && !cameraReviewVisible)))
+    }
 
     LaunchedEffect(selectedFriend?.uid) {
         val uid = selectedFriend?.uid

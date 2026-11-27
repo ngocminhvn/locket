@@ -5,6 +5,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -44,6 +50,29 @@ class MainActivity : ComponentActivity() {
                 var showProfileScreen by remember { mutableStateOf(false) }
                 var selectedGridIndex by remember { mutableStateOf(0) }
                 var activeChatFriend by remember { mutableStateOf<Friend?>(null) }
+                var homeTabSwipeEnabled by remember { mutableStateOf(true) }
+                val mainTab = when (currentScreen) {
+                    "history" -> 0
+                    "camera", "feed", "grid" -> 1
+                    "chat" -> 2
+                    else -> -1
+                }
+                val canSwipeTabs by rememberUpdatedState(
+                    isLoggedIn && mainTab >= 0 && !showProfileScreen && !showFriendsModal &&
+                        (currentScreen !in listOf("camera", "feed") || homeTabSwipeEnabled)
+                )
+                val activeTab by rememberUpdatedState(mainTab)
+                val switchTab by rememberUpdatedState<(Int) -> Unit>({ tab ->
+                    if (tab in 0..2 && tab != mainTab) {
+                        if (tab == 1) {
+                            viewModel.setReplyToFriend(null)
+                            viewModel.selectFriend(null)
+                            selectedGridIndex = 0
+                            homeTabSwipeEnabled = true
+                        }
+                        currentScreen = listOf("history", "camera", "chat")[tab]
+                    }
+                })
 
                 LaunchedEffect(isLoggedIn) {
                     if (!isLoggedIn) {
@@ -55,6 +84,49 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(LocketBlack)
+                        .pointerInput(Unit) {
+                            // Edge-inward swipe: right from the left edge goes
+                            // to the previous tab; left from the right goes to
+                            // the next. Leave the outermost system-back area
+                            // to Android and ignore vertical/diagonal drags.
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                val startTab = activeTab
+                                val edgeWidth = 80.dp.toPx()
+                                val systemEdge = 18.dp.toPx()
+                                val fromLeft = down.position.x >= systemEdge && down.position.x <= edgeWidth
+                                val fromRight = down.position.x <= size.width - systemEdge &&
+                                    down.position.x >= size.width - edgeWidth
+                                val target = when {
+                                    fromLeft && startTab > 0 -> startTab - 1
+                                    fromRight && startTab in 0..1 -> startTab + 1
+                                    else -> -1
+                                }
+                                if (!canSwipeTabs || target < 0) return@awaitEachGesture
+                                var locked = false
+                                var completed = false
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.changes.count { it.pressed } > 1 ||
+                                        !canSwipeTabs || activeTab != startTab) break
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    val delta = change.position - down.position
+                                    val horizontal = if (fromLeft) delta.x else -delta.x
+                                    if (!locked) {
+                                        if (abs(delta.y) > viewConfiguration.touchSlop && abs(delta.y) >= abs(delta.x)) break
+                                        if (horizontal < -viewConfiguration.touchSlop) break
+                                        if (horizontal > maxOf(viewConfiguration.touchSlop, 16.dp.toPx()) &&
+                                            horizontal > abs(delta.y) * 1.5f) locked = true
+                                    }
+                                    if (locked) {
+                                        change.consume()
+                                        if (!change.pressed) completed = horizontal >= 64.dp.toPx()
+                                    }
+                                    if (!change.pressed) break
+                                }
+                                if (completed && canSwipeTabs && activeTab == startTab) switchTab(target)
+                            }
+                        }
                 ) {
                     when {
                         showProfileScreen -> {
@@ -104,7 +176,8 @@ class MainActivity : ComponentActivity() {
                                             else currentScreen = destination
                                         },
                                         onOpenFriends = { showFriendsModal = true },
-                                        onOpenProfile = { showProfileScreen = true }
+                                        onOpenProfile = { showProfileScreen = true },
+                                        onTabSwipeEnabledChange = { homeTabSwipeEnabled = it }
                                     )
                                 }
                                 "grid" -> {
