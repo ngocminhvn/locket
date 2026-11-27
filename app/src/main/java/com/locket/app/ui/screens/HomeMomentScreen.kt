@@ -196,7 +196,7 @@ fun HomeMomentScreen(
                                 .padding(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = emojiStyled(currentMoment.caption),
+                                text = currentMoment.caption,
                                 color = Color.White,
                                 style = profileTextStyle(16.sp, 20.sp, FontWeight.Bold)
                             )
@@ -218,7 +218,7 @@ fun HomeMomentScreen(
                             .align(Alignment.Center)
                             .animateFloatingReaction { floatingReaction = null }
                     ) {
-                        Text(text = emojiStyled(emoji), fontSize = 72.sp)
+                        Text(text = emoji, fontSize = 72.sp)
                     }
                 }
 
@@ -520,7 +520,6 @@ internal fun MomentReactionBar(
                 // Text input
                 TextField(
                     value = messageText,
-                    visualTransformation = emojiInputTransformation(),
                     onValueChange = { messageText = it },
                     placeholder = { Text("Gửi tin nhắn...", color = Color(0xFF8E8E93), fontSize = 15.sp) },
                     modifier = Modifier.weight(1f),
@@ -555,7 +554,7 @@ internal fun MomentReactionBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = emojiStyled(emoji), fontSize = 27.sp)
+                        Text(text = emoji, fontSize = 27.sp)
                     }
                 }
 

@@ -323,7 +323,7 @@ fun ChatDetailScreen(
                                         .padding(horizontal = 18.dp, vertical = 12.dp)
                                 ) {
                                     Text(
-                                        text = emojiStyled(msg.text),
+                                        text = msg.text,
                                         color = Color.Black,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium
@@ -352,7 +352,7 @@ fun ChatDetailScreen(
                                             .padding(horizontal = 18.dp, vertical = 12.dp)
                                     ) {
                                         Text(
-                                            text = emojiStyled(msg.text),
+                                            text = msg.text,
                                             color = Color.White,
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Medium
@@ -376,7 +376,6 @@ fun ChatDetailScreen(
             ) {
                 BasicTextField(
                     value = inputMessage,
-                    visualTransformation = emojiInputTransformation(),
                     onValueChange = { inputMessage = it },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
@@ -399,7 +398,7 @@ fun ChatDetailScreen(
                 } else {
                     for (emoji in listOf("🔥", "😍", "💛")) {
                         Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = !sending) { sendText(emoji) }, contentAlignment = Alignment.Center) {
-                            Text(emojiStyled(emoji), fontSize = 25.sp)
+                            Text(emoji, fontSize = 25.sp)
                         }
                     }
                     IconButton(onClick = { showQuickEmojis = true }, modifier = Modifier.size(34.dp)) {
@@ -514,7 +513,7 @@ fun ChatDetailScreen(
                         ) {
                             for (emoji in listOf("🔥", "😍", "💛", "😂", "🥺")) {
                                 Text(
-                                    text = emojiStyled(emoji),
+                                    text = emoji,
                                     fontSize = 28.sp,
                                     modifier = Modifier
                                         .clickable {
@@ -678,7 +677,7 @@ private fun MessageBubble(msg: ChatMessage, bubbleColor: Color, onLongClick: () 
                 .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
             Text(
-                text = emojiStyled(msg.text),
+                text = msg.text,
                 color = if (msg.isMe) Color.Black else Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium
@@ -695,7 +694,7 @@ private fun ReactionRow(reactions: List<com.locket.app.model.MessageReaction>) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         for (r in reactions) {
-            Text(text = emojiStyled(r.emoji), fontSize = 16.sp)
+            Text(text = r.emoji, fontSize = 16.sp)
         }
     }
 }

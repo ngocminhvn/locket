@@ -5,9 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,13 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.emoji2.emojipicker.EmojiPickerView
 import com.locket.app.model.Friend
 import com.locket.app.ui.theme.LocketYellow
-import com.locket.app.ui.theme.LocalEmojiState
-import com.locket.app.ui.theme.emojiStyled
-import com.locket.app.ui.theme.emojiInputTransformation
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 
 @Composable
 internal fun BoxScope.FeedFriendPopup(modifier: Modifier, friends: List<Friend>, selectedFriend: Friend?,
@@ -68,68 +62,25 @@ private fun FilterFriendRow(friend: Friend?, selected: Boolean, onClick: () -> U
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
-    val state = LocalEmojiState.current
-    val groups = remember(state.catalog) { state.catalog?.entries?.map { it.group }?.distinct().orEmpty() }
-    var selected by remember { mutableIntStateOf(0) }
-    var query by remember { mutableStateOf("") }
-    var keyboardEmoji by remember { mutableStateOf("") }
-    val options = remember(query, selected, state.catalog) {
-        state.catalog?.entries.orEmpty().filter {
-            if (query.isBlank()) it.group == groups.getOrNull(selected)
-            else it.value.contains(query.trim()) || it.name.contains(query.trim(), ignoreCase = true)
-        }
-    }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF242424), shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp), dragHandle = null) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(16.dp)) {
-            if (state.catalog == null) {
-                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = LocketYellow)
-                Text("Chọn emoji bằng bàn phím", color = Color.White)
-                OutlinedTextField(keyboardEmoji, { keyboardEmoji = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Emoji") }, singleLine = true, visualTransformation = emojiInputTransformation())
-                val valid = keyboardEmoji.isNotBlank() && keyboardEmoji.codePoints().anyMatch {
-                    it >= 0x1F000 || it in 0x2600..0x27BF || it == 0xFE0F || it == 0x20E3
-                } && android.icu.text.BreakIterator.getCharacterInstance().apply { setText(keyboardEmoji) }.let {
-                    it.first(); it.next() == keyboardEmoji.length
-                }
-                TextButton(enabled = valid, onClick = { onPick(keyboardEmoji) }) { Text("Gửi emoji", color = LocketYellow) }
-                if (state.error) TextButton(onClick = state.retry) { Text("Tải lại bộ emoji") }
-            } else {
-                TextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    placeholder = { Text("Tìm emoji") }, shape = CircleShape,
-                    colors = TextFieldDefaults.colors(focusedContainerColor = Color(0xFF383838),
-                        unfocusedContainerColor = Color(0xFF383838), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    groups.forEachIndexed { index, group ->
-                        val label = when (group) {
-                            "Smileys & Emotion" -> "Cảm xúc"
-                            "People & Body" -> "Con người"
-                            "Animals & Nature" -> "Thiên nhiên"
-                            "Food & Drink" -> "Đồ ăn"
-                            "Travel & Places" -> "Du lịch"
-                            "Activities" -> "Hoạt động"
-                            "Objects" -> "Đồ vật"
-                            "Symbols" -> "Biểu tượng"
-                            "Flags" -> "Cờ"
-                            "Component" -> "Thành phần"
-                            else -> group
-                        }
-                        FilterChip(selected = selected == index && query.isBlank(), onClick = { selected = index; query = "" }, label = { Text(label) })
+    val pick by rememberUpdatedState(onPick)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color(0xFF242424),
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Chọn biểu cảm", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            AndroidView(
+                modifier = Modifier.fillMaxWidth().height(340.dp),
+                factory = { context ->
+                    EmojiPickerView(context).apply {
+                        emojiGridColumns = 8
+                        setOnEmojiPickedListener { item -> pick(item.emoji) }
                     }
                 }
-                key(selected, query) {
-                    LazyVerticalGrid(GridCells.Fixed(6), Modifier.fillMaxWidth().height(280.dp)) {
-                        items(options, key = { it.value }) { entry ->
-                            Box(Modifier.height(53.dp).clickable { onPick(entry.value) }, contentAlignment = Alignment.Center) {
-                                Text(emojiStyled(entry.value), fontSize = 29.sp, lineHeight = 36.sp)
-                            }
-                        }
-                    }
-                }
-                if (options.isEmpty()) Text("Không tìm thấy emoji", color = Color.LightGray)
-                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = LocketYellow)
-            }
+            )
         }
     }
 }

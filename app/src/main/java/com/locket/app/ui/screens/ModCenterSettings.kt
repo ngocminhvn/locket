@@ -32,7 +32,6 @@ import com.locket.app.ui.LocketViewModel
 import com.locket.app.rust.RustLocketCore
 import com.locket.app.ui.theme.LocketTextDim
 import com.locket.app.ui.theme.LocketYellow
-import com.locket.app.ui.theme.LocalEmojiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -191,10 +190,6 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     var progress by remember { mutableStateOf<Float?>(null) }
     var downloaded by remember { mutableStateOf<File?>(null) }
 
-    val emojiState = LocalEmojiState.current
-    ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Emoji iOS",
-        if (emojiState.loading) "Đang tải bộ emoji..." else if (emojiState.family != null && emojiState.catalog != null) "iOS 26.4 • Đang sử dụng"
-        else "Chưa tải xong • Nhấn để thử lại", enabled = !emojiState.loading) { emojiState.retry() }
     ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Phiên bản ứng dụng", version)
     ModRow({ Icon(Icons.Default.SystemUpdate, null, tint = Color.White) }, "Kiểm tra cập nhật",
         if (busy) "Đang kiểm tra..." else null, enabled = !busy && progress == null) {
