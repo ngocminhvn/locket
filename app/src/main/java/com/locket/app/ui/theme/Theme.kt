@@ -20,9 +20,11 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun LocketTheme(content: @Composable () -> Unit) {
+    ProvideEmojiSupport {
     MaterialTheme(
         colorScheme = DarkColorScheme,
         typography = LocketTypography,
         content = content
     )
+    }
 }

@@ -323,7 +323,7 @@ fun ChatDetailScreen(
                                         .padding(horizontal = 18.dp, vertical = 12.dp)
                                 ) {
                                     Text(
-                                        text = msg.text,
+                                        text = emojiStyled(msg.text),
                                         color = Color.Black,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium
@@ -352,7 +352,7 @@ fun ChatDetailScreen(
                                             .padding(horizontal = 18.dp, vertical = 12.dp)
                                     ) {
                                         Text(
-                                            text = msg.text,
+                                            text = emojiStyled(msg.text),
                                             color = Color.White,
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Medium
@@ -376,6 +376,7 @@ fun ChatDetailScreen(
             ) {
                 BasicTextField(
                     value = inputMessage,
+                    visualTransformation = emojiInputTransformation(),
                     onValueChange = { inputMessage = it },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
@@ -398,7 +399,7 @@ fun ChatDetailScreen(
                 } else {
                     for (emoji in listOf("🔥", "😍", "💛")) {
                         Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = !sending) { sendText(emoji) }, contentAlignment = Alignment.Center) {
-                            Text(emoji, fontSize = 25.sp)
+                            Text(emojiStyled(emoji), fontSize = 25.sp)
                         }
                     }
                     IconButton(onClick = { showQuickEmojis = true }, modifier = Modifier.size(34.dp)) {
@@ -463,26 +464,10 @@ fun ChatDetailScreen(
     }
 
     if (showQuickEmojis) {
-        AlertDialog(
-            onDismissRequest = { showQuickEmojis = false },
-            title = { Text("Chọn biểu cảm") },
-            containerColor = composerColor,
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    for (line in listOf(listOf("😂", "🥰", "🥺", "❤️"), listOf("👍", "😢", "😮", "🎉"))) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            line.forEach { emoji ->
-                                Text(emoji, fontSize = 28.sp, modifier = Modifier.clickable(enabled = !sending) {
-                                    showQuickEmojis = false
-                                    sendText(emoji)
-                                }.padding(6.dp))
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showQuickEmojis = false }) { Text("Đóng") } }
-        )
+        MomentEmojiSheet(onDismiss = { showQuickEmojis = false }, onPick = {
+            showQuickEmojis = false
+            if (!sending) sendText(it)
+        })
     }
 
     // Menu tin nhan (nhan giu 1 tin nhan that):
@@ -529,7 +514,7 @@ fun ChatDetailScreen(
                         ) {
                             for (emoji in listOf("🔥", "😍", "💛", "😂", "🥺")) {
                                 Text(
-                                    text = emoji,
+                                    text = emojiStyled(emoji),
                                     fontSize = 28.sp,
                                     modifier = Modifier
                                         .clickable {
@@ -693,7 +678,7 @@ private fun MessageBubble(msg: ChatMessage, bubbleColor: Color, onLongClick: () 
                 .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
             Text(
-                text = msg.text,
+                text = emojiStyled(msg.text),
                 color = if (msg.isMe) Color.Black else Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium
@@ -710,7 +695,7 @@ private fun ReactionRow(reactions: List<com.locket.app.model.MessageReaction>) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         for (r in reactions) {
-            Text(text = r.emoji, fontSize = 16.sp)
+            Text(text = emojiStyled(r.emoji), fontSize = 16.sp)
         }
     }
 }

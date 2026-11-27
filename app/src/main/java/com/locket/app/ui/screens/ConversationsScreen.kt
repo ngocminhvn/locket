@@ -192,7 +192,7 @@ fun ConversationsScreen(
                             }
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = conv.lastMessage,
+                                text = emojiStyled(conv.lastMessage),
                                 color = LocketTextDim,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,

@@ -409,7 +409,7 @@ fun MemoryDetailDialog(
                                 .padding(horizontal = 16.dp, vertical = 7.dp)
                         ) {
                             Text(
-                                text = moment.caption,
+                                text = emojiStyled(moment.caption),
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -430,7 +430,7 @@ fun MemoryDetailDialog(
                 ) {
                     listOf("🔥", "😍", "💛", "😂", "🥺").forEach { emoji ->
                         Text(
-                            text = emoji,
+                            text = emojiStyled(emoji),
                             fontSize = 28.sp,
                             modifier = Modifier
                                 .clickable {

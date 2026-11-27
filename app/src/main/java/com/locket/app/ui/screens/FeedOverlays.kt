@@ -25,6 +25,11 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.model.Friend
 import com.locket.app.ui.theme.LocketYellow
+import com.locket.app.ui.theme.LocalEmojiState
+import com.locket.app.ui.theme.emojiStyled
+import com.locket.app.ui.theme.emojiInputTransformation
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 
 @Composable
 internal fun BoxScope.FeedFriendPopup(modifier: Modifier, friends: List<Friend>, selectedFriend: Friend?,
@@ -60,64 +65,70 @@ private fun FilterFriendRow(friend: Friend?, selected: Boolean, onClick: () -> U
     }
 }
 
-private data class EmojiGroup(val label: String, val symbol: String, val entries: String)
-private val emojiGroups = listOf(
-    EmojiGroup("Mặt cười & cảm xúc", "😀", "😀|grin smile cười 😃|happy 😄|smile 😁|grin 😆|laugh 😅|sweat 🤣|rolling laugh 😂|tears joy cười 🙂|smile 🙃|upside down 😉|wink 😊|blush 😇|angel 🥰|love 😍|heart eyes 🤩|star 😘|kiss 😗|kiss ☺️|smile 😚|kiss 😙|kiss 🥲|tear 😋|yum 😛|tongue 😜|wink 🤪|crazy 😝|tongue 🤑|money 🤗|hug 🤭|giggle 🫢|surprise 🤫|quiet 🤔|think 🫡|salute 🤐|zip 🤨|sus 😐|neutral 😑|blank 😶|silent 🙄|roll 😏|smirk 😒|annoyed 😔|sad 😢|cry khóc 😭|cry 😤|angry 😡|angry 🤬|mad 😳|embarrassed 🥺|plead 🥹|tear 😱|shock 😴|sleep 🤯|mind blown 😎|cool 🤓|nerd 🤡|clown 💀|skull 👻|ghost 💩|poop 💛|heart vàng ❤️|heart yêu 🩷|pink heart 🧡|orange heart 💚|green heart 💙|blue heart 💜|purple heart 🖤|black heart 🤍|white heart 💔|broken heart 💕|love 💖|sparkle heart 🔥|fire lửa ✨|sparkles"),
-    EmojiGroup("Người & cử chỉ", "👋", "👋|wave 👍|like thích 👎|dislike 👌|okay ✌️|peace 🤞|luck 🤟|love 🤘|rock 🤙|call 👈|left 👉|right 👆|up 👇|down ☝️|point ✋|hand 🖐️|hand 🙌|celebrate 👏|clap 🤝|shake 🙏|pray cảm ơn 💪|strong 🫶|heart hands 🤍|heart"),
-    EmojiGroup("Động vật & thiên nhiên", "🐱", "🐶|dog chó 🐱|cat mèo 🐭|mouse 🐹|hamster 🐰|rabbit 🦊|fox 🐻|bear 🐼|panda 🐨|koala 🐯|tiger 🦁|lion 🐮|cow 🐷|pig 🐸|frog 🐵|monkey 🐔|chicken 🐧|penguin 🐦|bird 🦋|butterfly 🐝|bee 🌸|flower hoa 🌹|rose 🌻|sunflower 🌷|tulip 🌱|plant 🌴|palm 🍀|clover 🌈|rainbow ☀️|sun 🌙|moon ⭐|star"),
-    EmojiGroup("Đồ ăn & thức uống", "🍕", "🍎|apple 🍓|strawberry 🍉|watermelon 🍌|banana 🍇|grape 🥑|avocado 🍔|burger 🍟|fries 🍕|pizza 🌭|hotdog 🍜|noodles 🍣|sushi 🍚|rice 🍦|ice cream 🍰|cake 🎂|birthday 🍫|chocolate 🍩|donut ☕|coffee 🧋|tea 🍺|beer"),
-    EmojiGroup("Du lịch", "✈️", "🚗|car 🚕|taxi 🚌|bus 🚲|bike 🏍️|motorbike 🚆|train ✈️|plane 🚀|rocket 🚢|ship 🏠|home 🏖️|beach 🏔️|mountain 🏕️|camp 🌅|sunrise 🌃|night"),
-    EmojiGroup("Hoạt động", "⚽", "⚽|soccer 🏀|basketball 🏐|volleyball 🎾|tennis 🏸|badminton 🏓|ping pong 🏆|trophy 🥇|gold 🎮|game 🎲|dice 🎸|guitar 🎤|mic 🎧|music 🎨|art"),
-    EmojiGroup("Đồ vật", "💡", "📱|phone 📷|camera 🎥|video 💻|computer 💡|light 🎁|gift 🎈|balloon 🎉|party 🎊|celebration 💌|letter 💎|diamond 🔑|key 🛍️|shopping 📚|books ✏️|pencil"),
-    EmojiGroup("Biểu tượng", "✨", "✅|check ❌|cross ❗|warning ❓|question 💯|hundred 💥|boom 💫|dizzy ✨|sparkles 🔥|fire ⚡|lightning 🎵|music ♻️|recycle ☮️|peace ♡|heart"),
-    EmojiGroup("Cờ", "🏳️", "🇻🇳|vietnam việt nam 🇺🇸|usa 🇯🇵|japan 🇰🇷|korea 🇨🇳|china 🇬🇧|uk 🇫🇷|france 🇩🇪|germany 🇹🇭|thailand 🇸🇬|singapore 🏳️|white flag 🏳️‍🌈|rainbow flag")
-)
-// The emoji plus its keywords are encoded with a separator before each next emoji;
-// split by a whitespace followed by a non-ASCII emoji and a pipe.
-private fun EmojiGroup.options(): List<Pair<String, String>> =
-    entries.split(Regex("""\s+(?=[^\p{L}\p{N}\s|]+\|)""")).mapNotNull {
-        val emoji = it.substringBefore('|')
-        if ('|' !in it) null else emoji to it.substringAfter('|')
-    }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val state = LocalEmojiState.current
+    val groups = remember(state.catalog) { state.catalog?.entries?.map { it.group }?.distinct().orEmpty() }
     var selected by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
-    val options = remember(query, selected) {
-        if (query.isBlank()) emojiGroups[selected].options()
-        else emojiGroups.flatMap { it.options() }.distinctBy { it.first }.filter {
-            it.first.contains(query.trim()) || it.second.contains(query.trim(), ignoreCase = true)
+    var keyboardEmoji by remember { mutableStateOf("") }
+    val options = remember(query, selected, state.catalog) {
+        state.catalog?.entries.orEmpty().filter {
+            if (query.isBlank()) it.group == groups.getOrNull(selected)
+            else it.value.contains(query.trim()) || it.name.contains(query.trim(), ignoreCase = true)
         }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Color(0xFF242424), shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp), dragHandle = null) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
-            TextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                placeholder = { Text("Tìm emoji") }, shape = CircleShape,
-                colors = TextFieldDefaults.colors(focusedContainerColor = Color(0xFF383838),
-                    unfocusedContainerColor = Color(0xFF383838), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-            Spacer(Modifier.height(12.dp))
-            Text(if (query.isBlank()) emojiGroups[selected].label else "Kết quả tìm kiếm", color = Color.LightGray,
-                style = profileTextStyle(14.sp, 18.sp, FontWeight.Medium))
-            LazyVerticalGrid(GridCells.Fixed(5), Modifier.fillMaxWidth().height(240.dp)) {
-                items(options) { entry ->
-                    Box(Modifier.height(58.dp).clickable { onPick(entry.first) }, contentAlignment = Alignment.Center) {
-                        Text(entry.first, fontSize = 32.sp, lineHeight = 39.sp)
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(16.dp)) {
+            if (state.catalog == null) {
+                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = LocketYellow)
+                Text("Chọn emoji bằng bàn phím", color = Color.White)
+                OutlinedTextField(keyboardEmoji, { keyboardEmoji = it }, modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Emoji") }, singleLine = true, visualTransformation = emojiInputTransformation())
+                val valid = keyboardEmoji.isNotBlank() && keyboardEmoji.codePoints().anyMatch {
+                    it >= 0x1F000 || it in 0x2600..0x27BF || it == 0xFE0F || it == 0x20E3
+                } && android.icu.text.BreakIterator.getCharacterInstance().apply { setText(keyboardEmoji) }.let {
+                    it.first(); it.next() == keyboardEmoji.length
+                }
+                TextButton(enabled = valid, onClick = { onPick(keyboardEmoji) }) { Text("Gửi emoji", color = LocketYellow) }
+                if (state.error) TextButton(onClick = state.retry) { Text("Tải lại bộ emoji") }
+            } else {
+                TextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    placeholder = { Text("Tìm emoji") }, shape = CircleShape,
+                    colors = TextFieldDefaults.colors(focusedContainerColor = Color(0xFF383838),
+                        unfocusedContainerColor = Color(0xFF383838), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    groups.forEachIndexed { index, group ->
+                        val label = when (group) {
+                            "Smileys & Emotion" -> "Cảm xúc"
+                            "People & Body" -> "Con người"
+                            "Animals & Nature" -> "Thiên nhiên"
+                            "Food & Drink" -> "Đồ ăn"
+                            "Travel & Places" -> "Du lịch"
+                            "Activities" -> "Hoạt động"
+                            "Objects" -> "Đồ vật"
+                            "Symbols" -> "Biểu tượng"
+                            "Flags" -> "Cờ"
+                            "Component" -> "Thành phần"
+                            else -> group
+                        }
+                        FilterChip(selected = selected == index && query.isBlank(), onClick = { selected = index; query = "" }, label = { Text(label) })
                     }
                 }
-            }
-            if (options.isEmpty()) Text("Không tìm thấy emoji", color = Color.LightGray)
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFF393939)).padding(vertical = 5.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly) {
-                emojiGroups.forEachIndexed { index, group ->
-                    Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(8.dp))
-                        .background(if (index == selected && query.isBlank()) Color(0xFF606060) else Color.Transparent)
-                        .clickable { selected = index; query = "" }, contentAlignment = Alignment.Center) {
-                        Text(group.symbol, fontSize = 18.sp)
+                key(selected, query) {
+                    LazyVerticalGrid(GridCells.Fixed(6), Modifier.fillMaxWidth().height(280.dp)) {
+                        items(options, key = { it.value }) { entry ->
+                            Box(Modifier.height(53.dp).clickable { onPick(entry.value) }, contentAlignment = Alignment.Center) {
+                                Text(emojiStyled(entry.value), fontSize = 29.sp, lineHeight = 36.sp)
+                            }
+                        }
                     }
                 }
+                if (options.isEmpty()) Text("Không tìm thấy emoji", color = Color.LightGray)
+                if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = LocketYellow)
             }
         }
     }

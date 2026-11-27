@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.locket.app.model.Friend
+import com.locket.app.ui.theme.emojiStyled
+import com.locket.app.ui.theme.emojiInputTransformation
 import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -322,7 +324,7 @@ fun SendMomentScreen(
             text = {
                 Column {
                     if (edit != CaptionKind.TEXT) Text("Nhập thủ công; chưa có nguồn dữ liệu tự động đã xác minh.", fontSize = 12.sp)
-                    OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true,
+                    OutlinedTextField(value = draft, visualTransformation = emojiInputTransformation(), onValueChange = { draft = it }, singleLine = true,
                         modifier = Modifier.fillMaxWidth())
                 }
             },
