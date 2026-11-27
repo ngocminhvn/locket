@@ -9,7 +9,7 @@ import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.view.View
 import android.widget.RemoteViews
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import com.locket.app.MainActivity
 import com.locket.app.R
@@ -90,7 +90,9 @@ object LocketWidgetUpdater {
     private suspend fun loadBitmap(context: Context, url: String): Bitmap? {
         if (url.isBlank()) return null
         return try {
-            val loader = ImageLoader(context)
+            // Dung ImageLoader singleton cua app (LocketApplication):
+            // disk cache 250 MB da cau hinh san, anh load tu disk khi mo lai.
+            val loader = context.imageLoader
             val request = ImageRequest.Builder(context)
                 .data(url)
                 .allowHardware(false)

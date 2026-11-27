@@ -38,6 +38,14 @@ class SessionManager(context: Context) {
         get() = prefs.getString("refresh_token", null)
         set(value) = prefs.edit().putString("refresh_token", value).apply()
 
+    // Co danh dau migrate cache JSON cu (cached_moments/cached_friends)
+    // sang Room da chay xong chua (LocketCache.migrateLegacyCacheIfNeeded).
+    // Logout xoa het prefs nen co nay reset theo — dung vi Room cung bi
+    // xoa het khi logout.
+    var roomCacheMigrated: Boolean
+        get() = prefs.getBoolean("room_cache_migrated_v1", false)
+        set(value) = prefs.edit().putBoolean("room_cache_migrated_v1", value).apply()
+
     var currentUser: User
         get() {
             val json = prefs.getString("current_user", null)

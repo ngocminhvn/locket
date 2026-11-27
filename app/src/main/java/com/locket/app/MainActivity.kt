@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
                 sessionManager.refreshToken = refreshToken
             }
         )
-        val viewModel = LocketViewModel(sessionManager, apiClient)
+        val viewModel = LocketViewModel(sessionManager, apiClient, (application as LocketApplication).cache)
 
         setContent {
             LocketTheme {

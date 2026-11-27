@@ -10,6 +10,7 @@ import com.locket.app.model.Friend
 import com.locket.app.model.Moment
 import com.locket.app.model.User
 import com.locket.app.storage.SessionManager
+import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -18,7 +19,8 @@ import java.util.Calendar
 
 class LocketViewModel(
     val sessionManager: SessionManager,
-    val apiClient: LocketApiClient
+    val apiClient: LocketApiClient,
+    private val cache: LocketCache
 ) : ViewModel() {
 
     private val _currentUser = MutableStateFlow<User>(sessionManager.currentUser)
@@ -53,6 +55,13 @@ class LocketViewModel(
         get() = sessionManager.isLoggedIn
 
     init {
+        // Cache-first: chuyen cache JSON cu sang Room 1 lan (neu chua),
+        // roi UI doc truc tiep Flow tu Room — mo app la thay du lieu ngay,
+        // khong cho mang. Sync chay nen o duoi, xong moi ghi de Room.
+        viewModelScope.launch { cache.migrateLegacyCacheIfNeeded() }
+        viewModelScope.launch { cache.observeMoments().collect { _moments.value = it } }
+        viewModelScope.launch { cache.observeFriends().collect { _friends.value = it } }
+        viewModelScope.launch { cache.observeConversations().collect { _conversations.value = it } }
         if (isLoggedIn) {
             viewModelScope.launch {
                 apiClient.ensureFreshToken()
@@ -119,18 +128,18 @@ class LocketViewModel(
             var currentFriendsList = _friends.value
             if (currentUid.isNotBlank()) {
                 val friendsRes = apiClient.fetchFriends(currentUid)
-                friendsRes.onSuccess { liveFriends ->
-                    if (liveFriends.isNotEmpty()) {
-                        currentFriendsList = liveFriends
-                        _friends.value = liveFriends
-                        sessionManager.saveFriends(liveFriends)
-                    }
+                val liveFriends = friendsRes.getOrNull()
+                if (liveFriends != null && liveFriends.isNotEmpty()) {
+                    currentFriendsList = liveFriends
+                    _friends.value = liveFriends
+                    cache.saveFriends(liveFriends)
                 }
             }
 
             // 3. Fetch live moments feed
             val feedRes = apiClient.fetchMomentsFeed()
-            feedRes.onSuccess { rawMoments ->
+            val rawMoments = feedRes.getOrNull()
+            if (rawMoments != null) {
                 if (rawMoments.isNotEmpty()) {
                     val friendsMap = currentFriendsList.associateBy { it.uid }
                     val myUid = _currentUser.value.uid
@@ -151,7 +160,7 @@ class LocketViewModel(
                         }
                     }
                     _moments.value = resolved
-                    sessionManager.saveMoments(resolved)
+                    cache.saveMoments(resolved)
                     // Cap nhat Home Screen Widget bang moment moi nhat that
                     LocketWidgetUpdater.updateAll(LocketApplication.instance)
                 }
@@ -160,13 +169,15 @@ class LocketViewModel(
             // 4. Fetch live conversations
             if (currentUid.isNotBlank()) {
                 val convRes = apiClient.fetchConversations(currentUid)
-                convRes.onSuccess { liveConvs ->
+                val liveConvs = convRes.getOrNull()
+                if (liveConvs != null) {
                     val friendsMap = currentFriendsList.associateBy { it.uid }
                     val resolvedConvs = liveConvs.map { c ->
                         val f = friendsMap[c.friend.uid]
                         if (f != null) c.copy(friend = f) else c
                     }
                     _conversations.value = resolvedConvs
+                    cache.saveConversations(resolvedConvs)
                 }
             }
 
@@ -213,7 +224,7 @@ class LocketViewModel(
                     val updated = _moments.value.toMutableList()
                     updated.add(0, newMoment)
                     _moments.value = updated
-                    sessionManager.saveMoments(updated)
+                    cache.saveMoments(updated)
                     _isSyncing.value = false
                     onSuccess()
                 } else {
@@ -245,7 +256,7 @@ class LocketViewModel(
             apiClient.removeFriend(targetUid)
             val updated = _friends.value.filter { it.uid != targetUid }
             _friends.value = updated
-            sessionManager.saveFriends(updated)
+            cache.saveFriends(updated)
             onDone()
         }
     }
@@ -318,6 +329,7 @@ class LocketViewModel(
 
     fun logout() {
         sessionManager.logout()
+        viewModelScope.launch { cache.clearAll() }
         _currentUser.value = sessionManager.currentUser
         _isLoggedIn.value = false
         _friends.value = emptyList()
