@@ -4,6 +4,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import com.locket.app.ui.components.LocketTopBar
+import com.locket.app.ui.components.LocketBottomBar
+import com.locket.app.ui.components.FeedBottomBar
+import com.locket.app.ui.components.FriendFilterSheet
+import com.locket.app.ui.theme.LocketBlack
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -34,6 +44,8 @@ fun HomePagerScreen(
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
+    val friends by viewModel.friends.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
     val loading by viewModel.historyLoading.collectAsState()
     val hasMore by viewModel.historyHasMore.collectAsState()
     val error by viewModel.historyError.collectAsState()
@@ -49,6 +61,24 @@ fun HomePagerScreen(
     val scope = rememberCoroutineScope()
     var cameraSwipeEnabled by remember { mutableStateOf(true) }
     var previousFilter by remember { mutableStateOf(selectedFriend?.uid) }
+    var cameraReviewVisible by remember { mutableStateOf(false) }
+    var showFriendFilter by remember { mutableStateOf(false) }
+    var reactionEvent by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var reactionSerial by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val statusPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    var measuredHeader by remember { mutableStateOf(0.dp) }
+    var measuredCameraFooter by remember { mutableStateOf(0.dp) }
+    var measuredFeedFooter by remember { mutableStateOf(0.dp) }
+    val headerHeight = measuredHeader.takeIf { it > 0.dp } ?: (statusPadding + 66.dp)
+    val cameraFooterHeight = measuredCameraFooter.takeIf { it > 0.dp } ?: (navPadding + 70.dp)
+    val feedFooterHeight = measuredFeedFooter.takeIf { it > 0.dp } ?: (navPadding + 150.dp)
+    // Keep shared controls stationary until a page settles. During a drag
+    // only the photo, caption and author scroll with the finger.
+    val cameraSelected = pagerState.settledPage == 0
+    val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
+    val showChrome = !(cameraSelected && cameraReviewVisible)
 
     LaunchedEffect(selectedFriend?.uid) {
         val uid = selectedFriend?.uid
@@ -100,9 +130,10 @@ fun HomePagerScreen(
         scope.launch { pagerState.animateScrollToPage(0) }
     }
 
+    Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
     VerticalPager(
         state = pagerState,
-        userScrollEnabled = pagerState.currentPage != 0 || cameraSwipeEnabled,
+        userScrollEnabled = pagerState.settledPage != 0 || cameraSwipeEnabled,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
             // Native upward swipe reveals the next page. Also accept pulling
             // downward at the camera's top boundary, as requested, without
@@ -142,7 +173,10 @@ fun HomePagerScreen(
                 },
                 onOpenFriends = onOpenFriends,
                 onOpenProfile = onOpenProfile,
-                onSwipeEnabledChange = { cameraSwipeEnabled = it }
+                onSwipeEnabledChange = { cameraSwipeEnabled = it },
+                sharedHeaderHeight = headerHeight,
+                sharedFooterHeight = cameraFooterHeight,
+                onReviewVisibleChange = { cameraReviewVisible = it }
             )
         } else if (page > moments.size) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -163,8 +197,75 @@ fun HomePagerScreen(
                     } else onNavigate(destination)
                 },
                 onOpenFriends = onOpenFriends,
-                onOpenProfile = onOpenProfile
+                onOpenProfile = onOpenProfile,
+                headerHeight = headerHeight,
+                footerHeight = feedFooterHeight,
+                reactionEvent = reactionEvent,
+                reactionSerial = reactionSerial
             )
         }
+    }
+
+    // One header and one footer for the entire pager, never duplicated.
+    if (showChrome) {
+        Box(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(LocketBlack.copy(alpha = 0.92f), LocketBlack.copy(alpha = 0.65f), Color.Transparent)))
+                .onSizeChanged { measuredHeader = with(density) { it.height.toDp() } }
+        ) {
+            LocketTopBar(
+                title = if (cameraSelected) "${friends.size} Bạn bè"
+                    else selectedFriend?.displayName?.trim()?.substringAfterLast(' ')?.ifBlank { "Tất cả bạn bè" } ?: "Tất cả bạn bè",
+                showDropdownArrow = !cameraSelected,
+                avatarUrl = currentUser.profilePictureUrl,
+                onSpeakerClick = { viewModel.syncAllData() },
+                onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = true },
+                onAvatarClick = onOpenProfile
+            )
+        }
+
+        if (cameraSelected) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .onSizeChanged { measuredCameraFooter = with(density) { it.height.toDp() } }) {
+                LocketBottomBar("camera") { destination ->
+                    if (destination != "camera") onNavigate(destination)
+                }
+            }
+        } else {
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, LocketBlack.copy(alpha = 0.82f), LocketBlack)))
+                    .onSizeChanged { measuredFeedFooter = with(density) { it.height.toDp() } },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                MomentReactionBar(viewModel, activeMoment) { emoji ->
+                    activeMoment?.let {
+                        reactionEvent = it.id to emoji
+                        reactionSerial++
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                FeedBottomBar(
+                    onGridClick = { onNavigate("grid") },
+                    onHistoryClick = { onNavigate("history") },
+                    onShutterClick = {
+                        viewModel.setReplyToFriend(null)
+                        scope.launch { pagerState.animateScrollToPage(0) }
+                    },
+                    onChatClick = { onNavigate("chat") },
+                    onShareClick = { onNavigate("profile") },
+                    separated = true
+                )
+            }
+        }
+    }
+    if (showFriendFilter) {
+        FriendFilterSheet(
+            friends = friends,
+            selectedFriend = selectedFriend,
+            onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
+            onDismiss = { showFriendFilter = false }
+        )
+    }
     }
 }

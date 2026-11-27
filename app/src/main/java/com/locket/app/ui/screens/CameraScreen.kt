@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -66,7 +67,10 @@ fun CameraScreen(
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
     onOpenProfile: () -> Unit,
-    onSwipeEnabledChange: (Boolean) -> Unit = {}
+    onSwipeEnabledChange: (Boolean) -> Unit = {},
+    sharedHeaderHeight: Dp? = null,
+    sharedFooterHeight: Dp? = null,
+    onReviewVisibleChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -133,7 +137,10 @@ fun CameraScreen(
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
     val canSwipe = recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
-    SideEffect { onSwipeEnabledChange(canSwipe) }
+    SideEffect {
+        onSwipeEnabledChange(canSwipe)
+        onReviewVisibleChange(capturedBitmap != null)
+    }
 
     fun clearCapture() {
         capturedBitmap = null
@@ -364,7 +371,8 @@ fun CameraScreen(
         ) {
             // Top Bar (Matches 02-camera.jpg with real friend count and user avatar)
             val friendsLabel = "${friends.size} Bạn bè"
-            LocketTopBar(
+            if (sharedHeaderHeight != null) Spacer(Modifier.height(sharedHeaderHeight))
+            else LocketTopBar(
                 title = friendsLabel,
                 avatarUrl = currentUser.profilePictureUrl,
                 onSpeakerClick = {
@@ -603,7 +611,8 @@ fun CameraScreen(
             Spacer(modifier = Modifier.weight(0.55f))
 
             // Bottom Navigation Bar
-            LocketBottomBar(
+            if (sharedFooterHeight != null) Spacer(Modifier.height(sharedFooterHeight))
+            else LocketBottomBar(
                 currentScreen = "camera",
                 onNavigate = onNavigate
             )

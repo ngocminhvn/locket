@@ -23,6 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.model.Friend
@@ -37,16 +38,21 @@ fun HomeMomentScreen(
     currentMoment: Moment?,
     onNavigate: (String) -> Unit,
     onOpenFriends: () -> Unit,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    headerHeight: Dp,
+    footerHeight: Dp,
+    reactionEvent: Pair<String, String>?,
+    reactionSerial: Int
 ) {
     val context = LocalContext.current
     val friends by viewModel.friends.collectAsState()
-    val selectedFriend by viewModel.selectedFriend.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    var showFriendFilter by remember { mutableStateOf(false) }
-
-    var messageText by remember(currentMoment?.id) { mutableStateOf("") }
     var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(reactionSerial) {
+        if (reactionSerial > 0 && currentMoment?.id == reactionEvent?.first) {
+            floatingReaction = reactionEvent?.second
+        }
+    }
 
     // Menu tuy chon cua moment dang xem: null = dong; "menu" = danh sach
     // muc; "delete"/"report"/"hide"/"block" = hop thoai xac nhan muc do.
@@ -54,13 +60,6 @@ fun HomeMomentScreen(
     // thao tac nguy hiem). Chi hien muc phu hop: moment cua minh thi chi
     // co "Xoa khoanh khac", moment cua nguoi khac thi Bao cao / An / Chan.
     var menuAction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
-
-    val topBarTitle = if (selectedFriend == null) {
-        "Tất cả bạn bè"
-    } else {
-        val firstName = selectedFriend!!.displayName.trim().split("\\s+".toRegex()).lastOrNull() ?: selectedFriend!!.displayName
-        "$firstName"
-    }
 
     Box(
         modifier = Modifier
@@ -71,18 +70,7 @@ fun HomeMomentScreen(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar
-            LocketTopBar(
-                title = topBarTitle,
-                showDropdownArrow = true,
-                avatarUrl = currentUser.profilePictureUrl,
-                onSpeakerClick = {
-                    viewModel.syncAllData()
-                    Toast.makeText(context, "Đã làm mới khoảnh khắc từ server", Toast.LENGTH_SHORT).show()
-                },
-                onTitleClick = { showFriendFilter = true },
-                onAvatarClick = onOpenProfile
-            )
+            Spacer(Modifier.height(headerHeight))
 
             Spacer(modifier = Modifier.weight(0.8f))
 
@@ -249,128 +237,7 @@ fun HomeMomentScreen(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Reaction Bar (Calls real reactToMoment API & sends real chat message)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xFF202022))
-                    .padding(horizontal = 10.dp, vertical = 0.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Text input
-                TextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    placeholder = { Text("Gửi tin nhắn...", color = Color(0xFF8E8E93), fontSize = 15.sp) },
-                    modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    singleLine = true
-                )
-
-                // Quick emoji buttons calling reactToMoment
-                val emojis = listOf("🔥", "😍", "💛")
-                for (emoji in emojis) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                floatingReaction = emoji
-                                if (currentMoment != null) {
-                                    viewModel.reactToMoment(
-                                        momentId = currentMoment.id,
-                                        ownerUid = currentMoment.userUid,
-                                        reaction = emoji
-                                    )
-                                }
-                                Toast.makeText(context, "Đã gửi $emoji", Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = emoji, fontSize = 26.sp)
-                    }
-                }
-
-                // Send message button if text entered
-                if (messageText.isNotBlank()) {
-                    IconButton(
-                        onClick = {
-                            if (currentMoment != null) {
-                                // Tra loi moment: gui kem moment_uid that (shape goc
-                                // sendChatMessageV2 co moment_uid); chi xoa o nhap
-                                // + toast khi server tra 200.
-                                val text = messageText
-                                viewModel.sendChatMessage(
-                                    receiverUid = currentMoment.userUid,
-                                    message = text,
-                                    momentUid = currentMoment.id,
-                                    onSuccess = {
-                                        Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
-                                        messageText = ""
-                                    },
-                                    onError = { err ->
-                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                    }
-                                )
-                            }
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Gửi",
-                            tint = LocketYellow,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                } else {
-                    IconButton(
-                        onClick = {
-                            Toast.makeText(context, "Chọn biểu cảm", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.EmojiEmotions,
-                            contentDescription = "Emoji",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Feed Bottom Navigation Bar (Matches 04-home-moment.jpg)
-            FeedBottomBar(
-                onGridClick = { onNavigate("grid") },
-                onHistoryClick = { onNavigate("history") },
-                onShutterClick = { onNavigate("camera") },
-                onChatClick = { onNavigate("chat") },
-                onShareClick = { onNavigate("profile") },
-                separated = true
-            )
-        }
-
-        // Friend Filter Bottom Sheet (Matches frame_018.jpg)
-        if (showFriendFilter) {
-            FriendFilterSheet(
-                friends = friends,
-                selectedFriend = selectedFriend,
-                onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
-                onDismiss = { showFriendFilter = false }
-            )
+            Spacer(Modifier.height(footerHeight))
         }
 
         // Menu tuy chon cua moment + hop thoai xac nhan (pattern giong
@@ -576,4 +443,116 @@ private fun momentAge(timestamp: Long): String {
         seconds < 86400 -> "${seconds / 3600}h"
         else -> "${seconds / 86400}d"
     }
+}
+
+
+/** A single shared reaction bar, outside the vertical pager. */
+@Composable
+internal fun MomentReactionBar(
+    viewModel: LocketViewModel,
+    currentMoment: Moment?,
+    onReaction: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var messageText by remember(currentMoment?.id) { mutableStateOf("") }
+            // Reaction Bar (Calls real reactToMoment API & sends real chat message)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(Color(0xFF202022))
+                    .padding(horizontal = 10.dp, vertical = 0.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Text input
+                TextField(
+                    value = messageText,
+                    onValueChange = { messageText = it },
+                    placeholder = { Text("Gửi tin nhắn...", color = Color(0xFF8E8E93), fontSize = 15.sp) },
+                    modifier = Modifier.weight(1f),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = true
+                )
+
+                // Quick emoji buttons calling reactToMoment
+                val emojis = listOf("🔥", "😍", "💛")
+                for (emoji in emojis) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .clickable(enabled = currentMoment != null) {
+                                onReaction(emoji)
+                                if (currentMoment != null) {
+                                    viewModel.reactToMoment(
+                                        momentId = currentMoment.id,
+                                        ownerUid = currentMoment.userUid,
+                                        reaction = emoji
+                                    )
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = emoji, fontSize = 26.sp)
+                    }
+                }
+
+                // Send message button if text entered
+                if (messageText.isNotBlank()) {
+                    IconButton(
+                        onClick = {
+                            if (currentMoment != null) {
+                                // Tra loi moment: gui kem moment_uid that (shape goc
+                                // sendChatMessageV2 co moment_uid); chi xoa o nhap
+                                // + toast khi server tra 200.
+                                val text = messageText
+                                viewModel.sendChatMessage(
+                                    receiverUid = currentMoment.userUid,
+                                    message = text,
+                                    momentUid = currentMoment.id,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
+                                        messageText = ""
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    }
+                                )
+                            }
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = "Gửi",
+                            tint = LocketYellow,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    IconButton(
+                        onClick = {
+                            Toast.makeText(context, "Chọn biểu cảm", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.EmojiEmotions,
+                            contentDescription = "Emoji",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+
 }
