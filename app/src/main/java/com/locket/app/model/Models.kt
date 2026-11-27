@@ -46,6 +46,22 @@ data class FriendRequest(
     val avatarUrl: String = ""
 )
 
+/**
+ * Tai khoan bi chan.
+ * Nguon that: document Firestore `users/{uid}/blocked_users/{blockedUid}`
+ * (database mac dinh, KHONG phai database `locket` nhu history).
+ * Goc: helper blockedUsersCollection(uid) (decompiled.js ~950796, flows 5.1)
+ * va BlockedUsersProvider (~1246051): doc id = uid nguoi bi chan, doc
+ * data co first_name/last_name (filter doi ca id + ten). Goc khong doc
+ * field ngay chan nao trong doc nay nen model khong co ngay gio.
+ */
+data class BlockedUser(
+    val uid: String,
+    val username: String = "",
+    val displayName: String = "",
+    val avatarUrl: String = ""
+)
+
 data class Conversation(
     val id: String,
     val friend: Friend,

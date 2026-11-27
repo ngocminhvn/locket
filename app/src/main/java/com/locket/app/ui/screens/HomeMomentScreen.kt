@@ -48,6 +48,13 @@ fun HomeMomentScreen(
     var messageText by remember(currentMoment?.id) { mutableStateOf("") }
     var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
 
+    // Menu tuy chon cua moment dang xem: null = dong; "menu" = danh sach
+    // muc; "delete"/"report"/"hide"/"block" = hop thoai xac nhan muc do.
+    // Mau theo ChatDetailScreen (AlertDialog nen 0xFF1E1E22, chu do cho
+    // thao tac nguy hiem). Chi hien muc phu hop: moment cua minh thi chi
+    // co "Xoa khoanh khac", moment cua nguoi khac thi Bao cao / An / Chan.
+    var menuAction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
+
     val topBarTitle = if (selectedFriend == null) {
         "Tất cả bạn bè"
     } else {
@@ -157,6 +164,29 @@ fun HomeMomentScreen(
                             .animateFloatingReaction { floatingReaction = null }
                     ) {
                         Text(text = emoji, fontSize = 72.sp)
+                    }
+                }
+
+                // Nut "..." mo menu tuy chon cua moment (goc co menu tuy
+                // chon tren moment). Nut tron mo nhu top-bar hien tai,
+                // nen mo giong overlay caption trong anh.
+                if (currentMoment != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xB31E1E20))
+                            .clickable { menuAction = "menu" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Tùy chọn",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
@@ -340,6 +370,185 @@ fun HomeMomentScreen(
                 selectedFriend = selectedFriend,
                 onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
                 onDismiss = { showFriendFilter = false }
+            )
+        }
+
+        // Menu tuy chon cua moment + hop thoai xac nhan (pattern giong
+        // ChatDetailScreen: 1 AlertDialog, text doi theo menuAction).
+        if (menuAction != null && currentMoment != null) {
+            val moment = currentMoment
+            val isOwn = moment.userUid == currentUser.uid
+            val firstName = moment.userName.trim().substringBefore(' ').ifBlank { moment.userUid }
+            AlertDialog(
+                onDismissRequest = { menuAction = null },
+                containerColor = Color(0xFF1E1E22),
+                title = {
+                    Text(
+                        text = when (menuAction) {
+                            "delete" -> "Xóa khoảnh khắc?"
+                            "report" -> "Báo cáo khoảnh khắc?"
+                            "hide" -> "Ẩn $firstName?"
+                            "block" -> "Chặn $firstName?"
+                            else -> "Tùy chọn"
+                        },
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    when (menuAction) {
+                        "menu" -> Column(modifier = Modifier.fillMaxWidth()) {
+                            if (isOwn) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { menuAction = "delete" }
+                                        .padding(vertical = 10.dp)
+                                ) {
+                                    Text("Xóa khoảnh khắc", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { menuAction = "report" }
+                                        .padding(vertical = 10.dp)
+                                ) {
+                                    Text("Báo cáo", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { menuAction = "hide" }
+                                        .padding(vertical = 10.dp)
+                                ) {
+                                    Text("Ẩn bạn này", color = Color.White, fontSize = 16.sp)
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { menuAction = "block" }
+                                        .padding(vertical = 10.dp)
+                                ) {
+                                    Text("Chặn người này", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                                }
+                            }
+                        }
+                        // Y nghia 2 lua chon lay tu chuoi goc
+                        // delete_photo_globally_confirmation /
+                        // delete_photo_confirmation (xem ApiClient).
+                        "delete" -> Text(
+                            text = "Xóa cho mọi người: ảnh biến mất khỏi lịch sử của bạn và bạn bè không còn xem được nữa.\nChỉ xóa của mình: ảnh chỉ biến mất khỏi lịch sử của bạn, người khác vẫn xem được.",
+                            color = Color.White,
+                            fontSize = 15.sp
+                        )
+                        "report" -> Text(
+                            text = "Khoảnh khắc này sẽ được gửi đi để xem lại. Chủ sở hữu sẽ không được thông báo.",
+                            color = Color.White,
+                            fontSize = 15.sp
+                        )
+                        "hide" -> Text(
+                            text = "Bạn sẽ không xem Locket của người này nữa và họ sẽ không nhận Locket mới bạn gửi. Họ không được thông báo và hai bạn vẫn ở trong danh sách bạn bè của nhau.",
+                            color = Color.White,
+                            fontSize = 15.sp
+                        )
+                        "block" -> Text(
+                            text = "Họ sẽ không thể nhắn tin cho bạn, xem các Locket của bạn hoặc gửi lời mời kết bạn nữa. Locket sẽ không thông báo cho họ khi bạn chặn họ.",
+                            color = Color.White,
+                            fontSize = 15.sp
+                        )
+                        else -> {}
+                    }
+                },
+                confirmButton = {
+                    when (menuAction) {
+                        "delete" -> Row {
+                            TextButton(onClick = {
+                                viewModel.deleteMoment(
+                                    moment = moment,
+                                    deleteGlobally = false,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Đã xóa khoảnh khắc khỏi lịch sử của bạn", Toast.LENGTH_SHORT).show()
+                                        menuAction = null
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                        menuAction = null
+                                    }
+                                )
+                            }) {
+                                Text("Chỉ xóa của mình", color = Color.White)
+                            }
+                            TextButton(onClick = {
+                                viewModel.deleteMoment(
+                                    moment = moment,
+                                    deleteGlobally = true,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Đã xóa khoảnh khắc", Toast.LENGTH_SHORT).show()
+                                        menuAction = null
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                        menuAction = null
+                                    }
+                                )
+                            }) {
+                                Text("Xóa cho mọi người", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        "report" -> TextButton(onClick = {
+                            viewModel.reportMoment(
+                                moment = moment,
+                                onSuccess = {
+                                    Toast.makeText(context, "Đã gửi báo cáo", Toast.LENGTH_SHORT).show()
+                                    menuAction = null
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    menuAction = null
+                                }
+                            )
+                        }) {
+                            Text("Báo cáo", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                        }
+                        "hide" -> TextButton(onClick = {
+                            viewModel.hideFriend(
+                                userUid = moment.userUid,
+                                onSuccess = {
+                                    Toast.makeText(context, "Đã ẩn $firstName", Toast.LENGTH_SHORT).show()
+                                    menuAction = null
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    menuAction = null
+                                }
+                            )
+                        }) {
+                            Text("Ẩn", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                        }
+                        "block" -> TextButton(onClick = {
+                            viewModel.blockFriend(
+                                userUid = moment.userUid,
+                                onSuccess = {
+                                    Toast.makeText(context, "Đã chặn $firstName", Toast.LENGTH_SHORT).show()
+                                    menuAction = null
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    menuAction = null
+                                }
+                            )
+                        }) {
+                            Text("Chặn", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                        }
+                        else -> {}
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { menuAction = null }) {
+                        Text("Hủy", color = Color.White)
+                    }
+                }
             )
         }
     }

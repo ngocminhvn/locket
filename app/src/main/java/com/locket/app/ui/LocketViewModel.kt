@@ -7,6 +7,7 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
+import com.locket.app.model.BlockedUser
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
@@ -45,6 +46,19 @@ class LocketViewModel(
     // Room. Nguon that: Firestore users/{uid}/incoming_friend_requests.
     private val _incomingFriendRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
     val incomingFriendRequests: StateFlow<List<FriendRequest>> = _incomingFriendRequests.asStateFlow()
+
+    // Danh sach that cac tai khoan bi chan: REST moi lan mo man Profile,
+    // khong cache Room. Nguon that: Firestore users/{uid}/blocked_users.
+    private val _blockedUsers = MutableStateFlow<List<BlockedUser>>(emptyList())
+    val blockedUsers: StateFlow<List<BlockedUser>> = _blockedUsers.asStateFlow()
+
+    // Tombstone trong phien (khong luu DB): id moment da xoa + uid ban da
+    // an — mergeMoments loc bo chung de moment vua xoa/an khong hien lai
+    // khi sync/feed/history tai lai truoc khi server lan xong. Xoa la vinh
+    // vien tren server; an thi toggle duoc (mo lai se go khoi set khi co
+    // thao tac bo an — hien chua co UI bo an).
+    private val deletedMomentIds = mutableSetOf<String>()
+    private val hiddenFriendUids = mutableSetOf<String>()
 
     private val _moments = MutableStateFlow<List<Moment>>(sessionManager.getSavedMoments())
     val moments: StateFlow<List<Moment>> = _moments.asStateFlow()
@@ -160,10 +174,23 @@ class LocketViewModel(
     }
 
     private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
-        val merged = (_moments.value + incoming).associateBy { it.id }.values
+        val merged = (_moments.value + incoming)
+            .filter { it.id !in deletedMomentIds && it.userUid !in hiddenFriendUids }
+            .associateBy { it.id }.values
             .sortedByDescending { it.timestampSeconds }
         cache.saveMoments(merged)
         _moments.value = merged
+    }
+
+    /**
+     * Bo moment khoi danh sach hien thi + Room cache (dung sau khi xoa /
+     * chan / an thanh cong tren server). Chay duoi momentWriteLock nhu
+     * mergeMoments de khong mat update khi sync chay song song.
+     */
+    private suspend fun removeMomentsFromCache(predicate: (Moment) -> Boolean) = momentWriteLock.withLock {
+        val updated = _moments.value.filterNot(predicate)
+        _moments.value = updated
+        cache.saveMoments(updated)
     }
 
     fun loadOlderMoments() {
@@ -779,6 +806,127 @@ class LocketViewModel(
         }
     }
 
+    /**
+     * Xoa 1 moment cua minh: goi deleteMomentV2 {owner_uid, moment_uid,
+     * delete_globally}. Chi bao thanh cong khi server tra 200; xong bo
+     * moment khoi danh sach hien thi + Room cache (ghi tombstone de sync
+     * sau khong tai lai) roi refresh feed that tu server.
+     * deleteGlobally = true: xoa cho moi nguoi (ban be khong xem duoc
+     * nua); false: chi xoa khoi lich su cua minh (xem ApiClient).
+     */
+    fun deleteMoment(
+        moment: Moment,
+        deleteGlobally: Boolean,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.deleteMoment(moment.userUid, moment.id, deleteGlobally)
+            if (res.isSuccess) {
+                deletedMomentIds.add(moment.id)
+                removeMomentsFromCache { it.id == moment.id }
+                syncAllData()
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi xóa khoảnh khắc")
+            }
+        }
+    }
+
+    /** Bao cao 1 moment cua nguoi khac len server (reportMoment). */
+    fun reportMoment(
+        moment: Moment,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.reportMoment(moment.userUid, moment.id)
+            if (res.isSuccess) {
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi báo cáo khoảnh khắc")
+            }
+        }
+    }
+
+    /**
+     * Chan 1 nguoi: goi blockFriend {user_uid}, xong bo toan bo moment cua
+     * ho khoi feed hien thi + Room cache va bo ho khoi danh sach ban be
+     * (cache + hien thi). Khong dong vao cuoc tro chuyen cu: goc chi chan
+     * tin moi (nguoi bi chan khong gui tin / xem Locket duoc nua).
+     */
+    fun blockFriend(
+        userUid: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.blockFriend(userUid)
+            if (res.isSuccess) {
+                removeMomentsFromCache { it.userUid == userUid }
+                val updatedFriends = _friends.value.filter { it.uid != userUid }
+                _friends.value = updatedFriends
+                cache.saveFriends(updatedFriends)
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi chặn người dùng")
+            }
+        }
+    }
+
+    /**
+     * Bo chan 1 nguoi: goi unblockUser {user_uid}, xong bo ho khoi danh
+     * sach chan hien thi. Danh sach ban be/moment se ve lai o lan dong bo
+     * sau (syncAllData) neu server tra lai.
+     */
+    fun unblockUser(
+        userUid: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.unblockUser(userUid)
+            if (res.isSuccess) {
+                _blockedUsers.value = _blockedUsers.value.filter { it.uid != userUid }
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi bỏ chặn người dùng")
+            }
+        }
+    }
+
+    /**
+     * An moment cua 1 ban khoi feed: goi toggleFriendHidden {user_uid}
+     * (server tu doi trang thai), xong bo moment cua ho khoi feed hien
+     * thi + Room cache. KHONG xoa ho khoi danh sach ban be — goc noi ro
+     * 2 ben van o trong danh sach ban be cua nhau khi an.
+     */
+    fun hideFriend(
+        userUid: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.toggleFriendHidden(userUid)
+            if (res.isSuccess) {
+                hiddenFriendUids.add(userUid)
+                removeMomentsFromCache { it.userUid == userUid }
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi ẩn bạn bè")
+            }
+        }
+    }
+
+    /** Tai lai danh sach that cac tai khoan bi chan (goi khi mo man Profile). Loi thi giu danh sach cu. */
+    fun refreshBlockedUsers() {
+        viewModelScope.launch {
+            apiClient.fetchBlockedUsers().onSuccess { blocked ->
+                if (_isLoggedIn.value) _blockedUsers.value = blocked
+            }
+        }
+    }
+
     fun loginWithEmail(email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             _isSyncing.value = true
@@ -871,6 +1019,9 @@ class LocketViewModel(
         _isLoggedIn.value = false
         _friends.value = emptyList()
         _incomingFriendRequests.value = emptyList()
+        _blockedUsers.value = emptyList()
+        deletedMomentIds.clear()
+        hiddenFriendUids.clear()
         _moments.value = emptyList()
         _conversations.value = emptyList()
     }

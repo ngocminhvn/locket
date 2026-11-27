@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,10 +47,12 @@ fun ProfileScreen(
     var showLoginDialog by remember { mutableStateOf(false) }
     var showPhoneLoginDialog by remember { mutableStateOf(false) }
     var showTokenDialog by remember { mutableStateOf(false) }
+    var showBlockedUsers by remember { mutableStateOf(false) }
     var goldBadgeActive by remember { mutableStateOf(true) }
 
     val user by viewModel.currentUser.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
+    val blockedUsers by viewModel.blockedUsers.collectAsState()
 
     Box(
         modifier = Modifier
@@ -320,10 +324,15 @@ fun ProfileScreen(
 
             // Section: Riêng tư & bảo mật
             SectionTitle("Riêng tư & bảo mật")
+            // Danh sach that: doc tu Firestore users/{uid}/blocked_users
+            // (xem ApiClient.fetchBlockedUsers), khong phai Toast gia.
             SettingsItem(
                 icon = { Icon(Icons.Default.Block, null, tint = Color.White) },
                 title = "Tài khoản bị chặn",
-                onClick = { Toast.makeText(context, "Không có tài khoản bị chặn", Toast.LENGTH_SHORT).show() }
+                onClick = {
+                    viewModel.refreshBlockedUsers()
+                    showBlockedUsers = true
+                }
             )
             SettingsItem(
                 icon = { Icon(Icons.Default.Security, null, tint = Color.White) },
@@ -367,6 +376,14 @@ fun ProfileScreen(
         if (showTokenDialog) {
             DirectTokenDialog(viewModel = viewModel, onDismiss = { showTokenDialog = false })
         }
+
+        if (showBlockedUsers) {
+            BlockedUsersBottomSheet(
+                viewModel = viewModel,
+                blockedUsers = blockedUsers,
+                onDismiss = { showBlockedUsers = false }
+            )
+        }
     }
 }
 
@@ -408,6 +425,139 @@ private fun SettingsItem(
             modifier = Modifier.weight(1f)
         )
         trailing?.invoke()
+    }
+}
+
+/**
+ * Danh sach that cac tai khoan bi chan (bottom sheet, cung kieu overlay
+ * nhu QrShareBottomSheet: nen mo full man hinh + khung duoi bo tron 32dp,
+ * nen 0xFF141416).
+ * Nguon that: viewModel.blockedUsers — REST Firestore
+ * users/{uid}/blocked_users (xem ApiClient.fetchBlockedUsers). Khong co ai
+ * thi hien dong "Không có tài khoản bị chặn" dua tren du lieu that, khong
+ * phai Toast gia. Moi hang co nut "Bỏ chặn" goi unblockUser that.
+ */
+@Composable
+private fun BlockedUsersBottomSheet(
+    viewModel: LocketViewModel,
+    blockedUsers: List<com.locket.app.model.BlockedUser>,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var unblockingUid by remember { mutableStateOf<String?>(null) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.7f)
+                .clickable(enabled = false) {}
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(Color(0xFF141416))
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 40.dp, height = 4.dp)
+                    .background(Color(0xFF48484A), RoundedCornerShape(2.dp))
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Tài khoản bị chặn",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (blockedUsers.isEmpty()) {
+                Text(
+                    text = "Không có tài khoản bị chặn",
+                    color = LocketTextDim,
+                    fontSize = 16.sp
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(blockedUsers, key = { it.uid }) { blocked ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C2C2E)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (blocked.avatarUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = blocked.avatarUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Person,
+                                        null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = blocked.displayName.ifBlank { blocked.uid },
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    if (unblockingUid != null) return@TextButton
+                                    unblockingUid = blocked.uid
+                                    viewModel.unblockUser(
+                                        userUid = blocked.uid,
+                                        onSuccess = {
+                                            Toast.makeText(context, "Đã bỏ chặn ${blocked.displayName.ifBlank { blocked.uid }}", Toast.LENGTH_SHORT).show()
+                                            unblockingUid = null
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                            unblockingUid = null
+                                        }
+                                    )
+                                },
+                                enabled = unblockingUid == null
+                            ) {
+                                Text("Bỏ chặn", color = LocketRed, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 

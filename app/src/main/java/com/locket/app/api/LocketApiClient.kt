@@ -930,6 +930,255 @@ class LocketApiClient(
     }
 
     // ==========================================
+    // 3b. XOA / BAO CAO MOMENT & CHAN / AN BAN
+    // ==========================================
+
+    /**
+     * Xoa 1 moment cua minh: callable deleteMomentV2
+     * {owner_uid, moment_uid, delete_globally} (spec JSON: verified static,
+     * request_fields [owner_uid, moment_uid, delete_globally]).
+     *
+     * Y nghia delete_globally — xac minh tu bundle goc (decompiled.js
+     * ~1099160-1099260 + chuoi i18n):
+     * - true = xoa cho moi nguoi: "This will permanently delete your photo
+     *   from your history and your friends will no longer be able to see
+     *   the photo." (delete_photo_globally_confirmation). Goc goi true khi
+     *   xoa anh moi nhat (delete_first_photo_alert_title: "Deleting your
+     *   photos will now remove them for your friends"), va khi do con goi
+     *   setHasDeletedFirstPhoto.
+     * - false = chi xoa khoi lich su cua minh: "This will only delete the
+     *   photo from your personal history. Anyone else who received it will
+     *   still be able to view it." (delete_photo_confirmation).
+     * Ca 2 truong hop goc deu dispatch addDeletedMoments truoc (danh dau
+     * xoa local, decompiled.js ~1099060) — repo lam tuong duong bang cach
+     * bo moment khoi Room cache o ViewModel khi server tra 200.
+     */
+    suspend fun deleteMoment(ownerUid: String, momentUid: String, deleteGlobally: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("owner_uid", ownerUid)
+                    addProperty("moment_uid", momentUid)
+                    addProperty("delete_globally", deleteGlobally)
+                })
+            }
+            val resp = callEndpoint("deleteMomentV2", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi xóa khoảnh khắc"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Bao cao 1 moment cua nguoi khac: callable reportMoment
+     * {owner_uid, moment_uid} (spec JSON: verified static; goc chi coi la
+     * xong khi data.status == 200, decompiled.js ~1099329-1099409, kem
+     * logReportedMoment + toast report_photo_toast_success; loi thi log
+     * 'reportMoment failed'). Goc co hop thoai xac nhan rieng
+     * (report_photo_confirmation_title/body) nen app cung hoi xac nhan
+     * truoc khi gui.
+     */
+    suspend fun reportMoment(ownerUid: String, momentUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("owner_uid", ownerUid)
+                    addProperty("moment_uid", momentUid)
+                })
+            }
+            val resp = callEndpoint("reportMoment", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi báo cáo khoảnh khắc"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Chan 1 nguoi: callable blockFriend {user_uid} (spec JSON: verified
+     * static, request_fields [user_uid]). Goc co hop thoai xac nhan
+     * (block_friend_confirmation_title/body): nguoi bi chan khong nhan
+     * tin / xem Locket / gui loi moi ket ban duoc nua, va Locket khong
+     * thong bao cho ho. Sau khi chan, server ghi doc vao collection
+     * users/{uid}/blocked_users (xem fetchBlockedUsers).
+     */
+    suspend fun blockFriend(userUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("user_uid", userUid)
+                })
+            }
+            val resp = callEndpoint("blockFriend", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi chặn người dùng"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Bo chan 1 nguoi: callable unblockUser {user_uid} (spec JSON:
+     * verified static, request_fields [user_uid]).
+     */
+    suspend fun unblockUser(userUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("user_uid", userUid)
+                })
+            }
+            val resp = callEndpoint("unblockUser", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi bỏ chặn người dùng"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * An/hien moment cua 1 ban tren feed: callable toggleFriendHidden
+     * {user_uid} (spec JSON: verified static, request_fields [user_uid]).
+     * Server TU DOI trang thai (khong co param boolean — callsite goc
+     * decompiled.js ~1116398 chi gui user_uid, loi thi hien
+     * hide_friend_error). Theo chuoi xac nhan goc
+     * (hide_friend_confirmation_body/_secondary): an thi khong xem Locket
+     * cua nguoi do nua va ho khong nhan Locket moi minh gui; ho khong duoc
+     * thong bao, 2 ben van o trong danh sach ban be cua nhau — nen repo
+     * chi bo moment cua ho khoi feed hien thi, KHONG xoa khoi friends.
+     */
+    suspend fun toggleFriendHidden(userUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("user_uid", userUid)
+                })
+            }
+            val resp = callEndpoint("toggleFriendHidden", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi ẩn bạn bè"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Danh sach that cac tai khoan bi chan: list documents Firestore REST
+     * `users/{uid}/blocked_users` (database mac dinh, KHONG phai database
+     * `locket` nhu history). Goc: helper blockedUsersCollection(uid)
+     * (decompiled.js ~950796) + listener onSnapshot tren collection nay
+     * (BlockedUsersProvider, ~1246051).
+     * Doc that: id = uid nguoi bi chan; field da xac minh trong doc la
+     * first_name/last_name (provider chi giu doc co id + ten — xem _temp/
+     * _temp2 gan dong 1246000). Ten/avatar uu tien doc field, roi
+     * resolveUserNames (fetchUsers batch 10), roi doc users/{uid} nhu
+     * fetchFriends, cuoi cung hien uid that. Khong cache Room: REST moi
+     * lan mo danh sach la du.
+     */
+    suspend fun fetchBlockedUsers(): Result<List<com.locket.app.model.BlockedUser>> = withContext(Dispatchers.IO) {
+        val token = getToken()
+        val uid = getUid()
+        if (token.isNullOrBlank() || uid.isNullOrBlank()) {
+            return@withContext Result.failure(Exception("Chưa đăng nhập"))
+        }
+
+        try {
+            val url = "$FIRESTORE_BASE_URL/users/$uid/blocked_users"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+
+            val response = client.newCall(req).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("Lỗi Firestore blocked_users: HTTP ${response.code}"))
+            }
+
+            val json = gson.fromJson(response.body?.string(), JsonObject::class.java)
+            val documents = json.getAsJsonArray("documents") ?: JsonArray()
+
+            val blockedUids = mutableListOf<String>()
+            val docNames = mutableMapOf<String, Pair<String, String>>()
+            for (docElem in documents) {
+                val doc = docElem.asJsonObject
+                val blockedUid = doc.get("name")?.asString?.substringAfterLast("/") ?: ""
+                if (blockedUid.isBlank()) continue
+                blockedUids.add(blockedUid)
+                // Ten that luu ngay trong doc bi chan (first_name/last_name).
+                val fields = doc.getAsJsonObject("fields")
+                val first = extractString(fields, "first_name").trim()
+                val last = extractString(fields, "last_name").trim()
+                val displayName = "$first $last".trim()
+                if (displayName.isNotBlank()) {
+                    docNames[blockedUid] = displayName to extractString(fields, "profile_picture_url")
+                }
+            }
+
+            val distinctUids = blockedUids.distinct()
+            if (distinctUids.isEmpty()) {
+                return@withContext Result.success(emptyList())
+            }
+
+            val names = resolveUserNames(distinctUids)
+            val blocked = distinctUids.map { blockedUid ->
+                val docName = docNames[blockedUid]
+                val resolved = names[blockedUid]
+                when {
+                    resolved != null -> com.locket.app.model.BlockedUser(
+                        uid = blockedUid,
+                        displayName = resolved.first,
+                        avatarUrl = resolved.second
+                    )
+                    docName != null -> com.locket.app.model.BlockedUser(
+                        uid = blockedUid,
+                        displayName = docName.first,
+                        avatarUrl = docName.second
+                    )
+                    else -> {
+                        val docFriend = fetchUserProfileFromDoc(blockedUid)
+                        if (docFriend != null) {
+                            com.locket.app.model.BlockedUser(
+                                uid = blockedUid,
+                                username = docFriend.username,
+                                displayName = docFriend.displayName,
+                                avatarUrl = docFriend.avatarUrl
+                            )
+                        } else {
+                            com.locket.app.model.BlockedUser(uid = blockedUid, displayName = blockedUid)
+                        }
+                    }
+                }
+            }
+
+            Result.success(blocked)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================
     // 4. CHAT & CONVERSATIONS (LIVE API)
     // ==========================================
 
