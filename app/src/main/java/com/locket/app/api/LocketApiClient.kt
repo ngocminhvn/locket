@@ -783,7 +783,7 @@ class LocketApiClient(
 
     // Query by date with an exact timestamp/document-name boundary; preserve
     // nanoseconds and tie-breaking so equal timestamps never skip records.
-    suspend fun fetchHistoryPage(pageToken: HistoryCursor? = null): Result<HistoryPage> = withContext(Dispatchers.IO) {
+    suspend fun fetchHistoryPage(pageToken: HistoryCursor? = null, ownOnly: Boolean = false): Result<HistoryPage> = withContext(Dispatchers.IO) {
         try {
             ensureFreshToken()
             val token = getToken()
@@ -794,6 +794,11 @@ class LocketApiClient(
             val url = "$FIRESTORE_HISTORY_URL/history/$uid:runQuery"
             val query = JsonObject().apply {
                 add("from", gson.toJsonTree(listOf(mapOf("collectionId" to "entries"))))
+                if (ownOnly) add("where", gson.toJsonTree(mapOf("fieldFilter" to mapOf(
+                    "field" to mapOf("fieldPath" to "user"),
+                    "op" to "EQUAL",
+                    "value" to mapOf("stringValue" to uid)
+                ))))
                 add("orderBy", gson.toJsonTree(listOf(
                     mapOf("field" to mapOf("fieldPath" to "date"), "direction" to "DESCENDING"),
                     mapOf("field" to mapOf("fieldPath" to "__name__"), "direction" to "DESCENDING")
@@ -835,13 +840,13 @@ class LocketApiClient(
                 val owner = extractString(fields, "user")
                 val timestamp = extractTimestampMs(fields, "date")?.div(1000)
                     ?: return@mapNotNull null
-                if (id.isBlank() || thumb.isBlank() || owner.isBlank()) return@mapNotNull null
+                if (id.isBlank() || thumb.isBlank() || owner.isBlank() || (ownOnly && owner != uid)) return@mapNotNull null
                 Moment(id = id, userUid = owner, userName = "",
                     thumbnailUrl = thumb, videoUrl = extractString(fields, "video_url").ifBlank { null },
                     caption = extractString(fields, "caption"), timestampSeconds = timestamp,
                     timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"))
             }.orEmpty()
-            val names = resolveUserNames(records.map { it.userUid })
+            val names = if (ownOnly) emptyMap() else resolveUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
                 val name = names[m.userUid]
                 if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m

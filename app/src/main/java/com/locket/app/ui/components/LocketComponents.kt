@@ -190,17 +190,16 @@ fun LocketBottomBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // History (9 dots / Apps grid)
-            IconButton(
-                onClick = { onNavigate("history") },
-                modifier = Modifier.size(36.dp)
+            Box(
+                Modifier.size(width = if (currentScreen == "history") 66.dp else 36.dp, height = 46.dp)
+                    .clip(CircleShape)
+                    .background(if (currentScreen == "history") Color(0x33FFFFFF) else Color.Transparent)
+                    .clickable { onNavigate("history") },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Apps,
-                    contentDescription = "Kỷ niệm",
+                Icon(Icons.Default.Apps, "Kỷ niệm",
                     tint = if (currentScreen == "history") Color.White else LocketTextDim,
-                    modifier = Modifier.size(26.dp)
-                )
+                    modifier = Modifier.size(26.dp))
             }
 
             // Camera / Home button

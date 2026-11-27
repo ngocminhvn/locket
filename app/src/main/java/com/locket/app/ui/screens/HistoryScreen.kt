@@ -1,6 +1,16 @@
 package com.locket.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,11 +49,15 @@ fun HistoryScreen(
     onNavigate: (String) -> Unit,
     onOpenProfile: () -> Unit
 ) {
-    val moments by viewModel.moments.collectAsState()
+    val allMoments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val historyLoading by viewModel.historyLoading.collectAsState()
-    val historyHasMore by viewModel.historyHasMore.collectAsState()
-    val historyError by viewModel.historyError.collectAsState()
+    val moments = remember(allMoments, currentUser.uid) {
+        if (currentUser.uid.isBlank()) emptyList() else allMoments.filter { it.userUid == currentUser.uid }
+    }
+    val historyLoading by viewModel.ownHistoryLoading.collectAsState()
+    val historyHasMore by viewModel.ownHistoryHasMore.collectAsState()
+    val historyError by viewModel.ownHistoryError.collectAsState()
+    val coveredThrough by viewModel.ownHistoryCoveredThrough.collectAsState()
     var viewingMoment by remember { mutableStateOf<Moment?>(null) }
 
     // Group moments by "year-month-day"
@@ -61,59 +75,44 @@ fun HistoryScreen(
         map
     }
 
-    // Generate list of months from current month going back 14 months
-    val calendarMonths = remember {
-        val list = mutableListOf<CalendarMonthData>()
-        val cal = Calendar.getInstance()
-        // Ensure starting from current month
-        for (i in 0 until 15) {
-            val y = cal.get(Calendar.YEAR)
-            val m = cal.get(Calendar.MONTH) + 1
-            val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-            list.add(
-                CalendarMonthData(
-                    year = y,
-                    month = m,
-                    monthTitle = "Tháng $m $y",
-                    daysCount = daysInMonth
-                )
-            )
-            cal.add(Calendar.MONTH, -1)
+    val currentMonth = remember { java.time.YearMonth.now() }
+    val oldestOwnMonth = remember(moments) {
+        moments.minOfOrNull { it.timestampSeconds }?.let {
+            java.time.YearMonth.from(java.time.Instant.ofEpochSecond(it).atZone(java.time.ZoneId.systemDefault()))
         }
-        list
     }
-
+    val defaultStart = currentMonth.minusMonths(14)
+    val firstMonth = minOf(defaultStart, oldestOwnMonth ?: defaultStart)
+    val calendarMonths = remember(firstMonth, currentMonth) {
+        val months = mutableListOf<CalendarMonthData>()
+        var month = firstMonth
+        while (month <= currentMonth) {
+            months.add(CalendarMonthData(month.year, month.monthValue,
+                "Tháng ${month.monthValue} ${month.year}", month.lengthOfMonth()))
+            month = month.plusMonths(1)
+        }
+        months
+    }
+    // Old -> new, open at the current month and stats, just like the reference.
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = calendarMonths.lastIndex)
     val totalCount = moments.size
     val streak = remember(moments) { viewModel.calculateStreak(moments) }
-
-    // Lich su truoc day chi duoc tai khi vuot o HomePager / 1 lan trong
-    // syncAllData, nen mo thang man Ky niem co the chua co du lieu cac thang
-    // cu (chi hien cham tron du user co moment o thang do). Man nay tu tai
-    // them cac dot lich su cho den khi du phu 15 thang dang hien thi hoac
-    // het du lieu. Lich su sap xep moi-nhat-truoc nen khi moment cu nhat
-    // da tai ve cu hon dau thang cu nhat dang hien thi la du.
-    val earliestNeededTs = remember(calendarMonths) {
-        val oldest = calendarMonths.last()
-        Calendar.getInstance().apply {
-            set(Calendar.YEAR, oldest.year)
-            set(Calendar.MONTH, oldest.month - 1)
-            set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis / 1000
+    val transition = rememberInfiniteTransition(label = "memoryShimmer")
+    val shimmer by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1250, easing = LinearEasing), RepeatMode.Restart),
+        label = "memoryShimmerProgress"
+    )
+    val visibleOldest = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
+    val oldestVisibleMonth = visibleOldest?.let { key -> calendarMonths.firstOrNull { "${it.year}-${it.month}" == key } }
+        ?: calendarMonths.last()
+    val neededTs = remember(oldestVisibleMonth) { monthStart(oldestVisibleMonth) }
+    val needsMore = viewModel.isLoggedIn && historyHasMore && historyError == null &&
+        (coveredThrough == null || coveredThrough!! >= neededTs)
+    LaunchedEffect(needsMore, historyLoading, historyError, coveredThrough) {
+        if (needsMore && !historyLoading) viewModel.loadOwnHistory()
     }
-    val oldestLoadedTs = remember(moments) { moments.minOfOrNull { it.timestampSeconds } }
-    val allMonthsCovered = oldestLoadedTs != null && oldestLoadedTs < earliestNeededTs
-    val needsMoreHistory = viewModel.isLoggedIn && historyHasMore &&
-        historyError == null && !allMonthsCovered
 
-    LaunchedEffect(needsMoreHistory, historyLoading, historyError, moments.size) {
-        if (needsMoreHistory && !historyLoading) {
-            viewModel.loadOlderMoments()
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -122,116 +121,29 @@ fun HistoryScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(bottom = 120.dp)
+            contentPadding = PaddingValues(top = 96.dp, bottom = 92.dp)
         ) {
-            // Header: "Kỷ niệm" + Avatar (Matches 01-history-ky-niem.jpg)
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Spacer(modifier = Modifier.size(40.dp))
-
-                    Text(
-                        text = "Kỷ niệm",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    // Avatar
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF2C2C2E))
-                            .border(1.5.dp, LocketYellow, CircleShape)
-                            .clickable(onClick = onOpenProfile),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (currentUser.profilePictureUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = currentUser.profilePictureUrl,
-                                contentDescription = "Profile",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Profile",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
             // Month Cards
-            items(calendarMonths) { monthData ->
-                // Thang chua du du lieu khi lich su moi tai toi trong (hoac
-                // sau) dau thang do ma van con dot cu hon chua tai ve.
-                val monthStartTs = Calendar.getInstance().apply {
-                    set(Calendar.YEAR, monthData.year)
-                    set(Calendar.MONTH, monthData.month - 1)
-                    set(Calendar.DAY_OF_MONTH, 1)
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis / 1000
-                val monthCovered = oldestLoadedTs != null && oldestLoadedTs < monthStartTs
-                val monthLoading = viewModel.isLoggedIn && historyHasMore &&
-                    historyError == null && !monthCovered
+            items(calendarMonths, key = { "${it.year}-${it.month}" }) { monthData ->
+                val monthLoading = historyHasMore && historyError == null &&
+                    (coveredThrough == null || coveredThrough!! >= monthStart(monthData))
                 MonthCardDynamic(
                     monthData = monthData,
                     momentsByDate = momentsByDate,
                     isLoading = monthLoading,
+                    shimmer = shimmer,
                     onMomentClick = { viewingMoment = it },
                     onTodayAddClick = { onNavigate("camera") }
                 )
-
-                // Dashed Divider between months
-                Text(
-                    text = "- - - - - -",
-                    color = Color(0xFF333333),
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
+                MemoryConnector()
             }
-
-            // Trang thai tai lich su: dang tai thi hien spinner, loi thi hien
-            // nut thu lai. Khong de thang cu chi hien cham tron gay hieu
-            // nham la thang do khong co anh.
-            if (historyLoading || historyError != null) {
-                item {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    ) {
-                        if (historyLoading) {
-                            CircularProgressIndicator(color = LocketYellow)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(text = "Đang tải ảnh cũ...", color = LocketTextDim, fontSize = 13.sp)
-                        }
-                        if (historyError != null) {
-                            Text(
-                                text = historyError ?: "",
-                                color = Color(0xFFFF6B6B),
-                                fontSize = 13.sp
-                            )
-                            TextButton(onClick = { viewModel.loadOlderMoments() }) {
-                                Text("Thử lại", color = LocketYellow)
-                            }
-                        }
+            if (historyError != null) {
+                item(key = "history-error") {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(historyError.orEmpty(), color = Color(0xFFFF6B6B), fontSize = 13.sp)
+                        TextButton(onClick = { viewModel.loadOwnHistory() }) { Text("Thử lại", color = LocketYellow) }
                     }
                 }
             }
@@ -247,7 +159,7 @@ fun HistoryScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "💛 $totalCount Locket",
+                        text = if (historyHasMore) "💛 $totalCount đã tải" else "💛 $totalCount Locket",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -258,13 +170,28 @@ fun HistoryScreen(
                         fontSize = 15.sp
                     )
                     Text(
-                        text = "🔥 $streak ngày chuỗi",
+                        text = if (historyHasMore && (coveredThrough == null || coveredThrough!! >= java.time.LocalDate.now().minusDays(streak.toLong() + 1).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond())) "🔥 Đang tải" else "🔥 $streak ngày chuỗi",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        // Fixed header stays visible while the months scroll underneath.
+        Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
+            .background(Brush.verticalGradient(listOf(LocketBlack, LocketBlack.copy(alpha = 0.88f), Color.Transparent)))
+            .statusBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp).height(48.dp)) {
+            Text("Kỷ niệm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center))
+            Box(Modifier.align(Alignment.CenterEnd).size(46.dp).clip(CircleShape)
+                .background(Color(0xFF2C2C2E)).clickable(onClick = onOpenProfile),
+                contentAlignment = Alignment.Center) {
+                if (currentUser.profilePictureUrl.isNotBlank()) {
+                    AsyncImage(currentUser.profilePictureUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else Icon(Icons.Default.Person, "Hồ sơ", tint = Color.White)
             }
         }
 
@@ -303,6 +230,7 @@ private fun MonthCardDynamic(
     monthData: CalendarMonthData,
     momentsByDate: Map<String, List<Moment>>,
     isLoading: Boolean = false,
+    shimmer: Float = 0f,
     onMomentClick: (Moment) -> Unit,
     onTodayAddClick: () -> Unit
 ) {
@@ -311,120 +239,71 @@ private fun MonthCardDynamic(
             (todayCal.get(Calendar.MONTH) + 1) == monthData.month
     val todayDay = todayCal.get(Calendar.DAY_OF_MONTH)
 
+    val firstDate = java.time.LocalDate.of(monthData.year, monthData.month, 1)
+    val offset = firstDate.dayOfWeek.value - 1
+    val rows = (offset + monthData.daysCount + 6) / 7
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(Color(0xFF141416))
-            .padding(16.dp)
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+            .clip(RoundedCornerShape(24.dp)).background(Color(0xFF141416))
     ) {
-        Text(
-            text = monthData.monthTitle,
-            color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        // Thang chua tai du du lieu: bao dang tai thay vi de cham tron
-        // (cham tron chi co nghia "khong co anh" khi da tai het).
-        if (isLoading) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                CircularProgressIndicator(
-                    color = LocketYellow,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = "Đang tải ảnh cũ...",
-                    color = LocketTextDim,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (row in 0 until 5) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    for (col in 0 until 7) {
-                        val dayIndex = row * 7 + col + 1
-                        val key = "${monthData.year}-${monthData.month}-$dayIndex"
-                        val dayMoments = momentsByDate[key]
-                        val hasMoments = !dayMoments.isNullOrEmpty()
-                        val isToday = isCurrentMonth && dayIndex == todayDay
-
-                        val specialEmoji = when {
-                            monthData.month == 10 && dayIndex == 31 -> "🎃"
-                            monthData.month == 12 && dayIndex == 25 -> "🎁"
-                            monthData.month == 12 && dayIndex == 24 -> "🎄"
-                            monthData.month == 1 && dayIndex == 1 -> "🎆"
-                            monthData.month == 2 && dayIndex == 14 -> "💝"
+        Text(monthData.monthTitle, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.fillMaxWidth().background(Color(0xFF242424)).padding(horizontal = 16.dp, vertical = 12.dp))
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(rows) { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    repeat(7) { col ->
+                        val day = row * 7 + col - offset + 1
+                        val valid = day in 1..monthData.daysCount
+                        val ownMoment = if (valid) momentsByDate["${monthData.year}-${monthData.month}-$day"]?.firstOrNull() else null
+                        val today = isCurrentMonth && day == todayDay
+                        val future = isCurrentMonth && day > todayDay
+                        val holiday = when {
+                            monthData.month == 10 && day == 31 -> "🎃"
+                            monthData.month == 12 && day == 25 -> "🎁"
+                            monthData.month == 1 && day == 1 -> "🎆"
                             else -> null
                         }
-
-                        Box(
-                            modifier = Modifier.size(42.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
                             when {
-                                hasMoments -> {
-                                    val firstM = dayMoments!!.first()
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFF2C2C2E))
-                                            .clickable { onMomentClick(firstM) }
-                                    ) {
-                                        AsyncImage(
-                                            model = firstM.thumbnailUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
+                                !valid -> Unit
+                                ownMoment != null -> AsyncImage(ownMoment.thumbnailUrl, null,
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF292929))
+                                        .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop)
+                                isLoading && !future -> {
+                                    val phase = (shimmer * 2f - (row * 7 + col) / 35f).coerceIn(0f, 1f)
+                                    val intensity = (1f - kotlin.math.abs(phase * 2f - 1f)) * 0.55f
+                                    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                        .background(androidx.compose.ui.graphics.lerp(Color(0xFF191919), Color(0xFF343434), intensity)))
                                 }
-                                isToday -> {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .border(2.5.dp, LocketYellow, RoundedCornerShape(12.dp))
-                                            .clickable(onClick = onTodayAddClick),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Thêm khoảnh khắc",
-                                            tint = LocketYellow,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
+                                today -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF3B2D11)).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
+                                    .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = LocketYellow, modifier = Modifier.size(24.dp))
                                 }
-                                specialEmoji != null && dayIndex <= monthData.daysCount -> {
-                                    Text(text = specialEmoji, fontSize = 24.sp)
-                                }
-                                dayIndex <= monthData.daysCount -> {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(9.dp)
-                                            .background(Color(0xFF2C2C2E), CircleShape)
-                                    )
-                                }
+                                future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(Color(0xFF262626)))
+                                holiday != null -> Text(holiday, fontSize = 20.sp)
+                                else -> Box(Modifier.size(11.dp).background(Color(0xFF303030), CircleShape))
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private fun monthStart(month: CalendarMonthData): Long =
+    java.time.LocalDate.of(month.year, month.month, 1).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
+
+@Composable
+private fun MemoryConnector() {
+    Canvas(Modifier.padding(vertical = 8.dp).size(width = 46.dp, height = 16.dp)) {
+        val line = Path().apply {
+            moveTo(0f, size.height * 0.15f)
+            cubicTo(size.width * 0.25f, size.height, size.width * 0.75f, 0f, size.width, size.height * 0.85f)
+        }
+        drawPath(line, Color(0xFF3A3A3A), style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round,
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 5.dp.toPx()))))
     }
 }
 

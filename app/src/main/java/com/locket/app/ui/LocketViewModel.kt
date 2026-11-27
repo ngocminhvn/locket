@@ -52,6 +52,48 @@ class LocketViewModel(
     private var historyCursor: LocketApiClient.HistoryCursor? = null
     private val feedSyncLock = Mutex()
     private var historyJob: Job? = null
+    private var ownHistoryCursor: LocketApiClient.HistoryCursor? = null
+    private var ownHistoryJob: Job? = null
+    private val _ownHistoryLoading = MutableStateFlow(false)
+    val ownHistoryLoading = _ownHistoryLoading.asStateFlow()
+    private val _ownHistoryHasMore = MutableStateFlow(true)
+    val ownHistoryHasMore = _ownHistoryHasMore.asStateFlow()
+    private val _ownHistoryError = MutableStateFlow<String?>(null)
+    val ownHistoryError = _ownHistoryError.asStateFlow()
+    private val _ownHistoryCoveredThrough = MutableStateFlow<Long?>(null)
+    val ownHistoryCoveredThrough = _ownHistoryCoveredThrough.asStateFlow()
+
+    // Independent cursor: calendar queries own posts only and never advance
+    // the friends-feed pagination cursor.
+    fun loadOwnHistory() {
+        if (!_isLoggedIn.value || _ownHistoryLoading.value || !_ownHistoryHasMore.value) return
+        _ownHistoryLoading.value = true
+        _ownHistoryError.value = null
+        val account = sessionManager.currentUser.uid
+        ownHistoryJob = viewModelScope.launch {
+            try {
+                val page = apiClient.fetchHistoryPage(ownHistoryCursor, ownOnly = true).getOrThrow()
+                if (!_isLoggedIn.value || account != sessionManager.currentUser.uid) return@launch
+                val own = page.moments.filter { it.userUid == account }.map {
+                    it.copy(userName = _currentUser.value.displayName.ifBlank { "Bạn" },
+                        userAvatarUrl = _currentUser.value.profilePictureUrl)
+                }
+                mergeMoments(own)
+                val next = page.nextPageToken
+                if (next != null && next == ownHistoryCursor) error("Máy chủ trả lại cùng con trỏ")
+                ownHistoryCursor = next
+                _ownHistoryCoveredThrough.value = next?.let { java.time.Instant.parse(it.date).epochSecond }
+                _ownHistoryHasMore.value = next != null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _ownHistoryError.value = e.localizedMessage ?: "Không tải được kỷ niệm"
+            } finally {
+                _ownHistoryLoading.value = false
+            }
+        }
+    }
+
     private val _historyLoading = MutableStateFlow(false)
     val historyLoading = _historyLoading.asStateFlow()
     private val _historyHasMore = MutableStateFlow(true)
@@ -667,6 +709,12 @@ class LocketViewModel(
     }
 
     fun logout() {
+        ownHistoryJob?.cancel()
+        ownHistoryCursor = null
+        _ownHistoryLoading.value = false
+        _ownHistoryHasMore.value = true
+        _ownHistoryError.value = null
+        _ownHistoryCoveredThrough.value = null
         historyJob?.cancel()
         historyCursor = null
         _historyHasMore.value = true
