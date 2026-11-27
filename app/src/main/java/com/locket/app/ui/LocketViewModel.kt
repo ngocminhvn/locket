@@ -3,6 +3,8 @@ package com.locket.app.ui
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
 import com.locket.app.model.ChatMessage
@@ -48,6 +50,40 @@ class LocketViewModel(
     private val _historyError = MutableStateFlow<String?>(null)
     val historyError = _historyError.asStateFlow()
 
+    // URL thumbnail da enqueue prefetch trong phien (tranh goi trung).
+    // Chi truy cap tu main thread (LaunchedEffect + viewModelScope mac dinh
+    // chay tren Main) nen khong can dong bo them.
+    private val prefetchedThumbnails = mutableSetOf<String>()
+
+    /**
+     * Prefetch thumbnail vao disk cache cua Coil truoc khi user vuot toi.
+     * Ly do: anh chi bat dau tai khi page duoc compose (pager giu page ke),
+     * nen khong prefetch thi vuot toi moi tai tu mang -> cho ~0,5s tren
+     * mang cham. Prefetch chi tai thumbnail tinh; moment video cung chi
+     * prefetch thumbnail, KHONG tai file video. AsyncImage sau do doc tu
+     * cache nen hien ngay (neu anh da kip tai ve truoc).
+     */
+    fun prefetchThumbnails(urls: List<String>) {
+        val fresh = urls.filter { it.isNotBlank() && prefetchedThumbnails.add(it) }
+        if (fresh.isEmpty()) return
+        val app = LocketApplication.instance
+        val loader = app.imageLoader
+        for (url in fresh) {
+            loader.enqueue(ImageRequest.Builder(app).data(url).build())
+        }
+    }
+
+    /**
+     * Prefetch thumbnail cua `count` moment ke tiep sau `currentIndex`
+     * trong danh sach da sap xep moi-nhat-truoc. currentIndex = -1 (dang o
+     * camera) thi prefetch tu moment moi nhat.
+     */
+    fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 5) {
+        if (moments.isEmpty()) return
+        val upcoming = moments.drop((currentIndex + 1).coerceAtLeast(0)).take(count)
+        prefetchThumbnails(upcoming.map { it.thumbnailUrl })
+    }
+
     private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
         val merged = (_moments.value + incoming).associateBy { it.id }.values
             .sortedByDescending { it.timestampSeconds }
@@ -75,6 +111,10 @@ class LocketViewModel(
                     }
                 }
                 mergeMoments(incoming)
+                // Dot anh cu vua ve chinh la cac trang ke tiep user sap vuot
+                // toi (dang gan cuoi danh sach) -> prefetch thumbnail ngay de
+                // anh kip vao cache truoc khi user vuot toi.
+                prefetchThumbnails(incoming.take(5).map { it.thumbnailUrl })
                 val next = page.nextPageToken
                 if (next != null && next == historyCursor) {
                     _historyError.value = "Máy chủ trả lại cùng con trỏ lịch sử"

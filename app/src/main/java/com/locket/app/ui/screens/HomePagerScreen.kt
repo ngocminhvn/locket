@@ -62,6 +62,13 @@ fun HomePagerScreen(
         if (pagerState.settledPage == 0) viewModel.selectFriend(null)
     }
 
+    // Prefetch anh cua cac moment ke tiep truoc khi user vuot toi, de anh
+    // da nam trong disk cache cua Coil luc can hien (xem LocketViewModel).
+    // page 1 = moments[0]; page 0 (camera) thi prefetch tu moment moi nhat.
+    LaunchedEffect(pagerState.settledPage, moments) {
+        viewModel.prefetchUpcomingMoments(moments, pagerState.settledPage - 1)
+    }
+
     // Prefetch before the last cached image; a dedicated trailing page stays
     // available if the server is still loading or a filtered page has no match.
     LaunchedEffect(pagerState.currentPage, moments.size, loading, hasMore, error) {
@@ -89,6 +96,9 @@ fun HomePagerScreen(
 
     VerticalPager(
         state = pagerState,
+        // Giu page ke duoc compose truoc 1 trang: AsyncImage cua trang ke
+        // bat dau tai som hon, khong doi toi luc vuot toi moi tai.
+        beyondBoundsPageCount = 1,
         userScrollEnabled = pagerState.currentPage != 0 || cameraSwipeEnabled,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
             // Native upward swipe reveals the next page. Also accept pulling
