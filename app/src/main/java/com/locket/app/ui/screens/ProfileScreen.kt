@@ -26,7 +26,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -65,12 +64,8 @@ fun ProfileScreen(
     val scope = rememberCoroutineScope()
 
     var showQrModal by remember { mutableStateOf(false) }
-    var showLoginDialog by remember { mutableStateOf(false) }
-    var showPhoneLoginDialog by remember { mutableStateOf(false) }
-    var showTokenDialog by remember { mutableStateOf(false) }
     var showBlockedUsers by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
-    var showEditUsernameDialog by remember { mutableStateOf(false) }
     var isUploadingAvatar by remember { mutableStateOf(false) }
     var goldBadgeActive by remember { mutableStateOf(true) }
 
@@ -361,56 +356,6 @@ fun ProfileScreen(
             ModCenterSettings()
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Section: Tài khoản & Kết nối Live API Locket
-            SectionTitle("Tài khoản Live Locket")
-            if (viewModel.isLoggedIn) {
-                SettingsItem(
-                    icon = { Icon(Icons.Default.CheckCircle, null, tint = LocketYellow) },
-                    title = "Đang kết nối: ${user.email.ifBlank { user.username }}",
-                    trailing = {
-                        TextButton(onClick = {
-                            viewModel.logout()
-                            Toast.makeText(context, "Đã đăng xuất", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("Đăng xuất", color = LocketRed, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                )
-                // Ten nguoi dung that (setUsername V1) — hien username hien
-                // tai, bam de dat/doi; loi server (vd 401/App Check) bao that.
-                SettingsItem(
-                    icon = { Icon(Icons.Default.AlternateEmail, null, tint = LocketYellow) },
-                    title = if (user.username.isNotBlank()) "Tên người dùng: @${user.username}" else "Đặt tên người dùng",
-                    onClick = { showEditUsernameDialog = true }
-                )
-                SettingsItem(
-                    icon = { Icon(Icons.Default.Sync, null, tint = LocketYellow) },
-                    title = "Đồng bộ lại toàn bộ dữ liệu từ server",
-                    onClick = {
-                        viewModel.syncAllData()
-                        Toast.makeText(context, "Đang đồng bộ từ Locket...", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            } else {
-                SettingsItem(
-                    icon = { Icon(Icons.AutoMirrored.Filled.Login, null, tint = LocketYellow) },
-                    title = "Đăng nhập bằng Email & Mật khẩu",
-                    onClick = { showLoginDialog = true }
-                )
-                SettingsItem(
-                    icon = { Icon(Icons.Default.Phone, null, tint = LocketYellow) },
-                    title = "Đăng nhập bằng Số điện thoại (SMS)",
-                    onClick = { showPhoneLoginDialog = true }
-                )
-                SettingsItem(
-                    icon = { Icon(Icons.Default.Key, null, tint = LocketYellow) },
-                    title = "Nhập Firebase ID Token trực tiếp",
-                    onClick = { showTokenDialog = true }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
             // Section: Riêng tư & bảo mật
             SectionTitle("Riêng tư & bảo mật")
             // Danh sach that: doc tu Firestore users/{uid}/blocked_users
@@ -460,26 +405,6 @@ fun ProfileScreen(
                 viewModel = viewModel,
                 onDismiss = { showEditNameDialog = false }
             )
-        }
-
-        if (showEditUsernameDialog) {
-            EditUsernameDialog(
-                currentUsername = user.username,
-                viewModel = viewModel,
-                onDismiss = { showEditUsernameDialog = false }
-            )
-        }
-
-        if (showLoginDialog) {
-            EmailLoginDialog(viewModel = viewModel, onDismiss = { showLoginDialog = false })
-        }
-
-        if (showPhoneLoginDialog) {
-            PhoneLoginDialog(viewModel = viewModel, onDismiss = { showPhoneLoginDialog = false })
-        }
-
-        if (showTokenDialog) {
-            DirectTokenDialog(viewModel = viewModel, onDismiss = { showTokenDialog = false })
         }
 
         if (showBlockedUsers) {
@@ -978,74 +903,6 @@ private fun EditNameDialog(
     )
 }
 
-/**
- * Dialog dat/doi username that (setUsername V1). Hien username hien tai;
- * loi server (vd username da co nguoi dung / 401) bao that, khong bao
- * success gia. Chua live-verify (xem ApiClient.setUsername).
- */
-@Composable
-private fun EditUsernameDialog(
-    currentUsername: String,
-    viewModel: LocketViewModel,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    var username by remember { mutableStateOf(currentUsername) }
-    var isLoading by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
-        title = { Text("Tên người dùng", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "Tên người dùng dùng trong link mời locket.cam/<tên của bạn>.",
-                    color = LocketTextDim, fontSize = 13.sp
-                )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Username") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (username.isBlank()) {
-                        Toast.makeText(context, "Nhập tên người dùng", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    isLoading = true
-                    viewModel.updateUsername(
-                        username = username,
-                        onSuccess = {
-                            isLoading = false
-                            Toast.makeText(context, "Đã lưu tên người dùng", Toast.LENGTH_SHORT).show()
-                            onDismiss()
-                        },
-                        onError = { err ->
-                            isLoading = false
-                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                        }
-                    )
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
-            ) {
-                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
-                else Text("Lưu", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
-        }
-    )
-}
-
 @Composable
 private fun ShareActionItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
@@ -1061,200 +918,4 @@ private fun ShareActionItem(label: String, icon: androidx.compose.ui.graphics.ve
         Spacer(modifier = Modifier.height(6.dp))
         Text(label, color = Color.White, fontSize = 12.sp)
     }
-}
-
-@Composable
-private fun EmailLoginDialog(viewModel: LocketViewModel, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
-        title = { Text("Đăng nhập Email Locket", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Nhập thông tin tài khoản Locket của bạn:", color = LocketTextDim, fontSize = 13.sp)
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Email") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Mật khẩu") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (email.isBlank() || password.isBlank()) return@Button
-                    isLoading = true
-                    viewModel.loginWithEmail(
-                        email = email.trim(),
-                        pass = password,
-                        onSuccess = {
-                            isLoading = false
-                            Toast.makeText(context, "Đăng nhập thành công! 💛", Toast.LENGTH_SHORT).show()
-                            onDismiss()
-                        },
-                        onError = { err ->
-                            isLoading = false
-                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                        }
-                    )
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
-            ) {
-                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
-                else Text("Đăng nhập", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
-        }
-    )
-}
-
-@Composable
-private fun PhoneLoginDialog(viewModel: LocketViewModel, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var phone by remember { mutableStateOf("+84") }
-    var code by remember { mutableStateOf("") }
-    var isCodeSent by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
-        title = { Text("Đăng nhập SĐT Locket", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!isCodeSent) {
-                    Text("Nhập số điện thoại (định dạng E.164 ví dụ +84912345678):", color = LocketTextDim, fontSize = 13.sp)
-                    OutlinedTextField(
-                        value = phone,
-                        onValueChange = { phone = it },
-                        label = { Text("Số điện thoại") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } else {
-                    Text("Nhập mã OTP vừa nhận:", color = LocketTextDim, fontSize = 13.sp)
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { code = it },
-                        label = { Text("Mã OTP") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (!isCodeSent) {
-                        isLoading = true
-                        scope.launch {
-                            val res = viewModel.apiClient.sendVerificationCode(phone.trim())
-                            isLoading = false
-                            if (res.isSuccess) {
-                                isCodeSent = true
-                                Toast.makeText(context, "Đã gửi mã xác nhận!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Lỗi: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } else {
-                        isLoading = true
-                        scope.launch {
-                            val authRes = viewModel.apiClient.checkVerificationCode(phone.trim(), code.trim())
-                            isLoading = false
-                            if (authRes.success && authRes.idToken != null) {
-                                viewModel.loginWithDirectToken(authRes.idToken, authRes.uid ?: "user_me") {
-                                    Toast.makeText(context, "Đăng nhập thành công!", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                }
-                            } else {
-                                Toast.makeText(context, "Lỗi: ${authRes.errorMessage}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
-            ) {
-                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
-                else Text(if (!isCodeSent) "Gửi mã" else "Xác nhận", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
-        }
-    )
-}
-
-@Composable
-private fun DirectTokenDialog(viewModel: LocketViewModel, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    var token by remember { mutableStateOf("") }
-    var uid by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
-        title = { Text("Nhập Firebase Token", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Dành cho developer hoặc token trích xuất từ tài khoản Locket của bạn:", color = LocketTextDim, fontSize = 13.sp)
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    label = { Text("Firebase ID Token (Bearer)") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = uid,
-                    onValueChange = { uid = it },
-                    label = { Text("User UID (tùy chọn)") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (token.isNotBlank()) {
-                        viewModel.loginWithDirectToken(token.trim(), uid.trim().ifBlank { "user_me" }) {
-                            Toast.makeText(context, "Đã lưu token & đang đồng bộ dữ liệu!", Toast.LENGTH_SHORT).show()
-                            onDismiss()
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
-            ) {
-                Text("Lưu & Đồng bộ", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
-        }
-    )
 }
