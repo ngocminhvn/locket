@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -25,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,6 +34,7 @@ import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.theme.LocketYellow
 import com.locket.app.ui.theme.LocketTextDim
 import com.locket.app.ui.components.LocketTopBar
+import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.LocketBlack
 
 @Composable
@@ -57,7 +58,7 @@ fun HomeGridScreen(
     // Tai them lich su khi cuon gan het luoi (con ~9 anh = 3 hang cuoi).
     // Chi goi khi chua het, khong dang tai, khong loi; ViewModel tu chan
     // goi trung (loadOlderMoments return ngay khi dang tai).
-    val nearEnd by remember {
+    val nearEnd by remember(moments.size) {
         derivedStateOf {
             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             moments.isNotEmpty() && lastVisible >= (moments.size - 9).coerceAtLeast(0)
@@ -98,9 +99,12 @@ fun HomeGridScreen(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 state = gridState,
-                contentPadding = PaddingValues(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(
+                    start = 2.dp, end = 2.dp, top = 26.dp,
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 76.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -109,7 +113,7 @@ fun HomeGridScreen(
                     Box(
                         modifier = Modifier
                             .aspectRatio(1.0f)
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(Color(0xFF202022))
                             .clickable { onMomentClick(index) }
                     ) {
@@ -161,31 +165,40 @@ fun HomeGridScreen(
                 }
             }
 
-            // Bottom Navigation
-            // Grid only: the original uses three controls, not the five-button moment bar.
-            Box(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp, top = 8.dp),
-                contentAlignment = Alignment.Center
+        }
+
+        // The grid runs behind the floating three-button navigation, rather
+        // than reserving an opaque strip at the bottom of the screen.
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(
+                    Color.Transparent, LocketBlack.copy(alpha = 0.40f), LocketBlack.copy(alpha = 0.88f)
+                )))
+                .navigationBarsPadding().padding(bottom = 12.dp, top = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                Modifier.liquidGlassEffect(CircleShape, backgroundColor = Color(0xCC242424), borderWidth = 0.dp)
+                    .padding(horizontal = 7.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    Modifier.clip(CircleShape).background(Color(0xFF202022))
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(22.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { onNavigate("history") }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Apps, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(25.dp))
-                    }
-                    Box(
-                        Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape)
-                            .clickable { onNavigate("camera") },
-                        contentAlignment = Alignment.Center
-                    ) {
+                Box(Modifier.size(width = 64.dp, height = 46.dp)
+                    .clip(CircleShape).clickable { onNavigate("history") },
+                    contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Apps, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(24.dp))
+                }
+                Box(Modifier.size(width = 64.dp, height = 46.dp)
+                    .clip(CircleShape).clickable { onNavigate("camera") },
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape),
+                        contentAlignment = Alignment.Center) {
                         Box(Modifier.size(28.dp).background(Color.White, CircleShape))
                     }
-                    IconButton(onClick = { onNavigate("chat") }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = LocketTextDim, modifier = Modifier.size(25.dp))
-                    }
+                }
+                Box(Modifier.size(width = 64.dp, height = 46.dp)
+                    .clip(CircleShape).clickable { onNavigate("chat") },
+                    contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = LocketTextDim, modifier = Modifier.size(24.dp))
                 }
             }
         }
