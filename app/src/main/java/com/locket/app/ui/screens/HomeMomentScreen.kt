@@ -4,6 +4,10 @@ import android.widget.Toast
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import android.widget.VideoView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,7 +46,8 @@ fun HomeMomentScreen(
     val friends by viewModel.friends.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val currentIndex by remember { mutableStateOf(initialMomentIndex.coerceIn(0, maxOf(0, moments.size - 1))) }
+    var currentIndex by remember { mutableIntStateOf(initialMomentIndex.coerceAtLeast(0)) }
+    LaunchedEffect(selectedFriend) { if (selectedFriend != null) currentIndex = 0 }
     var showFriendFilter by remember { mutableStateOf(false) }
 
     val currentMoment = if (moments.isNotEmpty()) moments[currentIndex.coerceIn(0, moments.size - 1)] else null
@@ -84,8 +89,18 @@ fun HomeMomentScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
                     .aspectRatio(1.0f)
+                    .pointerInput(moments.size) {
+                        var distance = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { distance = 0f },
+                            onDragEnd = {
+                                val max = (moments.size - 1).coerceAtLeast(0)
+                                if (distance < -48.dp.toPx()) currentIndex = (currentIndex + 1).coerceAtMost(max)
+                                if (distance > 48.dp.toPx()) currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                            }
+                        ) { change, amount -> distance += amount; change.consume() }
+                    }
                     .clip(RoundedCornerShape(36.dp))
                     .background(Color(0xFF1E1E1E))
                     .clickable {
@@ -106,7 +121,19 @@ fun HomeMomentScreen(
                     }
             ) {
                 if (currentMoment != null) {
-                    AsyncImage(
+                    val videoUrl = currentMoment.videoUrl
+                    if (!videoUrl.isNullOrBlank()) {
+                        key(videoUrl) {
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx -> VideoView(ctx).apply {
+                                    setVideoURI(android.net.Uri.parse(videoUrl))
+                                    setOnPreparedListener { player -> player.isLooping = true; start() }
+                                } },
+                                onRelease = { it.stopPlayback() }
+                            )
+                        }
+                    } else AsyncImage(
                         model = currentMoment.thumbnailUrl,
                         contentDescription = "Moment",
                         modifier = Modifier.fillMaxSize(),

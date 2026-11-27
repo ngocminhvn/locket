@@ -68,7 +68,7 @@ fun ShutterButton(
 
 @Composable
 fun LocketTopBar(
-    title: String = "23 Bạn bè",
+    title: String = "Bạn bè",
     showDropdownArrow: Boolean = false,
     avatarUrl: String = "",
     onSpeakerClick: () -> Unit = {},
@@ -79,7 +79,7 @@ fun LocketTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -144,7 +144,6 @@ fun LocketTopBar(
                     .fillMaxSize()
                     .clip(CircleShape)
                     .background(Color(0xFF2C2C2E))
-                    .border(2.dp, LocketYellow, CircleShape)
             ) {
                 if (avatarUrl.isNotBlank()) {
                     AsyncImage(
@@ -167,19 +166,7 @@ fun LocketTopBar(
                     }
                 }
             }
-            // Small Heart Badge
-            Box(
-                modifier = Modifier
-                    .size(16.dp)
-                    .background(LocketYellow, CircleShape)
-                    .border(1.5.dp, Color.Black, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "💛",
-                    fontSize = 8.sp
-                )
-            }
+
         }
     }
 }
@@ -199,9 +186,9 @@ fun LocketBottomBar(
         Row(
             modifier = Modifier
                 .liquidGlassEffect(RoundedCornerShape(32.dp))
-                .padding(horizontal = 24.dp, vertical = 10.dp),
+                .padding(horizontal = 18.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(32.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // History (9 dots / Apps grid)
             IconButton(
@@ -211,7 +198,7 @@ fun LocketBottomBar(
                 Icon(
                     imageVector = Icons.Default.Apps,
                     contentDescription = "Kỷ niệm",
-                    tint = if (currentScreen == "history") LocketYellow else Color.White,
+                    tint = if (currentScreen == "history") Color.White else LocketTextDim,
                     modifier = Modifier.size(26.dp)
                 )
             }
@@ -219,8 +206,8 @@ fun LocketBottomBar(
             // Camera / Home button
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .size(width = 66.dp, height = 46.dp)
+                    .clip(CircleShape)
                     .background(if (currentScreen == "camera") Color(0x33FFFFFF) else Color.Transparent)
                     .clickable { onNavigate("camera") },
                 contentAlignment = Alignment.Center
@@ -241,7 +228,7 @@ fun LocketBottomBar(
                 Icon(
                     imageVector = Icons.Default.ChatBubble,
                     contentDescription = "Trò chuyện",
-                    tint = if (currentScreen == "chat") LocketYellow else Color.White,
+                    tint = if (currentScreen == "chat") Color.White else LocketTextDim,
                     modifier = Modifier.size(24.dp)
                 )
             }

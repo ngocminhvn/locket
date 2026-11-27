@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.Calendar
 
 class LocketViewModel(
@@ -257,7 +258,8 @@ class LocketViewModel(
         caption: String,
         recipients: List<String> = emptyList(),
         onSuccess: () -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        videoFile: File? = null
     ) {
         viewModelScope.launch {
             _isSyncing.value = true
@@ -270,29 +272,30 @@ class LocketViewModel(
             if (uploadRes.success && uploadRes.downloadUrl != null) {
                 val md5 = uploadRes.md5 ?: apiClient.computeMd5(bytes)
 
+                val videoUrl = if (videoFile != null) {
+                    val videoRes = apiClient.uploadMomentVideo(videoFile)
+                    if (!videoRes.success || videoRes.downloadUrl.isNullOrBlank()) {
+                        _isSyncing.value = false
+                        onError(videoRes.errorMessage ?: "Lỗi tải video")
+                        return@launch
+                    }
+                    videoRes.downloadUrl
+                } else null
+
                 // 2. Call postMomentV2 callable
                 val postRes = apiClient.postMoment(
                     thumbnailUrl = uploadRes.downloadUrl,
                     caption = caption,
                     recipients = recipients,
-                    md5 = md5
+                    md5 = md5,
+                    videoUrl = videoUrl
                 )
 
                 if (postRes.success) {
-                    val newMoment = Moment(
-                        id = postRes.momentId ?: "m_${System.currentTimeMillis()}",
-                        userUid = sessionManager.currentUser.uid,
-                        userName = sessionManager.currentUser.displayName.ifBlank { "Bạn" },
-                        thumbnailUrl = uploadRes.downloadUrl,
-                        caption = caption,
-                        timeAgo = "vừa xong",
-                        isLocal = true
-                    )
-                    val updated = _moments.value.toMutableList()
-                    updated.add(0, newMoment)
-                    _moments.value = updated
-                    cache.saveMoments(updated)
+                    // Fetch server records; never synthesize IDs, timestamps or local feed rows.
+                    videoFile?.delete()
                     _isSyncing.value = false
+                    syncAllData()
                     onSuccess()
                 } else {
                     _isSyncing.value = false

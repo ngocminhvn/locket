@@ -13,6 +13,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.video.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.*
+import android.media.MediaMetadataRetriever
+import android.widget.VideoView
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,7 +58,6 @@ import com.locket.app.ui.components.*
 import com.locket.app.ui.theme.*
 import kotlinx.coroutines.launch
 import java.io.InputStream
-import java.util.concurrent.Executors
 
 @Composable
 fun CameraScreen(
@@ -89,15 +99,207 @@ fun CameraScreen(
         }
     }
 
-    var cameraSelector by remember { mutableStateOf(CameraSelector.DEFAULT_BACK_CAMERA) }
+    var frontCamera by remember { mutableStateOf(true) }
+    val cameraSelector = if (frontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
+    var cameraError by remember { mutableStateOf<String?>(null) }
+    var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var isRollcallMode by remember { mutableStateOf(false) }
+    var videoMode by remember { mutableStateOf(false) }
+    var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
+    var recording by remember { mutableStateOf<Recording?>(null) }
+    var processingVideo by remember { mutableStateOf(false) }
+    var capturingPhoto by remember { mutableStateOf(false) }
+    var capturedVideo by remember { mutableStateOf<File?>(null) }
+    var screenActive by remember { mutableStateOf(true) }
+    val previewView = remember(context) {
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+    var hasAudioPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
+    val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        hasAudioPermission = it
+    }
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captionText by remember { mutableStateOf("") }
     var isPosting by remember { mutableStateOf(false) }
+
+    fun clearCapture() {
+        capturedBitmap = null
+        capturedVideo?.delete()
+        capturedVideo = null
+        captionText = ""
+    }
+
+    DisposableEffect(Unit) {
+        screenActive = true
+        onDispose {
+            screenActive = false
+            recording?.stop()
+            if (!isPosting) capturedVideo?.delete()
+        }
+    }
+
+    // Rebind whenever the selected lens changes; AndroidView.factory runs only once.
+    DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView) {
+        var active = true
+        var provider: ProcessCameraProvider? = null
+        imageCapture = null
+        videoCapture = null
+        hasFlash = false
+        cameraError = null
+        if (hasCameraPermission) {
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener({
+                if (active) {
+                    try {
+                        val cameraProvider = future.get()
+                        provider = cameraProvider
+                        if (!cameraProvider.hasCamera(cameraSelector)) {
+                            cameraError = "Thiết bị không có camera này"
+                        } else {
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
+                            val photo = ImageCapture.Builder()
+                                .setTargetRotation(previewView.display?.rotation ?: android.view.Surface.ROTATION_0)
+                                .setFlashMode(if (frontCamera) ImageCapture.FLASH_MODE_OFF else flashMode)
+                                .build()
+                            val video = VideoCapture.withOutput(
+                                Recorder.Builder().setQualitySelector(
+                                    QualitySelector.from(Quality.HD, FallbackStrategy.lowerQualityOrHigherThan(Quality.HD))
+                                ).build()
+                            )
+                            cameraProvider.unbindAll()
+                            val camera = try {
+                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, photo, video)
+                                    .also { videoCapture = video }
+                            } catch (_: IllegalArgumentException) {
+                                // Some cameras cannot bind three use cases at once.
+                                cameraProvider.unbindAll()
+                                cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, photo)
+                            }
+                            hasFlash = camera.cameraInfo.hasFlashUnit()
+                            imageCapture = photo
+                        }
+                    } catch (e: Exception) {
+                        cameraError = "Không thể mở camera: ${e.localizedMessage ?: "lỗi không xác định"}"
+                    }
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+        onDispose {
+            active = false
+            provider?.unbindAll()
+        }
+    }
+    LaunchedEffect(flashMode, hasFlash, imageCapture) {
+        imageCapture?.flashMode = if (hasFlash) flashMode else ImageCapture.FLASH_MODE_OFF
+    }
+    LaunchedEffect(recording) {
+        val activeRecording = recording ?: return@LaunchedEffect
+        // Standard account duration from the checked-in API spec.
+        delay(2500)
+        activeRecording.stop()
+    }
+
+    fun takePhoto() {
+        val capture = imageCapture
+        if (capture == null || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
+        capturingPhoto = true
+        capture.takePicture(ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                try {
+                    val bitmap = imageProxyToBitmap(image)
+                    if (screenActive) capturedBitmap = bitmap
+                } catch (e: Exception) {
+                    if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    image.close()
+                    capturingPhoto = false
+                }
+            }
+            override fun onError(exception: ImageCaptureException) {
+                capturingPhoto = false
+                if (screenActive) Toast.makeText(context, "Lỗi chụp: ${exception.message}", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    fun startVideo() {
+        if (recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
+        val capture = videoCapture
+        if (capture == null) {
+            Toast.makeText(context, "Camera này chưa sẵn sàng quay video", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val file = File.createTempFile("locket-video-", ".mp4", context.cacheDir)
+        try {
+            var pending = capture.output.prepareRecording(context, FileOutputOptions.Builder(file).build())
+            if (hasAudioPermission && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                pending = pending.withAudioEnabled()
+            }
+            recording = pending.start(ContextCompat.getMainExecutor(context)) { event ->
+                if (event is VideoRecordEvent.Finalize) {
+                    recording = null
+                    if (!screenActive || event.hasError()) {
+                        file.delete()
+                        if (screenActive) Toast.makeText(context, "Không thể quay video (${event.error})", Toast.LENGTH_SHORT).show()
+                    } else {
+                        processingVideo = true
+                        scope.launch {
+                            try {
+                                val thumbnail = withContext(Dispatchers.IO) {
+                                    val retriever = MediaMetadataRetriever()
+                                    try {
+                                        retriever.setDataSource(file.absolutePath)
+                                        retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                    } finally { retriever.release() }
+                                }
+                                if (thumbnail == null || !screenActive) {
+                                    file.delete()
+                                    if (screenActive) Toast.makeText(context, "Không đọc được video", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    capturedVideo = file
+                                    capturedBitmap = thumbnail
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                file.delete()
+                                throw e
+                            } catch (e: Exception) {
+                                file.delete()
+                                Toast.makeText(context, "Không đọc được video: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } finally { processingVideo = false }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            file.delete()
+            Toast.makeText(context, "Lỗi quay video: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val openLatest = {
+        if (recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null) {
+            viewModel.selectFriend(null)
+            onNavigate("latest")
+        }
+    }
+    val latestAction by rememberUpdatedState(openLatest)
+    val tapShutter by rememberUpdatedState<() -> Unit>({
+        if (videoMode) {
+            if (recording == null) startVideo() else recording?.stop()
+        } else takePhoto()
+    })
+    val beginHold by rememberUpdatedState<() -> Unit>({ startVideo() })
+    val endHold by rememberUpdatedState<() -> Unit>({ recording?.stop() })
 
     // Gallery Picker launcher
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -105,9 +307,11 @@ fun CameraScreen(
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val inputStream: InputStream? = context.contentResolver.openInputStream(it)
-                val bmp = BitmapFactory.decodeStream(inputStream)
-                capturedBitmap = bmp
+                val bmp = context.contentResolver.openInputStream(it)?.use { stream -> BitmapFactory.decodeStream(stream) }
+                if (bmp != null) {
+                    clearCapture()
+                    capturedBitmap = bmp
+                } else Toast.makeText(context, "Không thể đọc ảnh", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -120,11 +324,20 @@ fun CameraScreen(
             .background(LocketBlack)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                var distance = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { distance = 0f },
+                    onDragEnd = { if (distance > 64.dp.toPx()) latestAction() }
+                ) { change, amount ->
+                    distance += amount
+                    change.consume()
+                }
+            },
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top Bar (Matches 02-camera.jpg with real friend count and user avatar)
-            val friendsLabel = if (friends.isNotEmpty()) "${friends.size} Bạn bè" else "Thêm bạn bè"
+            val friendsLabel = "${friends.size} Bạn bè"
             LocketTopBar(
                 title = friendsLabel,
                 avatarUrl = currentUser.profilePictureUrl,
@@ -136,52 +349,24 @@ fun CameraScreen(
                 onAvatarClick = onOpenProfile
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.weight(0.55f))
 
             // Main Squircle Camera Viewfinder (Matches 02-camera.jpg)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
                     .aspectRatio(1.0f)
-                    .clip(RoundedCornerShape(36.dp))
+                    .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
             ) {
                 if (hasCameraPermission) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            val previewView = PreviewView(ctx)
-                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                            cameraProviderFuture.addListener({
-                                val cameraProvider = cameraProviderFuture.get()
-                                val preview = Preview.Builder().build().also {
-                                    it.setSurfaceProvider(previewView.surfaceProvider)
-                                }
-                                val capture = ImageCapture.Builder()
-                                    .setFlashMode(flashMode)
-                                    .setTargetRotation(previewView.display.rotation)
-                                    .build()
-                                imageCapture = capture
-
-                                try {
-                                    cameraProvider.unbindAll()
-                                    cameraProvider.bindToLifecycle(
-                                        lifecycleOwner,
-                                        cameraSelector,
-                                        preview,
-                                        capture
-                                    )
-                                } catch (exc: Exception) {
-                                    // Binding failed
-                                }
-                            }, ContextCompat.getMainExecutor(ctx))
-                            previewView
-                        },
-                        update = {
-                            imageCapture?.flashMode = flashMode
-                        }
+                        factory = { previewView }
                     )
+                    cameraError?.let { error ->
+                        Text(error, color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp))
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -220,7 +405,7 @@ fun CameraScreen(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(Color(0x66000000))
-                        .clickable {
+                        .clickable(enabled = hasFlash && recording == null) {
                             flashMode = when (flashMode) {
                                 ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
                                 ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_AUTO
@@ -254,31 +439,34 @@ fun CameraScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(width = 46.dp, height = 36.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (!isRollcallMode) LocketYellow else Color.Transparent)
-                            .clickable { isRollcallMode = false },
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (!videoMode) LocketYellow else Color.Transparent)
+                            .clickable(enabled = recording == null) { videoMode = false },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.CameraAlt,
                             contentDescription = "Ảnh",
-                            tint = if (!isRollcallMode) Color.Black else Color.White,
+                            tint = if (!videoMode) Color.Black else Color.White,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Box(
                         modifier = Modifier
-                            .size(width = 46.dp, height = 36.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (isRollcallMode) LocketYellow else Color.Transparent)
-                            .clickable { isRollcallMode = true },
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (videoMode) LocketYellow else Color.Transparent)
+                            .clickable(enabled = recording == null) {
+                                videoMode = true
+                                if (!hasAudioPermission) audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Screenshot,
-                            contentDescription = "Rollcall",
-                            tint = if (isRollcallMode) Color.Black else Color.White,
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Video",
+                            tint = if (videoMode) Color.Black else Color.White,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -299,61 +487,51 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xFF262628))
-                        .clickable { galleryLauncher.launch("image/*") },
+                        .clickable(enabled = recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PhotoLibrary,
+                        imageVector = Icons.Default.Collections,
                         contentDescription = "Thư viện",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(44.dp)
                     )
                 }
 
                 // Center: Shutter Button
-                ShutterButton(
-                    onClick = {
-                        val capture = imageCapture
-                        if (capture != null && hasCameraPermission) {
-                            val executor = Executors.newSingleThreadExecutor()
-                            capture.takePicture(
-                                executor,
-                                object : ImageCapture.OnImageCapturedCallback() {
-                                    override fun onCaptureSuccess(image: ImageProxy) {
-                                        val bmp = imageProxyToBitmap(image)
-                                        image.close()
-                                        scope.launch {
-                                            capturedBitmap = bmp
-                                        }
-                                    }
-
-                                    override fun onError(exception: ImageCaptureException) {
-                                        scope.launch {
-                                            Toast.makeText(context, "Lỗi chụp: ${exception.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            )
-                        } else {
-                            capturedBitmap = createDemoBitmap()
+                Box(
+                    modifier = Modifier
+                        .size(98.dp)
+                        .border(4.dp, if (recording != null) Color.Red else LocketYellow, CircleShape)
+                        .semantics {
+                            contentDescription = if (videoMode) "Quay video" else "Chụp ảnh, giữ để quay video"
+                            onClick { tapShutter(); true }
                         }
-                    }
-                )
+                        .pointerInput(Unit) {
+                            var held = false
+                            detectTapGestures(
+                                onPress = {
+                                    held = false
+                                    try { tryAwaitRelease() } finally { if (held) endHold() }
+                                },
+                                onLongPress = { held = true; beginHold() },
+                                onTap = { tapShutter() }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(Modifier.size(if (recording != null) 40.dp else 82.dp)
+                        .background(if (recording != null || videoMode) Color.Red else Color.White,
+                            if (recording != null) RoundedCornerShape(10.dp) else CircleShape))
+                }
 
                 // Right: Camera Flip Button
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF262628))
-                        .clickable {
-                            cameraSelector = if (cameraSelector == CameraSelector.DEFAULT_BACK_CAMERA) {
-                                CameraSelector.DEFAULT_FRONT_CAMERA
-                            } else {
-                                CameraSelector.DEFAULT_BACK_CAMERA
-                            }
+                        .clickable(enabled = recording == null && !processingVideo && !capturingPhoto) {
+                            frontCamera = !frontCamera
+                            flashMode = ImageCapture.FLASH_MODE_OFF
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -361,50 +539,21 @@ fun CameraScreen(
                         imageVector = Icons.Default.Sync,
                         contentDescription = "Đổi camera",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(38.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // "1 Lịch sử v" pill (Underneath Shutter, matches 02-camera.jpg)
+            Spacer(modifier = Modifier.weight(1f))
             Row(
-                modifier = Modifier
-                    .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = Color(0xCC1F1F21))
-                    .clickable { onNavigate("feed") }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.clickable { openLatest() }.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .background(LocketYellow, RoundedCornerShape(4.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "1",
-                        color = Color.Black,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Text(
-                    text = "Lịch sử",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
+                Text("Lịch sử", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.weight(0.55f))
 
             // Bottom Navigation Bar
             LocketBottomBar(
@@ -441,8 +590,10 @@ fun CameraScreen(
                         )
                         IconButton(
                             onClick = {
-                                capturedBitmap = null
-                                viewModel.setReplyToFriend(null)
+                                if (!isPosting) {
+                                    clearCapture()
+                                    viewModel.setReplyToFriend(null)
+                                }
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -464,7 +615,21 @@ fun CameraScreen(
                             .clip(RoundedCornerShape(28.dp))
                             .background(Color.Black)
                     ) {
-                        capturedBitmap?.let { bmp ->
+                        val videoFile = capturedVideo
+                        if (videoFile != null) {
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx -> VideoView(ctx).apply {
+                                    setVideoPath(videoFile.absolutePath)
+                                    setOnPreparedListener { player -> player.isLooping = true; start() }
+                                    setOnErrorListener { _, _, _ ->
+                                        Toast.makeText(ctx, "Không phát được video", Toast.LENGTH_SHORT).show()
+                                        true
+                                    }
+                                } },
+                                onRelease = { it.stopPlayback() }
+                            )
+                        } else capturedBitmap?.let { bmp ->
                             androidx.compose.foundation.Image(
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = "Captured",
@@ -540,12 +705,12 @@ fun CameraScreen(
                             isPosting = true
                             viewModel.postMoment(
                                 bitmap = bmp,
+                                videoFile = capturedVideo,
                                 caption = captionText,
                                 recipients = replyToFriend?.let { listOf(it.uid) } ?: emptyList(),
                                 onSuccess = {
                                     isPosting = false
-                                    capturedBitmap = null
-                                    captionText = ""
+                                    clearCapture()
                                     viewModel.setReplyToFriend(null)
                                     Toast.makeText(context, "Đã gửi khoảnh khắc lên Locket thành công! 💛", Toast.LENGTH_LONG).show()
                                     onNavigate("feed")
@@ -612,16 +777,3 @@ private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
     }
 }
 
-private fun createDemoBitmap(): Bitmap {
-    val bitmap = Bitmap.createBitmap(600, 600, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bitmap)
-    val paint = android.graphics.Paint().apply {
-        color = android.graphics.Color.DKGRAY
-    }
-    canvas.drawRect(0f, 0f, 600f, 600f, paint)
-    paint.color = android.graphics.Color.WHITE
-    paint.textSize = 42f
-    paint.textAlign = android.graphics.Paint.Align.CENTER
-    canvas.drawText("Locket Photo", 300f, 300f, paint)
-    return bitmap
-}

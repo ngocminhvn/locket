@@ -97,7 +97,15 @@ class MainActivity : ComponentActivity() {
                                 "camera" -> {
                                     CameraScreen(
                                         viewModel = viewModel,
-                                        onNavigate = { currentScreen = it },
+                                        onNavigate = { destination ->
+                                            if (destination == "latest") {
+                                                selectedGridIndex = 0
+                                                viewModel.selectFriend(null)
+                                                currentScreen = "feed"
+                                            } else {
+                                                currentScreen = destination
+                                            }
+                                        },
                                         onOpenFriends = { showFriendsModal = true },
                                         onOpenProfile = { showProfileScreen = true }
                                     )

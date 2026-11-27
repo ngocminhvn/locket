@@ -18,6 +18,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import java.io.File
 import okhttp3.Response
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -997,17 +999,50 @@ class LocketApiClient(
         }
     }
 
+    suspend fun uploadMomentVideo(file: File): UploadResult = withContext(Dispatchers.IO) {
+        val uid = getUid()
+        val token = getToken()
+        if (uid.isNullOrBlank() || token.isNullOrBlank() || !file.isFile || file.length() == 0L) {
+            return@withContext UploadResult(false, errorMessage = "Video không hợp lệ hoặc chưa đăng nhập")
+        }
+        val path = "users%2F$uid%2Fmoments%2Fvideos%2F${generateRandomId(20)}.mp4"
+        val bucket = "locket-video"
+        val endpoint = "https://firebasestorage.googleapis.com/v0/b/$bucket/o"
+        try {
+            val request = Request.Builder()
+                .url("$endpoint?uploadType=media&name=$path")
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Cache-Control", "public, max-age=604800")
+                .post(file.asRequestBody("video/mp4".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    UploadResult(false, errorMessage = "Lỗi tải video (HTTP ${response.code})")
+                } else {
+                    val json = gson.fromJson(body, JsonObject::class.java)
+                    val downloadToken = optString(json, "downloadTokens").substringBefore(',')
+                    if (downloadToken.isBlank()) UploadResult(false, errorMessage = "Storage không trả URL video")
+                    else UploadResult(true, downloadUrl = "$endpoint/$path?alt=media&token=$downloadToken")
+                }
+            }
+        } catch (e: Exception) {
+            UploadResult(false, errorMessage = e.localizedMessage ?: "Lỗi tải video")
+        }
+    }
+
     suspend fun postMoment(
         thumbnailUrl: String,
         caption: String = "",
         recipients: List<String> = emptyList(),
-        md5: String
+        md5: String,
+        videoUrl: String? = null
     ): PostResult = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
             return@withContext PostResult(
-                success = true,
-                momentId = "local_${System.currentTimeMillis()}"
+                success = false,
+                errorMessage = "Chưa đăng nhập"
             )
         }
 
@@ -1019,6 +1054,7 @@ class LocketApiClient(
                 add("recipients", gson.toJsonTree(recipients))
                 add("overlays", gson.toJsonTree(emptyList<String>()))
                 addProperty("md5", md5)
+                if (!videoUrl.isNullOrBlank()) addProperty("video_url", videoUrl)
             }
             val payload = JsonObject().apply {
                 add("data", innerData)
@@ -1036,10 +1072,19 @@ class LocketApiClient(
             val respStr = response.body?.string() ?: ""
 
             if (response.isSuccessful) {
-                val json = gson.fromJson(respStr, JsonObject::class.java)
-                val status = json.get("status")?.asInt ?: 200
-                if (status in 200..299) {
-                    PostResult(success = true, momentId = "moment_${System.currentTimeMillis()}")
+                val root = gson.fromJson(respStr, JsonObject::class.java)
+                val json = root.getAsJsonObject("result")
+                    ?: return@withContext PostResult(false, errorMessage = "Phản hồi đăng khoảnh khắc không hợp lệ")
+                val status = json.get("status")?.asInt ?: 0
+                if (status in 200..299 && json.getAsJsonArray("errors")?.size().let { it == null || it == 0 }) {
+                    val data = json.get("data")
+                    val item = when {
+                        data?.isJsonObject == true -> data.asJsonObject
+                        data?.isJsonArray == true -> data.asJsonArray.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject
+                        else -> null
+                    }
+                    val id = optString(item, "canonical_uid").ifBlank { optString(item, "moment_uid") }.ifBlank { optString(item, "id") }
+                    PostResult(success = true, momentId = id.ifBlank { null })
                 } else {
                     val err = json.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi máy chủ ($status)"
                     PostResult(success = false, errorMessage = err)
