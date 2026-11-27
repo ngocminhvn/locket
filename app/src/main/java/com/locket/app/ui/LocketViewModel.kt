@@ -670,7 +670,10 @@ class LocketViewModel(
             // the cached newest message, fall back to the original page size.
             val recent = incremental && old.isNotEmpty()
             var page = apiClient.fetchChatMessages(convId, pageSize = if (recent) 24 else 100).getOrNull() ?: return@withLock
-            if (recent && old.last().id !in page.messages.map { it.id }) {
+            val needsFullRefresh = if (RustLocketCore.isAvailable) {
+                RustLocketCore.needsFullChatRefresh(recent, old.lastOrNull()?.id, page.messages)
+            } else recent && old.last().id !in page.messages.map { it.id }
+            if (needsFullRefresh) {
                 page = apiClient.fetchChatMessages(convId).getOrNull() ?: return@withLock
             }
             if (!activeAccount(account) || _activeConversationId.value != convId) return@withLock

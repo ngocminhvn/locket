@@ -15,6 +15,8 @@ object RustLocketCore {
     private external fun parseChatNative(responseBody: ByteArray): ByteArray
     private external fun mergeMomentOrderNative(ids: Array<String>, owners: Array<String>, timestamps: LongArray, deleted: Array<String>, hidden: Array<String>): IntArray
     private external fun calculateStreakNative(timestamps: LongArray, nowMillis: Long, timezone: String): Int
+    private external fun tokenActionNative(hasToken: Boolean, stale: Boolean, hasRefresh: Boolean): Int
+    private external fun needsFullChatRefreshNative(incremental: Boolean, newestCached: String, received: Array<String>): Boolean
 
     data class FeedDelta(
         val notModified: Boolean,
@@ -56,6 +58,13 @@ object RustLocketCore {
         return calculateStreakNative(LongArray(moments.size) { moments[it].timestampSeconds }, nowMillis, timezone)
             .also { require(it >= 0) }
     }
+
+    enum class TokenAction { MISSING, USE_CURRENT, REFRESH }
+    fun tokenAction(hasToken: Boolean, stale: Boolean, hasRefresh: Boolean): TokenAction =
+        TokenAction.entries[tokenActionNative(hasToken, stale, hasRefresh)]
+
+    fun needsFullChatRefresh(incremental: Boolean, newestCachedId: String?, received: List<ChatMessage>): Boolean =
+        needsFullChatRefreshNative(incremental, newestCachedId.orEmpty(), Array(received.size) { received[it].id })
 }
 
 internal object FeedWireDecoder {

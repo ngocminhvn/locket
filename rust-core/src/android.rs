@@ -171,3 +171,35 @@ pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_calculateStreakNa
         }
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_tokenActionNative(
+    _env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    has_token: jni::sys::jboolean,
+    stale: jni::sys::jboolean,
+    has_refresh: jni::sys::jboolean,
+) -> jni::sys::jint {
+    crate::auth::token_action(has_token != 0, stale != 0, has_refresh != 0) as i32
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_needsFullChatRefreshNative(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    incremental: jni::sys::jboolean,
+    newest_cached: JString<'_>,
+    received: JObjectArray<'_>,
+) -> jni::sys::jboolean {
+    let result = java_string(&mut env, &newest_cached).and_then(|newest| {
+        string_array(&mut env, &received)
+            .map(|ids| crate::chat::needs_full_refresh(incremental != 0, &newest, &ids))
+    });
+    match result {
+        Ok(value) => u8::from(value),
+        Err(error) => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", error.to_string());
+            0
+        }
+    }
+}

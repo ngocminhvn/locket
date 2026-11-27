@@ -48,6 +48,7 @@ class LocketApiClient(
     private data class CachedName(val value: Pair<String, String>, val expiresAt: Long)
     private val nameCache = java.util.concurrent.ConcurrentHashMap<String, CachedName>()
     private val nameResolveLock = kotlinx.coroutines.sync.Mutex()
+    private val tokenRefreshLock = kotlinx.coroutines.sync.Mutex()
     private fun nameKey(uid: String) = "${getUid().orEmpty()}:$uid"
     private fun nameNow() = android.os.SystemClock.elapsedRealtime()
     fun seedUserNames(friends: List<Friend>, fresh: Boolean = false) {
@@ -215,7 +216,12 @@ class LocketApiClient(
     }
 
     // idToken chi song 1 gio -> refresh bang refreshToken da luu de app khoi hoi lai account.
-    suspend fun refreshIdToken(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun refreshIdToken(rejectedToken: String? = null): Boolean = tokenRefreshLock.withLock {
+        if (!rejectedToken.isNullOrBlank() && getToken() != rejectedToken) return@withLock true
+        refreshIdTokenUnlocked()
+    }
+
+    private suspend fun refreshIdTokenUnlocked(): Boolean = withContext(Dispatchers.IO) {
         val refreshToken = getRefreshToken() ?: return@withContext false
         try {
             val formBody = FormBody.Builder()
@@ -228,22 +234,38 @@ class LocketApiClient(
                 .addHeader("X-Android-Cert", ANDROID_CERT)
                 .post(formBody)
                 .build()
-            val response = client.newCall(request).execute()
-            val respStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) return@withContext false
+            val (successful, respStr) = client.newCall(request).execute().use { response ->
+                response.isSuccessful to response.body?.string().orEmpty()
+            }
+            if (!successful) return@withContext false
             val json = gson.fromJson(respStr, JsonObject::class.java)
             val newIdToken = json.get("id_token")?.asString ?: return@withContext false
             val newRefreshToken = json.get("refresh_token")?.asString ?: refreshToken
             onTokensRefreshed(newIdToken, newRefreshToken)
             true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             false
         }
     }
 
     suspend fun ensureFreshToken(): Boolean {
-        if (getToken().isNullOrBlank()) return false
-        return if (isTokenStale()) refreshIdToken() else true
+        if (!RustLocketCore.isAvailable) {
+            if (getToken().isNullOrBlank()) return false
+            return if (isTokenStale()) refreshIdToken() else true
+        }
+        return when (RustLocketCore.tokenAction(!getToken().isNullOrBlank(), isTokenStale(), !getRefreshToken().isNullOrBlank())) {
+            RustLocketCore.TokenAction.MISSING -> false
+            RustLocketCore.TokenAction.USE_CURRENT -> true
+            RustLocketCore.TokenAction.REFRESH -> tokenRefreshLock.withLock {
+                when (RustLocketCore.tokenAction(!getToken().isNullOrBlank(), isTokenStale(), !getRefreshToken().isNullOrBlank())) {
+                    RustLocketCore.TokenAction.USE_CURRENT -> true
+                    RustLocketCore.TokenAction.REFRESH -> refreshIdTokenUnlocked()
+                    RustLocketCore.TokenAction.MISSING -> false
+                }
+            }
+        }
     }
 
     // ==========================================
@@ -2262,11 +2284,12 @@ class LocketApiClient(
         }
         return try {
             withContext(Dispatchers.IO) {
-                var resp = client.newCall(buildRequest(getToken())).execute()
+                val usedToken = getToken()
+                var resp = client.newCall(buildRequest(usedToken)).execute()
                 if (resp.code == 401) {
                     resp.close()
                     // idToken het han (song 1 gio) -> refresh roi thu lai dung 1 lan
-                    if (refreshIdToken()) {
+                    if (refreshIdToken(usedToken)) {
                         resp = client.newCall(buildRequest(getToken())).execute()
                     } else {
                         return@withContext null
