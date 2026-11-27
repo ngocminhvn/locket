@@ -355,9 +355,62 @@ class LocketApiClient(
                 "Máy chủ đã phản hồi đổi email nhưng không xác thực lại được. Hãy kiểm tra tài khoản trước khi thử lại."
             }
             onTokensRefreshed(auth.idToken!!, auth.refreshToken!!)
+            // Goc (ChangeEmailSheet, bundle ~1358920, case 385/416): sau
+            // signInWithCustomToken, neu currentUser.emailVerified == false
+            // thi gui sendEmailVerification(). REST tuong duong: doc
+            // emailVerified qua accounts:lookup, neu false thi gui
+            // accounts:sendOobCode {requestType: VERIFY_EMAIL}. Chi gui
+            // khi xac dinh chua verified; lookup loi thi bo qua vi email
+            // da doi xong (khong bao loi gia cho thao tac chinh).
+            val verified = lookupEmailVerified(auth.idToken!!)
+            if (verified == false) {
+                val sent = sendVerificationEmail(auth.idToken!!)
+                if (sent.isFailure) error("Đã đổi email nhưng không gửi được email xác minh: ${sent.exceptionOrNull()?.message}")
+            }
             Result.success(Unit)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { Result.failure(e) }
+    }
+
+    // accounts:lookup doc emailVerified cua idToken moi. Tra null khi
+    // khong doc duoc (mang/loi server) — caller tu quyet dinh bo qua.
+    private fun lookupEmailVerified(idToken: String): Boolean? {
+        return try {
+            val payload = JsonObject().apply { addProperty("idToken", idToken) }
+            val req = Request.Builder()
+                .url("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$FIREBASE_API_KEY")
+                .addHeader("X-Android-Package", ANDROID_PACKAGE)
+                .addHeader("X-Android-Cert", ANDROID_CERT)
+                .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val user = gson.fromJson(response.body?.string(), JsonObject::class.java)
+                    .getAsJsonArray("users")?.firstOrNull()?.asJsonObject ?: return null
+                user.get("emailVerified")?.takeIf { it.isJsonPrimitive }?.asBoolean
+            }
+        } catch (e: Exception) { null }
+    }
+
+    // Gui email xac minh — REST tuong duong cua Firebase Auth SDK
+    // currentUser.sendEmailVerification() (bundle ~1358920 case 416).
+    // Tra loi server that khi bi tu choi (vd email da verified).
+    private fun sendVerificationEmail(idToken: String): Result<Unit> {
+        return try {
+            val payload = JsonObject().apply {
+                addProperty("requestType", "VERIFY_EMAIL")
+                addProperty("idToken", idToken)
+            }
+            val req = Request.Builder()
+                .url("https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=$FIREBASE_API_KEY")
+                .addHeader("X-Android-Package", ANDROID_PACKAGE)
+                .addHeader("X-Android-Cert", ANDROID_CERT)
+                .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+            client.newCall(req).execute().use { response ->
+                val respStr = response.body?.string() ?: ""
+                if (response.isSuccessful) Result.success(Unit)
+                else Result.failure(Exception(parseFirebaseError(respStr)))
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     suspend fun requestEditedPhoneCode(phone: String): Result<Unit> = withContext(Dispatchers.IO) {
