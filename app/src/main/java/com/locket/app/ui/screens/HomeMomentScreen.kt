@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +44,8 @@ fun HomeMomentScreen(
     headerHeight: Dp,
     footerHeight: Dp,
     reactionEvent: Pair<String, String>?,
-    reactionSerial: Int
+    reactionSerial: Int,
+    isActive: Boolean = true
 ) {
     val context = LocalContext.current
     val friends by viewModel.friends.collectAsState()
@@ -58,9 +61,9 @@ fun HomeMomentScreen(
 
     // Luot xem (Batch 7a): chi tai cho moment CUA MINH (server 401 cho
     // moment cua ban). Loi -> khong co so lieu -> an chip.
-    LaunchedEffect(currentMoment?.id, currentUser.uid) {
+    LaunchedEffect(currentMoment?.id, currentUser.uid, isActive) {
         val moment = currentMoment
-        if (moment != null && moment.userUid == currentUser.uid) {
+        if (isActive && moment != null && moment.userUid == currentUser.uid && momentViewCounts[moment.id] == null) {
             viewModel.refreshMomentViews(moment)
         }
     }
@@ -111,7 +114,19 @@ fun HomeMomentScreen(
             ) {
                 if (currentMoment != null) {
                     val videoUrl = currentMoment.videoUrl
-                    if (!videoUrl.isNullOrBlank()) {
+                    var imageLoading by remember(currentMoment.thumbnailUrl) { mutableStateOf(true) }
+                    if (imageLoading && isActive) MomentLoadingSkeleton(Modifier.fillMaxSize())
+                    AsyncImage(
+                        model = currentMoment.thumbnailUrl,
+                        contentDescription = "Moment",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        error = ColorPainter(Color(0xFF252527)),
+                        onLoading = { imageLoading = true },
+                        onSuccess = { imageLoading = false },
+                        onError = { imageLoading = false }
+                    )
+                    if (!videoUrl.isNullOrBlank() && isActive) {
                         key(videoUrl) {
                             AndroidView(
                                 modifier = Modifier.fillMaxSize(),
@@ -122,12 +137,7 @@ fun HomeMomentScreen(
                                 onRelease = { it.stopPlayback() }
                             )
                         }
-                    } else AsyncImage(
-                        model = currentMoment.thumbnailUrl,
-                        contentDescription = "Moment",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    }
 
                     // Caption overlay inside photo (Matches frame_010.jpg)
                     if (currentMoment.caption.isNotBlank()) {
@@ -576,4 +586,18 @@ internal fun MomentReactionBar(
                 }
             }
 
+}
+
+
+@Composable
+private fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "moment-loading")
+    val alpha by transition.animateFloat(
+        initialValue = 0.25f, targetValue = 0.65f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "skeleton-alpha"
+    )
+    Box(modifier.background(Brush.linearGradient(listOf(
+        Color(0xFF202022), Color(0xFF48484A).copy(alpha = alpha), Color(0xFF202022)
+    ))))
 }

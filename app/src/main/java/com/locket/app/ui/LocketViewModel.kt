@@ -19,6 +19,9 @@ import com.locket.app.storage.SessionManager
 import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -72,6 +75,19 @@ class LocketViewModel(
     private val momentWriteLock = Mutex()
     private var historyCursor: LocketApiClient.HistoryCursor? = null
     private val feedSyncLock = Mutex()
+    private val conversationSyncLock = Mutex()
+    private val chatSyncLock = Mutex()
+    private var syncJob: Job? = null
+    private var syncAgain = false
+    private var chatOpenJob: Job? = null
+    private var chatPollJob: Job? = null
+    private var activeFriendUid: String? = null
+    private var lastConversationSync = 0L
+    private val chatRefreshedAt = mutableMapOf<String, Long>()
+    private val chatMarkedThrough = mutableMapOf<String, String>()
+    private fun now() = android.os.SystemClock.elapsedRealtime()
+    private fun activeAccount(uid: String) = _isLoggedIn.value && uid == sessionManager.currentUser.uid
+
     private var historyJob: Job? = null
     private var ownHistoryCursor: LocketApiClient.HistoryCursor? = null
     private var ownHistoryJob: Job? = null
@@ -189,12 +205,20 @@ class LocketViewModel(
      * cache nen hien ngay (neu anh da kip tai ve truoc).
      */
     fun prefetchThumbnails(urls: List<String>) {
-        val fresh = urls.filter { it.isNotBlank() && prefetchedThumbnails.add(it) }
+        val fresh = urls.distinct().filter { it.isNotBlank() && prefetchedThumbnails.add(it) }
+        if (prefetchedThumbnails.size > 300) {
+            prefetchedThumbnails.clear()
+            prefetchedThumbnails.addAll(fresh)
+        }
         if (fresh.isEmpty()) return
         val app = LocketApplication.instance
         val loader = app.imageLoader
         for (url in fresh) {
-            loader.enqueue(ImageRequest.Builder(app).data(url).build())
+            loader.enqueue(ImageRequest.Builder(app).data(url)
+                .size(app.resources.displayMetrics.widthPixels)
+                .listener(onError = { _, _ ->
+                    viewModelScope.launch { prefetchedThumbnails.remove(url) }
+                }).build())
         }
     }
 
@@ -203,10 +227,55 @@ class LocketViewModel(
      * trong danh sach da sap xep moi-nhat-truoc. currentIndex = -1 (dang o
      * camera) thi prefetch tu moment moi nhat.
      */
-    fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 5) {
+    fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 8, forward: Boolean = true) {
         if (moments.isEmpty()) return
-        val upcoming = moments.drop((currentIndex + 1).coerceAtLeast(0)).take(count)
-        prefetchThumbnails(upcoming.map { it.thumbnailUrl })
+        val next = if (forward) ((currentIndex + 1)..(currentIndex + count)).toList()
+            else ((currentIndex - 1) downTo (currentIndex - count)).toList()
+        val opposite = if (forward) listOf(currentIndex - 1, currentIndex - 2)
+            else listOf(currentIndex + 1, currentIndex + 2)
+        prefetchThumbnails((next + opposite).mapNotNull { moments.getOrNull(it)?.thumbnailUrl })
+    }
+
+    private fun knownMomentNames(incoming: List<Moment>): List<Moment> {
+        val friends = _friends.value.associateBy { it.uid }
+        val own = _currentUser.value
+        val old = _moments.value.associateBy { it.id }
+        return incoming.map { m ->
+            val friend = friends[m.userUid]
+            val prior = old[m.id]
+            val name = when {
+                m.userUid == own.uid -> own.displayName
+                friend != null && friend.displayName != friend.uid -> friend.displayName
+                else -> m.userName.takeUnless { it == m.userUid }.orEmpty()
+            }.ifBlank { prior?.userName.orEmpty() }.ifBlank { m.userUid }
+            val avatar = when {
+                m.userUid == own.uid -> own.profilePictureUrl
+                friend != null -> friend.avatarUrl
+                else -> m.userAvatarUrl
+            }.ifBlank { prior?.userAvatarUrl.orEmpty() }
+            m.copy(userName = name, userAvatarUrl = avatar)
+        }
+    }
+
+    private fun enrichMomentNames(account: String, records: List<Moment>) {
+        val missing = records.filter { it.userName.isBlank() || it.userName == it.userUid }.map { it.userUid }.distinct()
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            val names = apiClient.resolveUserNames(missing)
+            if (!activeAccount(account) || names.isEmpty()) return@launch
+            momentWriteLock.withLock {
+                if (!activeAccount(account)) return@withLock
+                val updated = _moments.value.map { m ->
+                    val name = names[m.userUid]
+                    if (name != null && (m.userName.isBlank() || m.userName == m.userUid))
+                        m.copy(userName = name.first, userAvatarUrl = name.second.ifBlank { m.userAvatarUrl }) else m
+                }
+                if (updated != _moments.value) {
+                    cache.saveMoments(updated)
+                    if (activeAccount(account)) _moments.value = updated
+                }
+            }
+        }
     }
 
     private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
@@ -214,8 +283,10 @@ class LocketViewModel(
             .filter { it.id !in deletedMomentIds && it.userUid !in hiddenFriendUids }
             .associateBy { it.id }.values
             .sortedByDescending { it.timestampSeconds }
-        cache.saveMoments(merged)
-        _moments.value = merged
+        if (merged != _moments.value) {
+            cache.saveMoments(merged)
+            _moments.value = merged
+        }
     }
 
     /**
@@ -225,8 +296,10 @@ class LocketViewModel(
      */
     private suspend fun removeMomentsFromCache(predicate: (Moment) -> Boolean) = momentWriteLock.withLock {
         val updated = _moments.value.filterNot(predicate)
-        _moments.value = updated
-        cache.saveMoments(updated)
+        if (updated != _moments.value) {
+            cache.saveMoments(updated)
+            _moments.value = updated
+        }
     }
 
     fun loadOlderMoments() {
@@ -248,7 +321,9 @@ class LocketViewModel(
                         else -> m
                     }
                 }
-                mergeMoments(incoming)
+                val resolved = knownMomentNames(incoming)
+                mergeMoments(resolved)
+                enrichMomentNames(account, resolved)
                 // Dot anh cu vua ve chinh la cac trang ke tiep user sap vuot
                 // toi (dang gan cuoi danh sach) -> prefetch thumbnail ngay de
                 // anh kip vao cache truoc khi user vuot toi.
@@ -319,13 +394,15 @@ class LocketViewModel(
         // Cache-first: chuyen cache JSON cu sang Room 1 lan (neu chua),
         // roi UI doc truc tiep Flow tu Room — mo app la thay du lieu ngay,
         // khong cho mang. Sync chay nen o duoi, xong moi ghi de Room.
-        viewModelScope.launch { cache.migrateLegacyCacheIfNeeded() }
-        viewModelScope.launch { cache.observeMoments().collect { _moments.value = it } }
-        viewModelScope.launch { cache.observeFriends().collect { _friends.value = it } }
-        viewModelScope.launch { cache.observeConversations().collect { _conversations.value = it } }
-        if (isLoggedIn) {
-            viewModelScope.launch {
-                apiClient.ensureFreshToken()
+        viewModelScope.launch {
+            cache.migrateLegacyCacheIfNeeded()
+            if (isLoggedIn) {
+                _moments.value = cache.observeMoments().first()
+                _friends.value = cache.observeFriends().first()
+                _conversations.value = cache.observeConversations().first()
+                apiClient.seedUserNames(_friends.value)
+                apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
+                prefetchUpcomingMoments(_moments.value, -1)
                 syncAllData()
             }
         }
@@ -371,93 +448,111 @@ class LocketViewModel(
     }
 
     fun syncAllData() {
-        viewModelScope.launch {
+        if (syncJob?.isActive == true) {
+            syncAgain = true
+            return
+        }
+        val account = sessionManager.currentUser.uid
+        if (account.isBlank() || !_isLoggedIn.value) return
+        syncJob = viewModelScope.launch {
             _isSyncing.value = true
-            apiClient.ensureFreshToken()
-            val currentUid = sessionManager.currentUser.uid
-
-            // 1. Fetch user profile
-            if (currentUid.isNotBlank()) {
-                val userRes = apiClient.fetchUserProfile(currentUid)
-                userRes.onSuccess { user ->
-                    _currentUser.value = user
-                    sessionManager.currentUser = user
-                }
-            }
-
-            // 2. Fetch live friends
-            var currentFriendsList = _friends.value
-            if (currentUid.isNotBlank()) {
-                val friendsRes = apiClient.fetchFriends(currentUid)
-                val liveFriends = friendsRes.getOrNull()
-                if (liveFriends != null && liveFriends.isNotEmpty()) {
-                    currentFriendsList = liveFriends
-                    _friends.value = liveFriends
-                    cache.saveFriends(liveFriends)
-                }
-            }
-
-            // 3. Fetch live moments feed
-            feedSyncLock.withLock {
-            val feedRes = apiClient.fetchMomentsFeed(sessionManager.feedSyncToken)
-            val feed = feedRes.getOrNull()
-            if (feed != null && _isLoggedIn.value && currentUid == sessionManager.currentUser.uid) {
-                val rawMoments = feed.moments
-                if (rawMoments.isNotEmpty()) {
-                    val friendsMap = currentFriendsList.associateBy { it.uid }
-                    val myUid = _currentUser.value.uid
-                    val resolved = rawMoments.map { m ->
-                        when {
-                            m.userUid == myUid -> m.copy(
-                                userName = _currentUser.value.displayName.ifBlank { "Bạn" },
-                                userAvatarUrl = _currentUser.value.profilePictureUrl
-                            )
-                            friendsMap.containsKey(m.userUid) -> {
-                                val f = friendsMap[m.userUid]!!
-                                m.copy(
-                                    userName = f.displayName,
-                                    userAvatarUrl = f.avatarUrl
-                                )
+            try {
+                if (!apiClient.ensureFreshToken() || !activeAccount(account)) return@launch
+                apiClient.seedUserNames(_friends.value)
+                supervisorScope {
+                    // Start the feed immediately. History starts only once feed
+                    // has been delivered, not after unrelated profile/chat requests.
+                    launch {
+                        feedSyncLock.withLock {
+                            val feed = apiClient.fetchMomentsFeed(sessionManager.feedSyncToken).getOrNull()
+                            if (feed != null && activeAccount(account)) {
+                                if (feed.moments.isNotEmpty()) {
+                                    val resolved = knownMomentNames(feed.moments)
+                                    mergeMoments(resolved)
+                                    prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
+                                    enrichMomentNames(account, resolved)
+                                    if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
+                                }
+                                if (activeAccount(account)) sessionManager.feedSyncToken = feed.syncToken
                             }
-                            else -> if (m.userName.isBlank()) m.copy(userName = m.userUid) else m
+                        }
+                        if (activeAccount(account) && historyCursor == null && _historyHasMore.value && _historyError.value == null) loadOlderMoments()
+                    }
+                    launch {
+                        apiClient.fetchUserProfile(account).onSuccess { user ->
+                            if (activeAccount(account)) {
+                                _currentUser.value = user
+                                sessionManager.currentUser = user
+                            }
                         }
                     }
-                    mergeMoments(resolved)
-                    // Cap nhat Home Screen Widget bang moment moi nhat that
-                    LocketWidgetUpdater.updateAll(LocketApplication.instance)
+                    launch {
+                        apiClient.fetchFriends(account).onSuccess { live ->
+                            if (activeAccount(account)) {
+                                apiClient.seedUserNames(live, fresh = true)
+                                if (live != _friends.value) {
+                                    cache.saveFriends(live)
+                                    if (activeAccount(account)) _friends.value = live
+                                }
+                                momentWriteLock.withLock {
+                                    if (!activeAccount(account)) return@withLock
+                                    val updated = knownMomentNames(_moments.value)
+                                    if (updated != _moments.value) {
+                                        cache.saveMoments(updated)
+                                        if (activeAccount(account)) _moments.value = updated
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    launch { refreshConversations(force = false) }
+                }
+            } finally {
+                _isSyncing.value = false
+                syncJob = null
+                if (syncAgain && activeAccount(account)) {
+                    syncAgain = false
+                    syncAllData()
                 }
             }
-
-                if (feed != null && _isLoggedIn.value && currentUid == sessionManager.currentUser.uid) {
-                    sessionManager.feedSyncToken = feed.syncToken
-                }
-            }
-            if (historyCursor == null && _historyHasMore.value && _historyError.value == null) loadOlderMoments()
-
-            // 4. Fetch live conversations
-            if (currentUid.isNotBlank()) {
-                refreshConversations()
-            }
-
-            _isSyncing.value = false
         }
     }
 
-    /** Chi tai lai danh sach tro chuyen (dung khi quay lai man danh sach). */
-    suspend fun refreshConversations() {
-        val currentUid = sessionManager.currentUser.uid
-        if (currentUid.isBlank()) return
-        val convRes = apiClient.fetchConversations(currentUid)
-        val liveConvs = convRes.getOrNull() ?: return
-        // (a) Room friends cache: chi dung ten/avatar that tu cache.
-        // Khong de muc cache ten-UID ghi de ten that vua resolve duoc,
-        // va nguoc lai: live chua resolve duoc thi lay ten that tu cache.
-        val friendsMap = _friends.value.associateBy { it.uid }
-        val resolvedConvs = liveConvs.map { c ->
-            c.copy(friend = mergeConversationFriend(c.friend, friendsMap[c.friend.uid]))
+    /** Cached list remains visible; coalesce repeated screen-entry refreshes. */
+    suspend fun refreshConversations(force: Boolean = true) {
+        val account = sessionManager.currentUser.uid
+        if (account.isBlank() || !_isLoggedIn.value) return
+        conversationSyncLock.withLock {
+            if (!activeAccount(account)) return@withLock
+            if (!force && lastConversationSync != 0L && now() - lastConversationSync < 30_000L) return@withLock
+            apiClient.seedUserNames(_friends.value)
+            val live = apiClient.fetchConversations(account, resolveNames = false).getOrNull() ?: return@withLock
+            if (!activeAccount(account)) return@withLock
+            val cached = (_conversations.value.map { it.friend } + _friends.value).associateBy { it.uid }
+            val resolved = live.map { c -> c.copy(friend = mergeConversationFriend(c.friend, cached[c.friend.uid])) }
+            if (resolved != _conversations.value) {
+                cache.saveConversations(resolved)
+                if (activeAccount(account)) _conversations.value = resolved
+            }
+            lastConversationSync = now()
+            val missing = resolved.filter { it.friend.displayName.isBlank() || it.friend.displayName == it.friend.uid }.map { it.friend.uid }
+            if (missing.isNotEmpty()) viewModelScope.launch {
+                val names = apiClient.resolveUserNames(missing)
+                conversationSyncLock.withLock {
+                    if (!activeAccount(account)) return@withLock
+                    val updated = _conversations.value.map { c ->
+                        val name = names[c.friend.uid]
+                        if (name != null && (c.friend.displayName.isBlank() || c.friend.displayName == c.friend.uid))
+                            c.copy(friend = c.friend.copy(displayName = name.first, avatarUrl = name.second.ifBlank { c.friend.avatarUrl }))
+                        else c
+                    }
+                    if (updated != _conversations.value) {
+                        cache.saveConversations(updated)
+                        if (activeAccount(account)) _conversations.value = updated
+                    }
+                }
+            }
         }
-        _conversations.value = resolvedConvs
-        cache.saveConversations(resolvedConvs)
     }
 
     /**
@@ -493,53 +588,94 @@ class LocketViewModel(
      * Chua co cuoc tro chuyen that (mo tu danh sach ban be) -> khong co id,
      * hien trang trong that; gui tin se tao cuoc tro chuyen tren server.
      */
+    fun closeChat() {
+        chatOpenJob?.cancel()
+        chatPollJob?.cancel()
+        chatMessagesJob?.cancel()
+        chatOlderJob?.cancel()
+        activeFriendUid = null
+        _activeConversationId.value = null
+        _chatMessages.value = emptyList()
+        _isChatLoading.value = false
+    }
+
     fun openChat(friendUid: String) {
-        viewModelScope.launch {
-            _isChatLoading.value = true
-            if (_conversations.value.isEmpty()) {
-                refreshConversations()
+        closeChat()
+        activeFriendUid = friendUid
+        val account = sessionManager.currentUser.uid
+        _isChatLoading.value = true
+        chatOpenJob = viewModelScope.launch {
+            try {
+                var convId = _conversations.value.firstOrNull { it.friend.uid == friendUid }?.id
+                if (convId == null) {
+                    val local = cache.observeConversations().first()
+                    convId = local.firstOrNull { it.friend.uid == friendUid }?.id
+                }
+                if (convId == null) {
+                    refreshConversations(force = true)
+                    convId = _conversations.value.firstOrNull { it.friend.uid == friendUid }?.id
+                }
+                val id = convId ?: return@launch
+                if (!activeAccount(account) || activeFriendUid != friendUid) return@launch
+                _activeConversationId.value = id
+                chatNextPageToken = null
+                _chatHasMoreOlder.value = true
+                _isLoadingOlderChat.value = false
+                _chatMessages.value = cache.observeChatMessages(id).first()
+                chatMessagesJob = viewModelScope.launch {
+                    cache.observeChatMessages(id).collect { if (_activeConversationId.value == id) _chatMessages.value = it }
+                }
+                // Cache is displayed before any network response.
+                if (_chatMessages.value.isNotEmpty()) _isChatLoading.value = false
+                fetchChatMessagesAndMarkRead(id, resetPagination = true)
+            } finally {
+                if (activeFriendUid == friendUid) _isChatLoading.value = false
             }
-            val convId = _conversations.value.firstOrNull { it.friend.uid == friendUid }?.id
-            _activeConversationId.value = convId
-            chatMessagesJob?.cancel()
-            chatOlderJob?.cancel()
-            // Chat moi: dat lai phan trang tin cu.
-            chatNextPageToken = null
-            _chatHasMoreOlder.value = true
-            _isLoadingOlderChat.value = false
-            if (convId.isNullOrBlank()) {
-                _chatMessages.value = emptyList()
-                _isChatLoading.value = false
-                return@launch
-            }
-            chatMessagesJob = viewModelScope.launch {
-                cache.observeChatMessages(convId).collect { _chatMessages.value = it }
-            }
-            fetchChatMessagesAndMarkRead(convId, resetPagination = true)
-            _isChatLoading.value = false
         }
     }
 
-    /** Tai lai tin nhan that cua cuoc tro chuyen dang mo + danh dau da doc. */
     fun refreshChat(conversationId: String? = _activeConversationId.value) {
         val convId = conversationId ?: return
-        viewModelScope.launch { fetchChatMessagesAndMarkRead(convId) }
+        if (chatPollJob?.isActive == true || chatOpenJob?.isActive == true || convId != _activeConversationId.value) return
+        chatPollJob = viewModelScope.launch { fetchChatMessagesAndMarkRead(convId, incremental = true) }
     }
 
-    private suspend fun fetchChatMessagesAndMarkRead(convId: String, resetPagination: Boolean = false) {
-        apiClient.fetchChatMessages(convId).onSuccess { page ->
+    private suspend fun fetchChatMessagesAndMarkRead(convId: String, resetPagination: Boolean = false, incremental: Boolean = false) {
+        val account = sessionManager.currentUser.uid
+        chatSyncLock.withLock {
+            if (!activeAccount(account) || _activeConversationId.value != convId) return@withLock
+            if (!apiClient.ensureFreshToken()) return@withLock
+            val old = _chatMessages.value
+            // Small overlapping window for polling; if it does not overlap
+            // the cached newest message, fall back to the original page size.
+            val recent = incremental && old.isNotEmpty()
+            var page = apiClient.fetchChatMessages(convId, pageSize = if (recent) 24 else 100).getOrNull() ?: return@withLock
+            if (recent && old.last().id !in page.messages.map { it.id }) {
+                page = apiClient.fetchChatMessages(convId).getOrNull() ?: return@withLock
+            }
+            if (!activeAccount(account) || _activeConversationId.value != convId) return@withLock
             cache.saveChatMessages(page.messages)
             if (resetPagination) {
                 chatNextPageToken = page.nextPageToken
                 _chatHasMoreOlder.value = page.nextPageToken != null
             }
-        }
-        apiClient.markConversationAsRead(convId).onSuccess {
-            val updated = _conversations.value.map {
-                if (it.id == convId) it.copy(unreadCount = 0) else it
+            chatRefreshedAt[convId] = now()
+            val latest = page.messages.lastOrNull()?.id
+            val unread = _conversations.value.any { it.id == convId && it.unreadCount > 0 }
+            if ((latest != null && chatMarkedThrough[convId] != latest) || unread) {
+                apiClient.markConversationAsRead(convId).onSuccess {
+                    if (!activeAccount(account) || _activeConversationId.value != convId) return@onSuccess
+                    if (latest != null) chatMarkedThrough[convId] = latest
+                    conversationSyncLock.withLock {
+                        if (!activeAccount(account)) return@withLock
+                        val updated = _conversations.value.map { if (it.id == convId) it.copy(unreadCount = 0) else it }
+                        if (updated != _conversations.value) {
+                            cache.saveConversations(updated)
+                            if (activeAccount(account)) _conversations.value = updated
+                        }
+                    }
+                }
             }
-            _conversations.value = updated
-            cache.saveConversations(updated)
         }
     }
 
@@ -628,13 +764,14 @@ class LocketViewModel(
         viewModelScope.launch {
             val res = apiClient.sendChatMessage(receiverUid, message, momentUid)
             if (res.isSuccess) {
-                refreshConversations()
-                // Neu dang mo dung cuoc tro chuyen nay thi tai lai tin that ngay.
-                val convId = _conversations.value.firstOrNull { it.friend.uid == receiverUid }?.id
-                if (convId != null && convId == _activeConversationId.value) {
-                    fetchChatMessagesAndMarkRead(convId)
-                }
                 onSuccess()
+                val current = _activeConversationId.value
+                if (activeFriendUid == receiverUid && current != null) {
+                    launch { fetchChatMessagesAndMarkRead(current) }
+                    launch { refreshConversations() }
+                } else if (activeFriendUid == receiverUid) {
+                    openChat(receiverUid)
+                } else refreshConversations()
             } else {
                 onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
             }
@@ -1140,6 +1277,15 @@ class LocketViewModel(
     }
 
     fun logout() {
+        syncAgain = false
+        syncJob?.cancel()
+        closeChat()
+        apiClient.clearUserNameCache()
+        prefetchedThumbnails.clear()
+        viewedMomentUids.clear()
+        lastConversationSync = 0L
+        chatRefreshedAt.clear()
+        chatMarkedThrough.clear()
         ownHistoryJob?.cancel()
         ownHistoryCursor = null
         _ownHistoryLoading.value = false

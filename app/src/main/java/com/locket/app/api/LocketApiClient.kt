@@ -15,6 +15,7 @@ import com.locket.app.model.Moment
 import com.locket.app.model.User
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -44,6 +45,23 @@ class LocketApiClient(
         .build()
 
     private val gson = Gson()
+    private data class CachedName(val value: Pair<String, String>, val expiresAt: Long)
+    private val nameCache = java.util.concurrent.ConcurrentHashMap<String, CachedName>()
+    private val nameResolveLock = kotlinx.coroutines.sync.Mutex()
+    private fun nameKey(uid: String) = "${getUid().orEmpty()}:$uid"
+    private fun nameNow() = android.os.SystemClock.elapsedRealtime()
+    fun seedUserNames(friends: List<Friend>, fresh: Boolean = false) {
+        for (friend in friends) {
+            if (friend.uid.isBlank() || friend.displayName.isBlank() || friend.displayName == friend.uid) continue
+            val key = nameKey(friend.uid)
+            val entry = CachedName(friend.displayName to friend.avatarUrl, nameNow() + if (fresh) 900_000L else 120_000L)
+            if (fresh) nameCache[key] = entry else nameCache.putIfAbsent(key, entry)
+        }
+    }
+    fun clearUserNameCache() = nameCache.clear()
+    private fun cachedUserNames(uids: List<String>): Map<String, Pair<String, String>> =
+        uids.distinct().mapNotNull { uid -> nameCache[nameKey(uid)]?.value?.let { uid to it } }.toMap()
+
 
     companion object {
         const val FIREBASE_API_KEY = "AIzaSyB5dTd-xiLD5dEfWq5OpptnQtnMpE0W0u8"
@@ -814,10 +832,13 @@ class LocketApiClient(
     suspend fun resolveUserNames(uids: List<String>): Map<String, Pair<String, String>> = withContext(Dispatchers.IO) {
         val distinct = uids.filter { it.isNotBlank() }.distinct()
         if (distinct.isEmpty()) return@withContext emptyMap()
-        val result = mutableMapOf<String, Pair<String, String>>()
+        nameResolveLock.withLock {
+        val account = getUid()
+        val result = cachedUserNames(distinct).toMutableMap()
+        val missing = distinct.filter { nameCache[nameKey(it)]?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
         // fetchUsers chi nhan toi da 20 uid/call (21+ server tra "Malformed request", da verify live)
         // -> chia nho moi batch 10 uid cho an toan.
-        for (batch in distinct.chunked(10)) {
+        for (batch in missing.chunked(10)) {
             try {
                 val payload = JsonObject().apply {
                     add("data", JsonObject().apply {
@@ -847,14 +868,21 @@ class LocketApiClient(
                             username.isNotEmpty() -> username
                             else -> uid
                         }
-                        result[uid] = displayName to avatar
+                        if (getUid() != account) return@withLock emptyMap<String, Pair<String, String>>()
+                        if (displayName != uid) {
+                            val pair = displayName to avatar
+                            result[uid] = pair
+                            nameCache[nameKey(uid)] = CachedName(pair, nameNow() + 900_000L)
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                // batch nay loi thi bo qua, batch khac van chay; phan con lai caller fallback ve uid
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                // Keep known cached names if refresh fails.
             }
         }
         result
+        }
     }
 
     /**
@@ -1195,7 +1223,7 @@ class LocketApiClient(
             val records = momentArray(response)?.mapNotNull { item ->
                 if (item.isJsonObject) parseMomentJson(item.asJsonObject) else null
             }.orEmpty()
-            val names = resolveUserNames(records.map { it.userUid })
+            val names = cachedUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
                 val name = names[m.userUid]
                 if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
@@ -1285,7 +1313,7 @@ class LocketApiClient(
                     caption = extractString(fields, "caption"), timestampSeconds = timestamp,
                     timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"))
             }.orEmpty()
-            val names = if (ownOnly) emptyMap() else resolveUserNames(records.map { it.userUid })
+            val names = if (ownOnly) emptyMap() else cachedUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
                 val name = names[m.userUid]
                 if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
@@ -1672,7 +1700,7 @@ class LocketApiClient(
      * khi khong co bang chung).
      * timeAgo tinh tu latest_message.created_at that (truoc day hardcode "1d").
      */
-    suspend fun fetchConversations(userUid: String): Result<List<Conversation>> = withContext(Dispatchers.IO) {
+    suspend fun fetchConversations(userUid: String, resolveNames: Boolean = true): Result<List<Conversation>> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
             return@withContext Result.failure(Exception("Chưa đăng nhập"))
@@ -1753,13 +1781,14 @@ class LocketApiClient(
             // Chuoi fallback: (b) fetchUsers (batch 10) -> (c) Firestore
             // users/{uid} doc (xem fetchUserProfileFromDoc) -> (d) UID that.
             // (a) Room friends cache do ViewModel overlay them sau khi goi ham nay.
-            val names = resolveUserNames(convList.map { it.friend.uid }.distinct())
+            val names = if (resolveNames) resolveUserNames(convList.map { it.friend.uid }.distinct())
+                else cachedUserNames(convList.map { it.friend.uid })
             val resolved = convList.map { c ->
                 val resolvedName = names[c.friend.uid]
                 if (resolvedName != null) {
                     c.copy(friend = c.friend.copy(displayName = resolvedName.first, avatarUrl = resolvedName.second))
                 } else {
-                    val docFriend = fetchUserProfileFromDoc(c.friend.uid)
+                    val docFriend = if (resolveNames) fetchUserProfileFromDoc(c.friend.uid) else null
                     if (docFriend != null) {
                         c.copy(friend = docFriend)
                     } else {
@@ -1795,14 +1824,14 @@ class LocketApiClient(
      */
     data class ChatMessagesPage(val messages: List<ChatMessage>, val nextPageToken: String?)
 
-    suspend fun fetchChatMessages(conversationId: String, pageToken: String? = null): Result<ChatMessagesPage> = withContext(Dispatchers.IO) {
+    suspend fun fetchChatMessages(conversationId: String, pageToken: String? = null, pageSize: Int = 100): Result<ChatMessagesPage> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
             return@withContext Result.failure(Exception("Chưa đăng nhập"))
         }
         val myUid = getUid() ?: ""
         try {
-            val urlBuilder = StringBuilder("$FIRESTORE_BASE_URL/conversations/$conversationId/messages?pageSize=100&orderBy=created_at%20desc")
+            val urlBuilder = StringBuilder("$FIRESTORE_BASE_URL/conversations/$conversationId/messages?pageSize=${pageSize.coerceIn(1, 100)}&orderBy=created_at%20desc")
             if (!pageToken.isNullOrBlank()) {
                 urlBuilder.append("&pageToken=").append(URLEncoder.encode(pageToken, "UTF-8"))
             }

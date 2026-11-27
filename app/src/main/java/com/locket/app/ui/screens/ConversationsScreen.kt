@@ -50,7 +50,7 @@ fun ConversationsScreen(
     // Quay lai man danh sach: tai lai conversations that (REST, tuong duong
     // polling cua onSnapshot goc) de preview/so chua doc khong bi cu.
     LaunchedEffect(Unit) {
-        viewModel.refreshConversations()
+        viewModel.refreshConversations(force = false)
     }
 
     // Conversations strictly from live server data or friends list (No demo data)

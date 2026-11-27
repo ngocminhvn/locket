@@ -255,6 +255,63 @@ interface LocketDao {
     @Query("SELECT COUNT(*) FROM friends")
     suspend fun friendCount(): Int
 
+    @Query("SELECT * FROM moments")
+    suspend fun snapshotMoments(): List<MomentEntity>
+
+    @Query("SELECT * FROM friends")
+    suspend fun snapshotFriends(): List<FriendEntity>
+
+    @Query("SELECT * FROM conversations")
+    suspend fun snapshotConversations(): List<ConversationEntity>
+
+    @Query("SELECT * FROM chat_messages WHERE id IN (:ids)")
+    suspend fun snapshotChatMessages(ids: List<String>): List<ChatMessageEntity>
+
+    @Query("DELETE FROM moments WHERE id IN (:ids)")
+    suspend fun deleteMoments(ids: List<String>)
+
+    @Query("DELETE FROM friends WHERE uid IN (:ids)")
+    suspend fun deleteFriends(ids: List<String>)
+
+    @Query("DELETE FROM conversations WHERE id IN (:ids)")
+    suspend fun deleteConversations(ids: List<String>)
+
+    @Transaction
+    suspend fun reconcileMoments(moments: List<MomentEntity>) {
+        val old = snapshotMoments().associateBy { it.id }
+        val keys = moments.mapTo(HashSet()) { it.id }
+        (old.keys - keys).chunked(400).forEach { deleteMoments(it) }
+        val changed = moments.filter { old[it.id] != it }
+        if (changed.isNotEmpty()) insertMoments(changed)
+    }
+
+    @Transaction
+    suspend fun reconcileFriends(friends: List<FriendEntity>) {
+        val old = snapshotFriends().associateBy { it.uid }
+        val keys = friends.mapTo(HashSet()) { it.uid }
+        (old.keys - keys).chunked(400).forEach { deleteFriends(it) }
+        val changed = friends.filter { old[it.uid] != it }
+        if (changed.isNotEmpty()) insertFriends(changed)
+    }
+
+    @Transaction
+    suspend fun reconcileConversations(conversations: List<ConversationEntity>) {
+        val old = snapshotConversations().associateBy { it.id }
+        val keys = conversations.mapTo(HashSet()) { it.id }
+        (old.keys - keys).chunked(400).forEach { deleteConversations(it) }
+        val changed = conversations.filter { old[it.id] != it }
+        if (changed.isNotEmpty()) insertConversations(changed)
+    }
+
+    @Transaction
+    suspend fun upsertChangedChatMessages(messages: List<ChatMessageEntity>) {
+        for (batch in messages.chunked(400)) {
+            val old = snapshotChatMessages(batch.map { it.id }).associateBy { it.id }
+            val changed = batch.filter { old[it.id] != it }
+            if (changed.isNotEmpty()) insertChatMessages(changed)
+        }
+    }
+
     @Query("DELETE FROM moments")
     suspend fun clearMoments()
 

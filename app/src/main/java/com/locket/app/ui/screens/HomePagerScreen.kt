@@ -106,14 +106,21 @@ fun HomePagerScreen(
     // Prefetch anh cua cac moment ke tiep truoc khi user vuot toi, de anh
     // da nam trong disk cache cua Coil luc can hien (xem LocketViewModel).
     // page 1 = moments[0]; page 0 (camera) thi prefetch tu moment moi nhat.
-    LaunchedEffect(pagerState.settledPage, moments) {
-        viewModel.prefetchUpcomingMoments(moments, pagerState.settledPage - 1)
+    LaunchedEffect(pagerState, moments) {
+        var previous = pagerState.currentPage
+        snapshotFlow { pagerState.currentPage to pagerState.targetPage }
+            .collect { (current, target) ->
+                val forward = if (target != current) target > current else current >= previous
+                viewModel.prefetchUpcomingMoments(moments, current - 1, count = 8, forward = forward)
+                if (target != current) viewModel.prefetchUpcomingMoments(moments, target - 1, count = 5, forward = forward)
+                previous = current
+            }
     }
 
     // Prefetch before the last cached image; a dedicated trailing page stays
     // available if the server is still loading or a filtered page has no match.
     LaunchedEffect(pagerState.currentPage, moments.size, loading, hasMore, error) {
-        if (pagerState.currentPage > 0 && pagerState.currentPage >= (moments.size - 3).coerceAtLeast(1) &&
+        if (pagerState.currentPage > 0 && pagerState.currentPage >= (moments.size - 7).coerceAtLeast(1) &&
             hasMore && !loading && error == null) {
             viewModel.loadOlderMoments()
         }
@@ -138,6 +145,8 @@ fun HomePagerScreen(
     Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
     VerticalPager(
         state = pagerState,
+        beyondViewportPageCount = 3,
+        key = { page -> if (page == 0) "camera" else moments.getOrNull(page - 1)?.id ?: "loading-tail" },
         userScrollEnabled = pagerState.settledPage != 0 || cameraSwipeEnabled,
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
             // Native upward swipe reveals the next page. Also accept pulling
@@ -163,7 +172,9 @@ fun HomePagerScreen(
         }
     ) { page ->
         if (page == 0) {
-            CameraScreen(
+            // Pager can compose camera as an offscreen page. Don't bind
+            // CameraX until the user is at (or approaching) camera.
+            if (pagerState.currentPage <= 1 || pagerState.targetPage == 0 || !cameraSwipeEnabled) CameraScreen(
                 viewModel = viewModel,
                 onNavigate = { destination ->
                     when (destination) {
@@ -206,7 +217,8 @@ fun HomePagerScreen(
                 headerHeight = headerHeight,
                 footerHeight = feedFooterHeight,
                 reactionEvent = reactionEvent,
-                reactionSerial = reactionSerial
+                reactionSerial = reactionSerial,
+                isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress
             )
         }
     }

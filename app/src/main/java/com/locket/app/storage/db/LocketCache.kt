@@ -7,6 +7,8 @@ import com.locket.app.model.Moment
 import com.locket.app.storage.SessionManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Lop cache that duy nhat cua app (Room/SQLite).
@@ -38,14 +40,14 @@ class LocketCache(
         dao.observeChatMessages(conversationId).map { list -> list.map { it.toModel() } }
 
     suspend fun saveMoments(moments: List<Moment>) {
-        dao.replaceMoments(moments.map { it.toEntity() })
-        // Dual-write: widget van doc cache JSON cu trong prefs.
-        sessionManager.saveMoments(moments)
+        dao.reconcileMoments(withContext(Dispatchers.Default) { moments.map { it.toEntity() } })
+        // Widget still reads legacy JSON; serialize off the UI thread.
+        withContext(Dispatchers.IO) { sessionManager.saveMoments(moments) }
     }
 
     suspend fun saveFriends(friends: List<Friend>) {
-        dao.replaceFriends(friends.map { it.toEntity() })
-        sessionManager.saveFriends(friends)
+        dao.reconcileFriends(friends.map { it.toEntity() })
+        withContext(Dispatchers.IO) { sessionManager.saveFriends(friends) }
     }
 
     suspend fun saveConversations(conversations: List<Conversation>) {
@@ -66,7 +68,7 @@ class LocketCache(
                 } else c
             } else c
         }
-        dao.replaceConversations(repaired.map { it.toEntity() })
+        dao.reconcileConversations(repaired.map { it.toEntity() })
     }
 
     /**
@@ -77,7 +79,7 @@ class LocketCache(
      */
     suspend fun saveChatMessages(messages: List<ChatMessage>) {
         if (messages.isNotEmpty()) {
-            dao.insertChatMessages(messages.map { it.toEntity() })
+            dao.upsertChangedChatMessages(messages.map { it.toEntity() })
         }
     }
 

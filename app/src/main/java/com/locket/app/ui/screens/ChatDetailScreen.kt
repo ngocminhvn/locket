@@ -130,8 +130,9 @@ fun ChatDetailScreen(
     }
 
     // Mo man chat: tim cuoc tro chuyen that theo uid ban, tai tin that.
-    LaunchedEffect(friend.uid) {
+    DisposableEffect(friend.uid) {
         viewModel.openChat(friend.uid)
+        onDispose { viewModel.closeChat() }
     }
 
     // Tin moi ve thi cuon xuong duoi — chi khi tin moi nhat doi (key la id
@@ -148,7 +149,7 @@ fun ChatDetailScreen(
     LaunchedEffect(activeConversationId) {
         val convId = activeConversationId ?: return@LaunchedEffect
         while (true) {
-            delay(8000)
+            delay(12000)
             viewModel.refreshChat(convId)
         }
     }
