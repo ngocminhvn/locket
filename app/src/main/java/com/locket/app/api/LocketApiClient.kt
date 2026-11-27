@@ -2061,22 +2061,42 @@ class LocketApiClient(
 
     suspend fun sendChatMessage(receiverUid: String, message: String, momentUid: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            if (receiverUid.isBlank() || message.isBlank()) error("Thiếu người nhận hoặc nội dung")
+            if (!ensureFreshToken()) error("Phiên đăng nhập hết hạn hoặc không thể làm mới")
             val payload = JsonObject().apply {
                 add("data", JsonObject().apply {
                     addProperty("msg", message)
                     addProperty("receiver_uid", receiverUid)
                     addProperty("client_token", UUID.randomUUID().toString())
-                    if (momentUid != null) {
-                        addProperty("moment_uid", momentUid)
-                    }
+                    if (!momentUid.isNullOrBlank()) addProperty("moment_uid", momentUid)
                 })
             }
-            val resp = callEndpoint("sendChatMessageV2", payload)
-            if (resp != null && resp.get("status")?.asInt in 200..299) {
+            // Preserve the actual callable error instead of masking every
+            // network/server failure behind the same generic toast.
+            val bytes = callEndpointBytes("sendChatMessageV2", payload, propagateFailure = true)
+                ?: error("Máy chủ không trả dữ liệu")
+            val root = gson.fromJson(bytes.toString(Charsets.UTF_8), JsonObject::class.java)
+                ?: error("Phản hồi gửi tin nhắn trống")
+            val result = asObj(root, "result") ?: root
+            val status = optString(result, "status").toIntOrNull()
+            val callableError = asObj(root, "error")
+            if (callableError == null && status != null && status in 200..299) {
                 Result.success(true)
             } else {
-                Result.failure(Exception("Lỗi gửi tin nhắn"))
+                val errors = result.get("errors")?.takeIf { it.isJsonArray }?.asJsonArray
+                val firstError = errors?.firstOrNull()
+                val detail = when {
+                    firstError?.isJsonPrimitive == true -> firstError.asString
+                    firstError?.isJsonObject == true -> optString(firstError.asJsonObject, "message")
+                    else -> ""
+                }.ifBlank { optString(result, "message") }
+                    .ifBlank { optString(callableError, "message") }
+                    .ifBlank { optString(callableError, "status") }
+                    .ifBlank { if (status != null) "Máy chủ trả mã $status" else "Phản hồi không có trạng thái xác nhận" }
+                Result.failure(Exception(detail))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -2271,7 +2291,7 @@ class LocketApiClient(
     }
 
     /** Transport only: keep callable response bytes intact for one Rust parse. */
-    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject): ByteArray? {
+    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject, propagateFailure: Boolean = false): ByteArray? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
         val body = payload.toString().toRequestBody("application/json".toMediaType())
         fun buildRequest(token: String?): Request {
@@ -2292,14 +2312,22 @@ class LocketApiClient(
                     if (refreshIdToken(usedToken)) {
                         resp = client.newCall(buildRequest(getToken())).execute()
                     } else {
+                        if (propagateFailure) error("Phiên đăng nhập hết hạn (HTTP 401)")
                         return@withContext null
                     }
                 }
-                resp.use { response -> response.body?.bytes() ?: byteArrayOf() }
+                resp.use { response ->
+                    val bytes = response.body?.bytes() ?: byteArrayOf()
+                    if (propagateFailure && !response.isSuccessful && bytes.isEmpty()) {
+                        error("Máy chủ trả HTTP ${response.code}")
+                    }
+                    bytes
+                }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (propagateFailure) throw e
             null
         }
     }
