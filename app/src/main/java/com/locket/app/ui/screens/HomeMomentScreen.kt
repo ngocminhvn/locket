@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.locket.app.model.Friend
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.*
@@ -41,7 +42,7 @@ fun HomeMomentScreen(
     val friends by viewModel.friends.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    var currentIndex by remember { mutableStateOf(initialMomentIndex.coerceIn(0, maxOf(0, moments.size - 1))) }
+    val currentIndex by remember { mutableStateOf(initialMomentIndex.coerceIn(0, maxOf(0, moments.size - 1))) }
     var showFriendFilter by remember { mutableStateOf(false) }
 
     val currentMoment = if (moments.isNotEmpty()) moments[currentIndex.coerceIn(0, moments.size - 1)] else null
@@ -88,8 +89,19 @@ fun HomeMomentScreen(
                     .clip(RoundedCornerShape(36.dp))
                     .background(Color(0xFF1E1E1E))
                     .clickable {
-                        if (moments.isNotEmpty()) {
-                            currentIndex = (currentIndex + 1) % moments.size
+                        // Bam 1 lan vao moment = tra loi bang anh: mo camera, nguoi nhan
+                        // mac dinh la chu cua moment nay. Khong doi moment bang bam nua
+                        // (app goc khong lam vay); doi moment bang loc ban be / xem lich su.
+                        val moment = currentMoment
+                        if (moment != null && moment.userUid != currentUser.uid) {
+                            val target = friends.firstOrNull { it.uid == moment.userUid }
+                                ?: Friend(
+                                    uid = moment.userUid,
+                                    username = moment.userUid,
+                                    displayName = moment.userName.ifBlank { moment.userUid }
+                                )
+                            viewModel.setReplyToFriend(target)
+                            onNavigate("camera")
                         }
                     }
             ) {

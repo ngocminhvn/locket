@@ -3,12 +3,14 @@ package com.locket.app.ui
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.model.Moment
 import com.locket.app.model.User
 import com.locket.app.storage.SessionManager
+import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -61,6 +63,15 @@ class LocketViewModel(
 
     fun selectFriend(friend: Friend?) {
         _selectedFriend.value = friend
+    }
+
+    // Tra loi rieng 1 ban: bam vao moment cua ban do -> mo camera, gui chi cho ban do.
+    // Dat truoc khi mo man hinh camera; camera tu xoa khi roi man hinh / dang xong / huy.
+    private val _replyToFriend = MutableStateFlow<Friend?>(null)
+    val replyToFriend: StateFlow<Friend?> = _replyToFriend.asStateFlow()
+
+    fun setReplyToFriend(friend: Friend?) {
+        _replyToFriend.value = friend
     }
 
     fun calculateStreak(momentsList: List<Moment>): Int {
@@ -141,6 +152,8 @@ class LocketViewModel(
                     }
                     _moments.value = resolved
                     sessionManager.saveMoments(resolved)
+                    // Cap nhat Home Screen Widget bang moment moi nhat that
+                    LocketWidgetUpdater.updateAll(LocketApplication.instance)
                 }
             }
 

@@ -63,6 +63,13 @@ fun CameraScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
+    // Ban dang duoc tra loi rieng (dat khi bam vao moment cua ban do o Home)
+    val replyToFriend by viewModel.replyToFriend.collectAsState()
+
+    // Roi man hinh camera thi huy muc tieu tra loi, tranh gui nham lan sau
+    DisposableEffect(Unit) {
+        onDispose { viewModel.setReplyToFriend(null) }
+    }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -433,7 +440,10 @@ fun CameraScreen(
                             fontWeight = FontWeight.Bold
                         )
                         IconButton(
-                            onClick = { capturedBitmap = null },
+                            onClick = {
+                                capturedBitmap = null
+                                viewModel.setReplyToFriend(null)
+                            },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
@@ -486,6 +496,43 @@ fun CameraScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    // Dang tra loi rieng 1 ban: anh nay chi gui cho ban do
+                    replyToFriend?.let { target ->
+                        val firstName = target.displayName.trim().split("\\s+".toRegex()).lastOrNull()
+                            ?: target.displayName
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Reply,
+                                contentDescription = null,
+                                tint = LocketYellow,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Đang trả lời $firstName",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.setReplyToFriend(null) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Hủy trả lời riêng",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
                     // Post Button (Calls real Locket API postMomentV2)
                     Button(
                         onClick = {
@@ -494,10 +541,12 @@ fun CameraScreen(
                             viewModel.postMoment(
                                 bitmap = bmp,
                                 caption = captionText,
+                                recipients = replyToFriend?.let { listOf(it.uid) } ?: emptyList(),
                                 onSuccess = {
                                     isPosting = false
                                     capturedBitmap = null
                                     captionText = ""
+                                    viewModel.setReplyToFriend(null)
                                     Toast.makeText(context, "Đã gửi khoảnh khắc lên Locket thành công! 💛", Toast.LENGTH_LONG).show()
                                     onNavigate("feed")
                                 },

@@ -37,7 +37,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             LocketTheme {
                 val isLoggedIn by viewModel.isLoggedInFlow.collectAsState()
-                var currentScreen by remember { mutableStateOf(if (isLoggedIn) "camera" else "welcome") }
+                // Widget mo app dung man Home: intent extra "open_home" (LocketWidgetUpdater).
+                val openHome = intent.getBooleanExtra("open_home", false)
+                var currentScreen by remember { mutableStateOf(if (isLoggedIn) (if (openHome) "feed" else "camera") else "welcome") }
                 var showFriendsModal by remember { mutableStateOf(false) }
                 var showProfileScreen by remember { mutableStateOf(false) }
                 var selectedGridIndex by remember { mutableStateOf(0) }
@@ -101,7 +103,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 "feed" -> {
-                                    HomeMomentScreen(
+                                    HomePagerScreen(
                                         viewModel = viewModel,
                                         initialMomentIndex = selectedGridIndex,
                                         onNavigate = { currentScreen = it },
