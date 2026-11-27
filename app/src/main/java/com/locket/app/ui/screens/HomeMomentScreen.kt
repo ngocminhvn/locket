@@ -218,13 +218,6 @@ fun HomeMomentScreen(
                         fontWeight = FontWeight.Bold
                     )
 
-                    Icon(
-                        Icons.Default.Favorite,
-                        contentDescription = null,
-                        tint = LocketYellow,
-                        modifier = Modifier.size(18.dp)
-                    )
-
                     Text(
                         text = momentAge(currentMoment.timestampSeconds),
                         color = LocketTextDim,
