@@ -13,6 +13,8 @@ object RustLocketCore {
     private external fun parseFeedNative(responseBody: ByteArray): ByteArray
     private external fun parseHistoryNative(responseBody: ByteArray, ownUid: String, ownOnly: Boolean, limit: Int): ByteArray
     private external fun parseChatNative(responseBody: ByteArray): ByteArray
+    private external fun mergeMomentOrderNative(ids: Array<String>, owners: Array<String>, timestamps: LongArray, deleted: Array<String>, hidden: Array<String>): IntArray
+    private external fun calculateStreakNative(timestamps: LongArray, nowMillis: Long, timezone: String): Int
 
     data class FeedDelta(
         val notModified: Boolean,
@@ -36,6 +38,23 @@ object RustLocketCore {
     fun parseChat(responseBody: ByteArray, conversationId: String, myUid: String): ChatPage {
         check(isAvailable)
         return FeedWireDecoder.decodeChat(parseChatNative(responseBody), conversationId, myUid)
+    }
+
+    fun mergeMoments(existing: List<Moment>, incoming: List<Moment>, deleted: Set<String>, hiddenOwners: Set<String>): List<Moment> {
+        check(isAvailable)
+        val combined = existing + incoming
+        val order = mergeMomentOrderNative(
+            Array(combined.size) { combined[it].id }, Array(combined.size) { combined[it].userUid },
+            LongArray(combined.size) { combined[it].timestampSeconds }, deleted.toTypedArray(), hiddenOwners.toTypedArray(),
+        )
+        require(order.all { it in combined.indices }) { "Rust returned invalid moment index" }
+        return order.map(combined::get)
+    }
+
+    fun calculateStreak(moments: List<Moment>, nowMillis: Long = System.currentTimeMillis(), timezone: String = java.util.TimeZone.getDefault().id): Int {
+        check(isAvailable)
+        return calculateStreakNative(LongArray(moments.size) { moments[it].timestampSeconds }, nowMillis, timezone)
+            .also { require(it >= 0) }
     }
 }
 

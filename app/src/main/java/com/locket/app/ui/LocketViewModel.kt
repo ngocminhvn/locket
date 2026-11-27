@@ -15,6 +15,7 @@ import com.locket.app.model.FriendRequest
 import com.locket.app.model.Moment
 import com.locket.app.model.RecommendedFriend
 import com.locket.app.model.User
+import com.locket.app.rust.RustLocketCore
 import com.locket.app.storage.SessionManager
 import com.locket.app.storage.db.LocketCache
 import com.locket.app.widget.LocketWidgetUpdater
@@ -280,10 +281,14 @@ class LocketViewModel(
     }
 
     private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
-        val merged = (_moments.value + incoming)
-            .filter { it.id !in deletedMomentIds && it.userUid !in hiddenFriendUids }
-            .associateBy { it.id }.values
-            .sortedByDescending { it.timestampSeconds }
+        val merged = if (RustLocketCore.isAvailable) {
+            RustLocketCore.mergeMoments(_moments.value, incoming, deletedMomentIds, hiddenFriendUids)
+        } else {
+            (_moments.value + incoming)
+                .filter { it.id !in deletedMomentIds && it.userUid !in hiddenFriendUids }
+                .associateBy { it.id }.values
+                .sortedByDescending { it.timestampSeconds }
+        }
         if (merged != _moments.value) {
             cache.saveMoments(merged)
             _moments.value = merged
@@ -428,6 +433,7 @@ class LocketViewModel(
     }
 
     fun calculateStreak(momentsList: List<Moment>): Int {
+        if (RustLocketCore.isAvailable) return RustLocketCore.calculateStreak(momentsList)
         if (momentsList.isEmpty()) return 0
         val cal = Calendar.getInstance()
         val days = momentsList.map { m ->

@@ -12,6 +12,25 @@ fn parses_callable_feed_and_preserves_nanos() {
 }
 
 #[test]
+fn merge_keeps_last_value_filters_tombstones_and_is_stable() {
+    let ids = vec!["a", "b", "a", "c"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let owners = vec!["u", "u", "u", "hidden"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let timestamps = [10, 10, 20, 30];
+    let order =
+        locket_core::feed::merge_indices(&ids, &owners, &timestamps, &[], &["hidden".to_owned()]);
+    assert_eq!(order, vec![2, 1]);
+    let deleted =
+        locket_core::feed::merge_indices(&ids, &owners, &timestamps, &["a".to_owned()], &[]);
+    assert!(!deleted.contains(&2));
+}
+
+#[test]
 fn represents_304_as_not_modified_delta() {
     let feed = parse_feed_response(br#"{"result":{"status":304,"sync_token":"same"}}"#).unwrap();
     assert!(feed.not_modified);
