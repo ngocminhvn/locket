@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.net.URLEncoder
 import okhttp3.Response
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -1056,17 +1057,33 @@ class LocketApiClient(
      * messagesCollection orderBy('created_at', 'desc').limit(N) (bundle
      * ~1732028); hien thi thi dao lai cu -> moi o client.
      * Field doc xem parseChatMessageJson.
+     *
+     * Phan trang tin cu: Firestore REST list tra `nextPageToken` trong
+     * response khi con trang sau — truyen lai lam `pageToken` de lay tiep
+     * 100 tin cu hon. Token nay la cursor theo document cuoi trang (ben
+     * khi tin moi den trong luc polling), khong phai offset. Chon cach nay
+     * thay vi cursor created_at nhu startAfter(Timestamp) cua goc (bundle
+     * ~1732860: orderBy desc + limit + startAfter(Timestamp.fromMillis(
+     * oldestCreatedAt))): REST list khong co startAfter, muon dung kieu
+     * goc phai doi sang runQuery/structuredQuery nhu fetchHistoryPage,
+     * trong khi nextPageToken cua list da du va dung chuan REST.
+     * Het tin cu khi nextPageToken == null.
      */
-    suspend fun fetchChatMessages(conversationId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
+    data class ChatMessagesPage(val messages: List<ChatMessage>, val nextPageToken: String?)
+
+    suspend fun fetchChatMessages(conversationId: String, pageToken: String? = null): Result<ChatMessagesPage> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
             return@withContext Result.failure(Exception("Chưa đăng nhập"))
         }
         val myUid = getUid() ?: ""
         try {
-            val url = "$FIRESTORE_BASE_URL/conversations/$conversationId/messages?pageSize=100&orderBy=created_at%20desc"
+            val urlBuilder = StringBuilder("$FIRESTORE_BASE_URL/conversations/$conversationId/messages?pageSize=100&orderBy=created_at%20desc")
+            if (!pageToken.isNullOrBlank()) {
+                urlBuilder.append("&pageToken=").append(URLEncoder.encode(pageToken, "UTF-8"))
+            }
             val req = Request.Builder()
-                .url(url)
+                .url(urlBuilder.toString())
                 .addHeader("Authorization", "Bearer $token")
                 .get()
                 .build()
@@ -1083,7 +1100,8 @@ class LocketApiClient(
             }
             // Sap xep cu -> moi de hien thi; dedupe theo id that (khong sinh id gia)
             val deduped = messages.distinctBy { it.id }.sortedBy { it.createdAtMs }
-            Result.success(deduped)
+            val nextPageToken = json.get("nextPageToken")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
+            Result.success(ChatMessagesPage(deduped, nextPageToken))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1124,6 +1142,88 @@ class LocketApiClient(
                 Result.success(true)
             } else {
                 val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi gửi reaction"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Go reaction khoi 1 tin nhan chat: callable removeChatMessageReaction
+     * {conversation_id, message_id, emoji}. Cung 1 doan code voi
+     * sendChatMessageReaction trong bundle goc, chon send/remove theo flag
+     * (decompiled.js ~1733500: tim reaction co sender == myUid, bam dung
+     * emoji cu thi go, bam emoji khac thi gui moi).
+     */
+    suspend fun removeChatMessageReaction(conversationId: String, messageId: String, emoji: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("conversation_id", conversationId)
+                    addProperty("message_id", messageId)
+                    addProperty("emoji", emoji)
+                })
+            }
+            val resp = callEndpoint("removeChatMessageReaction", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi gỡ reaction"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Thu hoi (unsend) 1 tin nhan chat: callable deleteChatMessage
+     * {message_uid, conversation_uid}. Goc goi la "unsend" (decompiled.js
+     * ~1733206: hop thoai xac nhan unsend_message_confirmation_title/body,
+     * nut "unsend", toast unsend_message_toast_error; chi goi status 200
+     * moi coi la xong) — thu hoi la thao tac tren tin do chinh minh gui,
+     * nen app chi hien muc nay voi tin cua minh.
+     */
+    suspend fun deleteChatMessage(messageUid: String, conversationUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("message_uid", messageUid)
+                    addProperty("conversation_uid", conversationUid)
+                })
+            }
+            val resp = callEndpoint("deleteChatMessage", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi xóa tin nhắn"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Bao cao 1 tin nhan chat cua nguoi khac: callable reportMessage
+     * {message_uid, conversation_uid}. Goc co hop thoai xac nhan rieng
+     * (report_message_confirmation_title/body, nut "report" destructive,
+     * decompiled.js ~1733030), nen app cung hoi xac nhan truoc khi gui.
+     */
+    suspend fun reportMessage(messageUid: String, conversationUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("message_uid", messageUid)
+                    addProperty("conversation_uid", conversationUid)
+                })
+            }
+            val resp = callEndpoint("reportMessage", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi báo cáo tin nhắn"
                 Result.failure(Exception(err))
             }
         } catch (e: Exception) {

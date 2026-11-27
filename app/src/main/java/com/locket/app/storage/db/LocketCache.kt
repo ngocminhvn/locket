@@ -72,13 +72,18 @@ class LocketCache(
     /**
      * Luu tin nhan chat: UPSERT theo id that, khong xoa toan bo — fetch chi
      * lay 100 tin moi nhat, xoa het se lam mat tin cu hon chua tai lai.
-     * Tin da xoa tren server (deleteChatMessage) van nam lai trong cache
-     * cho den khi clearAll (logout) — ghi nhan la han che, chua xu ly.
+     * Tin da thu hoi tren server thi xoa khoi cache bang deleteChatMessage
+     * (duoi day), khong doi toi clearAll (logout).
      */
     suspend fun saveChatMessages(messages: List<ChatMessage>) {
         if (messages.isNotEmpty()) {
             dao.insertChatMessages(messages.map { it.toEntity() })
         }
+    }
+
+    /** Xoa 1 tin nhan da thu hoi khoi cache Room (khi deleteChatMessage 200). */
+    suspend fun deleteChatMessage(messageId: String) {
+        dao.deleteChatMessage(messageId)
     }
 
     suspend fun clearChatMessages(conversationId: String) {

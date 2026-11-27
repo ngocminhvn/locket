@@ -19,6 +19,7 @@ import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
@@ -228,6 +229,17 @@ class LocketViewModel(
 
     private var chatMessagesJob: Job? = null
 
+    // Phan trang tin cu trong chat dang mo: token trang ke tiep cua
+    // Firestore REST list (nextPageToken, null = het tin cu). Chi dat lai
+    // khi mo chat moi; refresh/polling chi tai lai trang 1 (100 tin moi
+    // nhat) nen khong cham vao token — tranh tai trung trang cu da tai.
+    private var chatNextPageToken: String? = null
+    private val _chatHasMoreOlder = MutableStateFlow(true)
+    val chatHasMoreOlder: StateFlow<Boolean> = _chatHasMoreOlder.asStateFlow()
+    private val _isLoadingOlderChat = MutableStateFlow(false)
+    val isLoadingOlderChat: StateFlow<Boolean> = _isLoadingOlderChat.asStateFlow()
+    private var chatOlderJob: Job? = null
+
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
@@ -427,6 +439,11 @@ class LocketViewModel(
             val convId = _conversations.value.firstOrNull { it.friend.uid == friendUid }?.id
             _activeConversationId.value = convId
             chatMessagesJob?.cancel()
+            chatOlderJob?.cancel()
+            // Chat moi: dat lai phan trang tin cu.
+            chatNextPageToken = null
+            _chatHasMoreOlder.value = true
+            _isLoadingOlderChat.value = false
             if (convId.isNullOrBlank()) {
                 _chatMessages.value = emptyList()
                 _isChatLoading.value = false
@@ -435,7 +452,7 @@ class LocketViewModel(
             chatMessagesJob = viewModelScope.launch {
                 cache.observeChatMessages(convId).collect { _chatMessages.value = it }
             }
-            fetchChatMessagesAndMarkRead(convId)
+            fetchChatMessagesAndMarkRead(convId, resetPagination = true)
             _isChatLoading.value = false
         }
     }
@@ -446,9 +463,13 @@ class LocketViewModel(
         viewModelScope.launch { fetchChatMessagesAndMarkRead(convId) }
     }
 
-    private suspend fun fetchChatMessagesAndMarkRead(convId: String) {
-        apiClient.fetchChatMessages(convId).onSuccess { messages ->
-            cache.saveChatMessages(messages)
+    private suspend fun fetchChatMessagesAndMarkRead(convId: String, resetPagination: Boolean = false) {
+        apiClient.fetchChatMessages(convId).onSuccess { page ->
+            cache.saveChatMessages(page.messages)
+            if (resetPagination) {
+                chatNextPageToken = page.nextPageToken
+                _chatHasMoreOlder.value = page.nextPageToken != null
+            }
         }
         apiClient.markConversationAsRead(convId).onSuccess {
             val updated = _conversations.value.map {
@@ -557,8 +578,84 @@ class LocketViewModel(
         }
     }
 
-    /** Reaction len 1 tin nhan chat that (message id that, khong id gia). */
+    /**
+     * Tai them 1 trang tin cu hon (100 tin) cho cuoc tro chuyen dang mo:
+     * goi fetchChatMessages voi nextPageToken da luu, gop vao dau danh
+     * sach (dedupe theo id that, giu sort cu -> moi). Luu Room thi danh
+     * sach hien thi tu cap nhat qua Flow. onLoaded tra so tin moi that su
+     * duoc them — man hinh dung de giu vi tri cuon (tin cu chen len dau
+     * se day tin dang xem xuong). Het tin cu khi server het tra token.
+     */
+    fun loadOlderChatMessages(conversationId: String, onLoaded: suspend (Int) -> Unit = {}) {
+        val token = chatNextPageToken
+        if (!_isLoggedIn.value || _isLoadingOlderChat.value || !_chatHasMoreOlder.value) return
+        if (token.isNullOrBlank() || conversationId != _activeConversationId.value) return
+        _isLoadingOlderChat.value = true
+        chatOlderJob = viewModelScope.launch {
+            try {
+                val beforeIds = _chatMessages.value.map { it.id }.toSet()
+                val page = apiClient.fetchChatMessages(conversationId, token).getOrThrow()
+                if (conversationId != _activeConversationId.value) return@launch
+                val fresh = page.messages.filter { it.id !in beforeIds }
+                if (fresh.isNotEmpty()) {
+                    cache.saveChatMessages(fresh)
+                    // Doi Room flow day danh sach moi len _chatMessages roi
+                    // moi bao xong, de man hinh scrollToItem(anchor + them)
+                    // khong vuot qua so item hien co.
+                    withTimeoutOrNull(2000) {
+                        cache.observeChatMessages(conversationId)
+                            .first { list -> fresh.all { f -> list.any { it.id == f.id } } }
+                    }
+                }
+                chatNextPageToken = page.nextPageToken
+                _chatHasMoreOlder.value = page.nextPageToken != null
+                onLoaded(fresh.size)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Loi mang: giu nguyen token + hasMore de user cuon lai thu.
+            } finally {
+                _isLoadingOlderChat.value = false
+            }
+        }
+    }
+
+    /**
+     * Reaction len 1 tin nhan chat that (message id that, khong id gia).
+     * Toggle nhu goc (decompiled.js ~1733500): tim reaction cua chinh
+     * minh tren tin (reactions[].sender == myUid) — bam dung emoji da
+     * react thi go (removeChatMessageReaction), bam emoji khac thi gui
+     * moi (sendChatMessageReaction). onRemoved chay khi da go xong.
+     */
     fun reactToChatMessage(
+        conversationId: String,
+        messageId: String,
+        emoji: String,
+        onSuccess: () -> Unit = {},
+        onRemoved: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val myUid = sessionManager.currentUser.uid
+            val myReaction = _chatMessages.value.firstOrNull { it.id == messageId }
+                ?.reactions?.firstOrNull { it.senderUid == myUid }
+            val alreadyReactedSame = myReaction?.emoji == emoji
+            val res = if (alreadyReactedSame) {
+                apiClient.removeChatMessageReaction(conversationId, messageId, emoji)
+            } else {
+                apiClient.sendChatMessageReaction(conversationId, messageId, emoji)
+            }
+            if (res.isSuccess) {
+                fetchChatMessagesAndMarkRead(conversationId)
+                if (alreadyReactedSame) onRemoved() else onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi gửi reaction")
+            }
+        }
+    }
+
+    /** Go thang reaction cua minh khoi 1 tin nhan chat (nut "Go reaction"). */
+    fun removeChatMessageReaction(
         conversationId: String,
         messageId: String,
         emoji: String,
@@ -566,12 +663,52 @@ class LocketViewModel(
         onError: (String) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val res = apiClient.sendChatMessageReaction(conversationId, messageId, emoji)
+            val res = apiClient.removeChatMessageReaction(conversationId, messageId, emoji)
             if (res.isSuccess) {
                 fetchChatMessagesAndMarkRead(conversationId)
                 onSuccess()
             } else {
-                onError(res.exceptionOrNull()?.message ?: "Lỗi gửi reaction")
+                onError(res.exceptionOrNull()?.message ?: "Lỗi gỡ reaction")
+            }
+        }
+    }
+
+    /**
+     * Thu hoi (unsend) 1 tin nhan do minh gui: chi bao thanh cong khi
+     * server tra 200; xong xoa tin khoi Room cache (tin se bien khoi man
+     * hinh qua Flow) va tai lai danh sach tro chuyen de preview cap nhat.
+     */
+    fun deleteChatMessage(
+        messageId: String,
+        conversationId: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.deleteChatMessage(messageId, conversationId)
+            if (res.isSuccess) {
+                cache.deleteChatMessage(messageId)
+                refreshConversations()
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi xóa tin nhắn")
+            }
+        }
+    }
+
+    /** Bao cao 1 tin nhan cua nguoi khac len server. */
+    fun reportChatMessage(
+        messageId: String,
+        conversationId: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.reportMessage(messageId, conversationId)
+            if (res.isSuccess) {
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.message ?: "Lỗi báo cáo tin nhắn")
             }
         }
     }
@@ -723,6 +860,10 @@ class LocketViewModel(
         sessionManager.logout()
         viewModelScope.launch { cache.clearAll() }
         chatMessagesJob?.cancel()
+        chatOlderJob?.cancel()
+        chatNextPageToken = null
+        _chatHasMoreOlder.value = true
+        _isLoadingOlderChat.value = false
         _chatMessages.value = emptyList()
         _activeConversationId.value = null
         _isChatLoading.value = false

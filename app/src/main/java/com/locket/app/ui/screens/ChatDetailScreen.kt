@@ -31,6 +31,7 @@ import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.*
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -40,6 +41,12 @@ import java.util.Locale
  * (Room cache-first, sync REST — tuong duong polling cua onSnapshot goc),
  * gui qua sendChatMessageV2, danh dau da doc qua markAsRead.
  * Khong dung tin nhan dung tu moment, khong them tin local khi gui.
+ * Cuon len dau danh sach thi tai them tin cu (nextPageToken); khi dang mo
+ * chat thi polling nhe moi ~8s de tin moi ve gan realtime hon — chua phai
+ * realtime that (Firestore :listen streaming chua lam).
+ * Nhan giu 1 tin: reaction (bam dung emoji da react thi go), thu hoi tin
+ * cua minh (deleteChatMessage — goc goi la "unsend"), bao cao tin nguoi
+ * khac (reportMessage).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -51,10 +58,19 @@ fun ChatDetailScreen(
     val context = LocalContext.current
     var inputMessage by remember { mutableStateOf("") }
     var reactingTo by remember { mutableStateOf<ChatMessage?>(null) }
+    // Buoc xac nhan trong menu tin nhan: null = chon emoji/menu,
+    // "delete" = xac nhan thu hoi, "report" = xac nhan bao cao.
+    var menuConfirm by remember { mutableStateOf<String?>(null) }
+    // Da cuon xuong duoi 1 lan sau khi mo chat chua (chan tu tai tin cu
+    // ngay khi vua mo).
+    var chatSettled by remember(friend.uid) { mutableStateOf(false) }
 
     val messages by viewModel.chatMessages.collectAsState()
     val isChatLoading by viewModel.isChatLoading.collectAsState()
+    val isLoadingOlderChat by viewModel.isLoadingOlderChat.collectAsState()
     val activeConversationId by viewModel.activeConversationId.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+    val myUid = currentUser.uid
     val listState = rememberLazyListState()
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
@@ -64,11 +80,42 @@ fun ChatDetailScreen(
         viewModel.openChat(friend.uid)
     }
 
-    // Tin moi ve thi cuon xuong duoi.
-    LaunchedEffect(messages.size) {
+    // Tin moi ve thi cuon xuong duoi — chi khi tin moi nhat doi (key la id
+    // tin cuoi): tai them tin cu khong doi tin moi nhat nen khong keo xuong.
+    LaunchedEffect(messages.lastOrNull()?.id) {
         if (messages.isNotEmpty()) {
             listState.scrollToItem(messages.lastIndex)
+            chatSettled = true
         }
+    }
+
+    // Polling nhe khi dang mo chat: refresh moi ~8s de tin moi ve gan
+    // realtime hon. Dung khi roi man vi LaunchedEffect bi huy.
+    LaunchedEffect(activeConversationId) {
+        val convId = activeConversationId ?: return@LaunchedEffect
+        while (true) {
+            delay(8000)
+            viewModel.refreshChat(convId)
+        }
+    }
+
+    // Cuon toi dau danh sach (tin cu nhat) thi tai them tin cu.
+    // LazyColumn khong reverseLayout: dau danh sach = index 0 = tin cu nhat.
+    LaunchedEffect(activeConversationId) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { idx ->
+                val convId = viewModel.activeConversationId.value ?: return@collect
+                if (!chatSettled || idx != 0) return@collect
+                if (messages.isEmpty() || !viewModel.chatHasMoreOlder.value || viewModel.isLoadingOlderChat.value) return@collect
+                val info = listState.layoutInfo
+                if (info.visibleItemsInfo.isEmpty() || info.totalItemsCount <= info.visibleItemsInfo.size) return@collect
+                val anchorOffset = listState.firstVisibleItemScrollOffset
+                viewModel.loadOlderChatMessages(convId) { added ->
+                    // Tin cu chen len dau day tin dang xem xuong `added` vi
+                    // tri — cuon lai dung cho do de giu vi tri doc.
+                    if (added > 0) listState.scrollToItem(added, anchorOffset)
+                }
+            }
     }
 
     fun formatTime(createdAtMs: Long): String {
@@ -168,6 +215,24 @@ fun ChatDetailScreen(
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // Dang tai them tin cu: vong loading nho o dau danh sach
+                    // (chi them item nay khi dang tai, khong doi index tin).
+                    if (isLoadingOlderChat) {
+                        item(key = "loading-older") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LocketYellow,
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
                     items(messages, key = { it.id }) { msg ->
                         val timeStr = formatTime(msg.createdAtMs)
                         if (msg.thumbnailUrl != null) {
@@ -353,54 +418,192 @@ fun ChatDetailScreen(
         }
     }
 
-    // Reaction picker: nhan giu 1 tin nhan that -> gui reaction that qua
-    // sendChatMessageReaction {conversation_id, message_id, emoji}.
+    // Menu tin nhan (nhan giu 1 tin nhan that):
+    // - Chon emoji: gui reaction that qua sendChatMessageReaction; bam dung
+    //   emoji minh da react thi go (removeChatMessageReaction).
+    // - "Xoa tin nhan": chi tin do minh gui (goc goi la "unsend") -> hoi
+    //   xac nhan roi goi deleteChatMessage {message_uid, conversation_uid}.
+    // - "Bao cao tin nhan": chi tin cua nguoi khac -> hoi xac nhan roi goi
+    //   reportMessage {message_uid, conversation_uid}.
     // Chi toast khi server tra 200.
     val target = reactingTo
     if (target != null) {
+        val myReaction = target.reactions.firstOrNull { it.senderUid == myUid }
         AlertDialog(
-            onDismissRequest = { reactingTo = null },
+            onDismissRequest = { reactingTo = null; menuConfirm = null },
             containerColor = Color(0xFF1E1E22),
-            title = { Text("Chọn biểu cảm", color = Color.White, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    text = when (menuConfirm) {
+                        "delete" -> "Thu hồi tin nhắn?"
+                        "report" -> "Báo cáo tin nhắn?"
+                        else -> "Chọn biểu cảm"
+                    },
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    for (emoji in listOf("🔥", "😍", "💛", "😂", "🥺")) {
-                        Text(
-                            text = emoji,
-                            fontSize = 28.sp,
-                            modifier = Modifier
-                                .clickable {
-                                    val convId = activeConversationId
-                                    if (convId.isNullOrBlank()) {
-                                        Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
-                                        reactingTo = null
-                                    } else {
-                                        viewModel.reactToChatMessage(
-                                            conversationId = convId,
-                                            messageId = target.id,
-                                            emoji = emoji,
-                                            onSuccess = {
-                                                Toast.makeText(context, "Đã gửi $emoji", Toast.LENGTH_SHORT).show()
+                when (menuConfirm) {
+                    "delete" -> Text(
+                        text = "Tin nhắn này sẽ bị thu hồi.",
+                        color = Color.White,
+                        fontSize = 15.sp
+                    )
+                    "report" -> Text(
+                        text = "Tin nhắn này sẽ được gửi báo cáo.",
+                        color = Color.White,
+                        fontSize = 15.sp
+                    )
+                    else -> Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            for (emoji in listOf("🔥", "😍", "💛", "😂", "🥺")) {
+                                Text(
+                                    text = emoji,
+                                    fontSize = 28.sp,
+                                    modifier = Modifier
+                                        .clickable {
+                                            val convId = activeConversationId
+                                            if (convId.isNullOrBlank()) {
+                                                Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
                                                 reactingTo = null
-                                            },
-                                            onError = { err ->
-                                                Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                                reactingTo = null
+                                            } else {
+                                                viewModel.reactToChatMessage(
+                                                    conversationId = convId,
+                                                    messageId = target.id,
+                                                    emoji = emoji,
+                                                    onSuccess = {
+                                                        Toast.makeText(context, "Đã gửi $emoji", Toast.LENGTH_SHORT).show()
+                                                        reactingTo = null
+                                                    },
+                                                    onRemoved = {
+                                                        Toast.makeText(context, "Đã gỡ $emoji", Toast.LENGTH_SHORT).show()
+                                                        reactingTo = null
+                                                    },
+                                                    onError = { err ->
+                                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                                        reactingTo = null
+                                                    }
+                                                )
                                             }
-                                        )
+                                        }
+                                        .padding(6.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (target.isMe) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { menuConfirm = "delete" }
+                                    .padding(vertical = 10.dp)
+                            ) {
+                                Text("Xóa tin nhắn", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { menuConfirm = "report" }
+                                    .padding(vertical = 10.dp)
+                            ) {
+                                Text("Báo cáo tin nhắn", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                            }
+                        }
+                        if (myReaction != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val convId = activeConversationId
+                                        if (convId.isNullOrBlank()) {
+                                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
+                                            reactingTo = null
+                                        } else {
+                                            viewModel.removeChatMessageReaction(
+                                                conversationId = convId,
+                                                messageId = target.id,
+                                                emoji = myReaction.emoji,
+                                                onSuccess = {
+                                                    Toast.makeText(context, "Đã gỡ ${myReaction.emoji}", Toast.LENGTH_SHORT).show()
+                                                    reactingTo = null
+                                                },
+                                                onError = { err ->
+                                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                                    reactingTo = null
+                                                }
+                                            )
+                                        }
                                     }
-                                }
-                                .padding(6.dp)
-                        )
+                                    .padding(vertical = 10.dp)
+                            ) {
+                                Text("Gỡ reaction ${myReaction.emoji}", color = Color.White, fontSize = 16.sp)
+                            }
+                        }
                     }
                 }
             },
-            confirmButton = {},
+            confirmButton = {
+                when (menuConfirm) {
+                    "delete" -> TextButton(onClick = {
+                        val convId = activeConversationId
+                        if (convId.isNullOrBlank()) {
+                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
+                            reactingTo = null
+                            menuConfirm = null
+                        } else {
+                            viewModel.deleteChatMessage(
+                                messageId = target.id,
+                                conversationId = convId,
+                                onSuccess = {
+                                    Toast.makeText(context, "Đã thu hồi tin nhắn", Toast.LENGTH_SHORT).show()
+                                    reactingTo = null
+                                    menuConfirm = null
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    reactingTo = null
+                                    menuConfirm = null
+                                }
+                            )
+                        }
+                    }) {
+                        Text("Thu hồi", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                    }
+                    "report" -> TextButton(onClick = {
+                        val convId = activeConversationId
+                        if (convId.isNullOrBlank()) {
+                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
+                            reactingTo = null
+                            menuConfirm = null
+                        } else {
+                            viewModel.reportChatMessage(
+                                messageId = target.id,
+                                conversationId = convId,
+                                onSuccess = {
+                                    Toast.makeText(context, "Đã gửi báo cáo", Toast.LENGTH_SHORT).show()
+                                    reactingTo = null
+                                    menuConfirm = null
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                                    reactingTo = null
+                                    menuConfirm = null
+                                }
+                            )
+                        }
+                    }) {
+                        Text("Báo cáo", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                    }
+                    else -> {}
+                }
+            },
             dismissButton = {
-                TextButton(onClick = { reactingTo = null }) {
+                TextButton(onClick = { reactingTo = null; menuConfirm = null }) {
                     Text("Hủy", color = Color.White)
                 }
             }

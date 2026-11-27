@@ -299,6 +299,11 @@ interface LocketDao {
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun clearChatMessages(conversationId: String)
 
+    // Xoa 1 tin nhan da thu hoi (deleteChatMessage) khoi cache: chi 1 cau
+    // DELETE theo id, khong doi bang/schema (khong tang version DB).
+    @Query("DELETE FROM chat_messages WHERE id = :messageId")
+    suspend fun deleteChatMessage(messageId: String)
+
     @Query("DELETE FROM chat_messages")
     suspend fun clearAllChatMessages()
 
