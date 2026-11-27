@@ -13,6 +13,7 @@ import com.locket.app.model.RecommendedFriend
 import com.locket.app.model.MessageReaction
 import com.locket.app.model.Moment
 import com.locket.app.model.User
+import com.locket.app.rust.RustLocketCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
@@ -24,7 +25,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.net.URLEncoder
-import okhttp3.Response
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
@@ -1229,6 +1229,23 @@ class LocketApiClient(
                     if (!syncToken.isNullOrBlank()) addProperty("sync_token", syncToken)
                 })
             }
+            if (RustLocketCore.isAvailable) {
+                val responseBody = callEndpointBytes("getLatestMomentV2", payload)
+                    ?: error("Không tải được feed")
+                val delta = RustLocketCore.parseFeed(responseBody)
+                val nextToken = delta.syncToken?.takeIf { it.isNotBlank() } ?: syncToken
+                val names = cachedUserNames(delta.moments.map { it.userUid })
+                val resolved = delta.moments.map { moment ->
+                    names[moment.userUid]?.let { name ->
+                        moment.copy(userName = name.first, userAvatarUrl = name.second)
+                    } ?: moment
+                }
+                return@withContext Result.success(FeedSync(resolved, nextToken))
+            }
+
+            // Compatibility fallback for builds where the native libraries have
+            // not been produced yet. Keep it until all four packaged ABIs have
+            // passed parser parity and device smoke tests.
             val response = callEndpoint("getLatestMomentV2", payload) ?: error("Không tải được feed")
             val status = response.get("status")?.asInt ?: 0
             val nextToken = optString(response, "sync_token").ifBlank { syncToken }
@@ -2200,6 +2217,19 @@ class LocketApiClient(
     // ==========================================
 
     private suspend fun callEndpoint(endpoint: String, payload: JsonObject): JsonObject? {
+        val bytes = callEndpointBytes(endpoint, payload) ?: return null
+        return try {
+            val root = gson.fromJson(bytes.toString(Charsets.UTF_8), JsonObject::class.java)
+            if (root != null && root.has("result") && root.get("result").isJsonObject) {
+                root.getAsJsonObject("result")
+            } else root
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Transport only: keep callable response bytes intact for one Rust parse. */
+    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject): ByteArray? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
         val body = payload.toString().toRequestBody("application/json".toMediaType())
         fun buildRequest(token: String?): Request {
@@ -2209,13 +2239,6 @@ class LocketApiClient(
                 .post(body)
             if (!token.isNullOrBlank()) builder.addHeader("Authorization", "Bearer $token")
             return builder.build()
-        }
-        fun parseResponse(resp: Response): JsonObject? {
-            val str = resp.body?.string() ?: ""
-            val root = gson.fromJson(str, JsonObject::class.java)
-            return if (root != null && root.has("result") && root.get("result").isJsonObject) {
-                root.getAsJsonObject("result")
-            } else root
         }
         return try {
             withContext(Dispatchers.IO) {
@@ -2229,8 +2252,10 @@ class LocketApiClient(
                         return@withContext null
                     }
                 }
-                parseResponse(resp)
+                resp.use { response -> response.body?.bytes() ?: byteArrayOf() }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         }
