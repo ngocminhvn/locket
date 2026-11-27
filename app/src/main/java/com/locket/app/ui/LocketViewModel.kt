@@ -52,7 +52,10 @@ class LocketViewModel(
 
     init {
         if (isLoggedIn) {
-            syncAllData()
+            viewModelScope.launch {
+                apiClient.ensureFreshToken()
+                syncAllData()
+            }
         }
     }
 
@@ -89,6 +92,7 @@ class LocketViewModel(
     fun syncAllData() {
         viewModelScope.launch {
             _isSyncing.value = true
+            apiClient.ensureFreshToken()
             val currentUid = sessionManager.currentUser.uid
 
             // 1. Fetch user profile
@@ -132,7 +136,7 @@ class LocketViewModel(
                                     userAvatarUrl = f.avatarUrl
                                 )
                             }
-                            else -> m
+                            else -> if (m.userName.isBlank()) m.copy(userName = m.userUid) else m
                         }
                     }
                     _moments.value = resolved
@@ -241,6 +245,7 @@ class LocketViewModel(
             if (res.success && res.idToken != null) {
                 sessionManager.idToken = res.idToken
                 sessionManager.refreshToken = res.refreshToken
+                sessionManager.savedEmail = email
                 sessionManager.currentUser = sessionManager.currentUser.copy(
                     uid = res.uid ?: "user_me",
                     email = email

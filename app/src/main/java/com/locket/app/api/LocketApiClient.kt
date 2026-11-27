@@ -11,10 +11,12 @@ import com.locket.app.model.Moment
 import com.locket.app.model.User
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
@@ -23,7 +25,10 @@ import kotlin.random.Random
 
 class LocketApiClient(
     private val getToken: () -> String?,
-    private val getUid: () -> String?
+    private val getUid: () -> String?,
+    private val getRefreshToken: () -> String? = { null },
+    private val isTokenStale: () -> Boolean = { false },
+    private val onTokensRefreshed: (idToken: String, refreshToken: String) -> Unit = { _, _ -> }
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -182,6 +187,36 @@ class LocketApiClient(
         } catch (e: Exception) {
             return AuthResult(success = false, errorMessage = e.localizedMessage)
         }
+    }
+
+    // idToken chi song 1 gio -> refresh bang refreshToken da luu de app khoi hoi lai account.
+    suspend fun refreshIdToken(): Boolean = withContext(Dispatchers.IO) {
+        val refreshToken = getRefreshToken() ?: return@withContext false
+        try {
+            val formBody = FormBody.Builder()
+                .add("grant_type", "refresh_token")
+                .add("refresh_token", refreshToken)
+                .build()
+            val request = Request.Builder()
+                .url("https://securetoken.googleapis.com/v1/token?key=$FIREBASE_API_KEY")
+                .post(formBody)
+                .build()
+            val response = client.newCall(request).execute()
+            val respStr = response.body?.string() ?: ""
+            if (!response.isSuccessful) return@withContext false
+            val json = gson.fromJson(respStr, JsonObject::class.java)
+            val newIdToken = json.get("id_token")?.asString ?: return@withContext false
+            val newRefreshToken = json.get("refresh_token")?.asString ?: refreshToken
+            onTokensRefreshed(newIdToken, newRefreshToken)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun ensureFreshToken(): Boolean {
+        if (getToken().isNullOrBlank()) return false
+        return if (isTokenStale()) refreshIdToken() else true
     }
 
     // ==========================================
@@ -383,6 +418,53 @@ class LocketApiClient(
         }
     }
 
+    /**
+     * Resolve ten hien thi + avatar cho 1 danh sach uid qua callable fetchUsers.
+     * Response that: data = [{uid, first_name, last_name, username, profile_picture_url, badge, temp}].
+     * Fallback dung nhu app goc: "first last" -> username -> uid.
+     */
+    suspend fun resolveUserNames(uids: List<String>): Map<String, Pair<String, String>> = withContext(Dispatchers.IO) {
+        val distinct = uids.filter { it.isNotBlank() }.distinct()
+        if (distinct.isEmpty()) return@withContext emptyMap()
+        val result = mutableMapOf<String, Pair<String, String>>()
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    add("user_uids", gson.toJsonTree(distinct))
+                })
+            }
+            val resp = callEndpoint("fetchUsers", payload)
+            val dataElem = resp?.get("data")
+            val dataArr = when {
+                dataElem?.isJsonArray == true -> dataElem.asJsonArray
+                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("users") -> dataElem.asJsonObject.getAsJsonArray("users")
+                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("data") -> dataElem.asJsonObject.getAsJsonArray("data")
+                else -> null
+            }
+            if (dataArr != null) {
+                for (uElem in dataArr) {
+                    val u = uElem.asJsonObject
+                    val uid = u.get("uid")?.asString ?: continue
+                    val first = u.get("first_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                    val last = u.get("last_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                    val username = u.get("username")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                    val avatar = u.get("profile_picture_url")?.takeIf { !it.isJsonNull }?.asString ?: ""
+                    val displayName = when {
+                        first.isNotEmpty() && last.isNotEmpty() -> "$first $last"
+                        first.isNotEmpty() -> first
+                        last.isNotEmpty() -> last
+                        username.isNotEmpty() -> username
+                        else -> uid
+                    }
+                    result[uid] = displayName to avatar
+                }
+            }
+        } catch (e: Exception) {
+            // tra ve nhung gi resolve duoc; phan con lai caller fallback ve uid
+        }
+        result
+    }
+
     suspend fun searchUserByUsername(username: String): Result<User?> = withContext(Dispatchers.IO) {
         try {
             val payload = JsonObject().apply {
@@ -525,7 +607,7 @@ class LocketApiClient(
                                     Moment(
                                         id = mId,
                                         userUid = userOwner,
-                                        userName = "Bạn",
+                                        userName = "",
                                         thumbnailUrl = thumb,
                                         caption = cap,
                                         timeAgo = "kỷ niệm"
@@ -537,7 +619,24 @@ class LocketApiClient(
                 }
             }
 
-            Result.success(momentsList)
+            // 4. Resolve ten that — getLatestMomentV2 KHONG tra ten, chi co uid (user)
+            //    nen goi fetchUsers 1 lan cho toan bo owner uid distinct.
+            val myUid = getUid()
+            val ownerUids = momentsList.map { it.userUid }.distinct()
+            val names = resolveUserNames(ownerUids)
+            val resolvedMoments = momentsList.map { m ->
+                when {
+                    m.userUid == myUid -> m.copy(userName = "Bạn")
+                    names.containsKey(m.userUid) -> {
+                        val (name, avatar) = names[m.userUid]!!
+                        m.copy(userName = name, userAvatarUrl = avatar)
+                    }
+                    m.userName.isNotBlank() -> m
+                    else -> m.copy(userName = m.userUid) // fallback dung nhu app goc: hien uid
+                }
+            }
+
+            Result.success(resolvedMoments)
         } catch (e: Exception) {
             if (momentsList.isNotEmpty()) {
                 Result.success(momentsList)
@@ -567,7 +666,7 @@ class LocketApiClient(
         return Moment(
             id = id,
             userUid = userUid,
-            userName = "Bạn bè",
+            userName = "", // placeholder: getLatestMomentV2 KHONG tra ten, chi co uid (user); ten duoc dien o fetchMomentsFeed() qua fetchUsers
             thumbnailUrl = thumb,
             videoUrl = video,
             caption = caption,
@@ -635,14 +734,25 @@ class LocketApiClient(
                 convList.add(
                     Conversation(
                         id = convId,
-                        friend = Friend(uid = otherUid, username = otherUid, displayName = otherUid),
+                        friend = Friend(uid = otherUid, username = otherUid, displayName = ""),
                         lastMessage = lastMsg,
                         timeAgo = "1d"
                     )
                 )
             }
 
-            Result.success(convList)
+            // Resolve ten that — khong gan uid lam ten nua
+            val names = resolveUserNames(convList.map { it.friend.uid }.distinct())
+            val resolved = convList.map { c ->
+                val resolvedName = names[c.friend.uid]
+                if (resolvedName != null) {
+                    c.copy(friend = c.friend.copy(displayName = resolvedName.first, avatarUrl = resolvedName.second))
+                } else {
+                    c.copy(friend = c.friend.copy(displayName = c.friend.uid))
+                }
+            }
+
+            Result.success(resolved)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -795,27 +905,37 @@ class LocketApiClient(
     // UTILITY HELPERS
     // ==========================================
 
-    private fun callEndpoint(endpoint: String, payload: JsonObject): JsonObject? {
-        val token = getToken()
+    private suspend fun callEndpoint(endpoint: String, payload: JsonObject): JsonObject? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
         val body = payload.toString().toRequestBody("application/json".toMediaType())
-        val reqBuilder = Request.Builder()
-            .url(url)
-            .addHeader("Content-Type", "application/json")
-            .post(body)
-
-        if (!token.isNullOrBlank()) {
-            reqBuilder.addHeader("Authorization", "Bearer $token")
+        fun buildRequest(token: String?): Request {
+            val builder = Request.Builder()
+                .url(url)
+                .addHeader("Content-Type", "application/json")
+                .post(body)
+            if (!token.isNullOrBlank()) builder.addHeader("Authorization", "Bearer $token")
+            return builder.build()
         }
-
-        return try {
-            val resp = client.newCall(reqBuilder.build()).execute()
+        fun parseResponse(resp: Response): JsonObject? {
             val str = resp.body?.string() ?: ""
             val root = gson.fromJson(str, JsonObject::class.java)
-            if (root != null && root.has("result") && root.get("result").isJsonObject) {
+            return if (root != null && root.has("result") && root.get("result").isJsonObject) {
                 root.getAsJsonObject("result")
-            } else {
-                root
+            } else root
+        }
+        return try {
+            withContext(Dispatchers.IO) {
+                var resp = client.newCall(buildRequest(getToken())).execute()
+                if (resp.code == 401) {
+                    resp.close()
+                    // idToken het han (song 1 gio) -> refresh roi thu lai dung 1 lan
+                    if (refreshIdToken()) {
+                        resp = client.newCall(buildRequest(getToken())).execute()
+                    } else {
+                        return@withContext null
+                    }
+                }
+                parseResponse(resp)
             }
         } catch (e: Exception) {
             null

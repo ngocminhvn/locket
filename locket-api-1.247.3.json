@@ -104,7 +104,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Verifies an SMS OTP code during phone sign-in when the server does not use Firebase Phone Auth.",
+      "success_response": null,
+      "response_note": "Requires a phone OTP code — not called."
     },
     {
       "name": "createAccountWithEmailPassword",
@@ -115,7 +118,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload r6 = a0 của wrapper, do caller build {email: userEmail, password} (@1857188); response data.token = custom token, dùng signInWithCustomToken.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Creates a new account with email and password and returns a custom token for sign-in.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "createAccountWithEmailPasswordV2",
@@ -127,7 +133,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload = copy của {email, password} + recaptcha_token; response data.token = custom token.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Creates a new account with email and password plus a reCAPTCHA token when AppCheck is unavailable.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "finalizeTemporaryUser",
@@ -140,7 +149,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 200 = ok.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Completes the profile of a temporary account (first/last name and username) after sign-up.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "linkEmailPassword",
@@ -151,7 +163,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Links an email and password to the currently signed-in (phone) account.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendPasswordResetEmail",
@@ -162,7 +177,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Chỉ 1 trong 2 field tùy loại đăng nhập (phone hoặc email); status 200 = ok, khác -> 'Failed to send password reset email'. Các hit @953154/@957818 là Firebase Auth native SDK (r0.native.sendPasswordResetEmail), KHÔNG phải callable này.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a password-reset email or SMS for the account.",
+      "success_response": null,
+      "response_note": "Sends a reset email/SMS — not called."
     },
     {
       "name": "sendVerificationCode",
@@ -175,7 +193,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "600 = ExistingPhoneNumber (số đã có tài khoản, dialog account_already_exists); 601 = UnknownPhoneNumber; 602 = UsePasswordInstead; 400 = Other; 200 + data.method='firebase' -> tiếp tục Firebase signInWithPhoneNumber. Luồng đổi số @1359495: 600 -> ném PhoneVerificationError 'couldnt_verify_number'.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends an OTP to a phone number for sign-in or number change; the server decides the verification method.",
+      "success_response": null,
+      "response_note": "Sends a real SMS — not called."
     },
     {
       "name": "setUsername",
@@ -185,7 +206,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sets the account username.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "setUsernameV2",
@@ -196,7 +220,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sets the account username with a reCAPTCHA token.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "signInWithPhonePassword",
@@ -207,7 +234,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Signs in with phone number and password and returns a custom token.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "suggestUsernames",
@@ -218,7 +248,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Suggests available usernames based on first and last name.",
+      "success_response": null,
+      "response_note": "Called; server returned status 401 with errors ['Unauthorized'] — endpoint refuses this client."
     },
     {
       "name": "updateEmailAddress",
@@ -228,7 +261,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Changes the account email address and returns a custom token for re-sign-in.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "validateEmailAddress",
@@ -239,7 +275,12 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "600 = email đã thuộc tài khoản khác (dialog email_account_already_exists, log logAttemptedAddEmailToExistingAccount); 200 = ok.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Checks whether an email is valid and already belongs to another account.",
+      "success_response": {
+        "needs_registration": true,
+        "status": 200
+      }
     },
     {
       "name": "validateUsername",
@@ -249,7 +290,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Checks whether a username is valid and still available.",
+      "success_response": null,
+      "response_note": "Called; server returned HTTP 401 {\"error\": {\"message\": \"Unauthenticated\", \"status\": \"UNAUTHENTICATED\"}} despite a valid Bearer token."
     },
     {
       "name": "validateUsernameV2",
@@ -260,7 +304,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Checks username availability with a reCAPTCHA token.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "verifyEditedPhoneNumber",
@@ -271,7 +318,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Lỗi nếu data.error có giá trị hoặc status>=400 -> ném PhoneVerificationError ('couldnt_verify_number' / 'make_sure_you_entered_the_verification_code_correctly').",
-      "verified": "static"
+      "verified": "static",
+      "function": "Verifies the OTP code when changing the phone number.",
+      "success_response": null,
+      "response_note": "Requires a phone OTP code — not called."
     },
     {
       "name": "deleteMomentV2",
@@ -283,7 +333,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a moment, optionally globally.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "getLatestMomentV2",
@@ -296,7 +349,29 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 304 = không có moment mới (bỏ qua xử lý); 200 + data[0] = moment mới nhất (canonical_uid, video_url, thumbnail_url, caption, user, date._seconds/_nanoseconds, overlays, md5, group_id).",
-      "verified": "static"
+      "verified": "live",
+      "function": "Fetches the newest moments from friends (and groups) since the last fetch.",
+      "success_response": {
+        "data": [
+          {
+            "canonical_uid": "UID",
+            "user": "UID",
+            "thumbnail_url": "https://.../placeholder",
+            "date": {
+              "_seconds": 1795766344,
+              "_nanoseconds": 626000000
+            },
+            "md5": "...",
+            "suggested_reactions": [
+              "🍟",
+              "🍔"
+            ]
+          }
+        ],
+        "missed_moments_count": 0,
+        "sync_token": "...",
+        "status": 200
+      }
     },
     {
       "name": "getMomentViews",
@@ -307,7 +382,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Lists the users who viewed a moment.",
+      "success_response": null,
+      "response_note": "Called; server returned status 401 with errors ['User does not have access to this moment'] — moment belongs to a friend; view list may be owner-only or require end_before."
     },
     {
       "name": "getSampledMoments",
@@ -319,7 +397,12 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Log lỗi 'getSampledMoments failed (status ...' khi thất bại.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Returns a random sample of moments within a time range.",
+      "success_response": {
+        "data": [],
+        "status": 200
+      }
     },
     {
       "name": "markMomentAsViewed",
@@ -329,7 +412,11 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "live",
+      "function": "Marks a moment as viewed.",
+      "success_response": {
+        "status": 200
+      }
     },
     {
       "name": "markReactionAsViewed",
@@ -340,7 +427,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Marks a reaction on a moment as viewed.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "postMomentV2",
@@ -357,7 +447,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "group chỉ có khi group_id set (group={id, message_client_token}); payload merge thêm getStreakUploadPayload() qua copyDataProperties (field streak không xác định tĩnh được); sau khi post, nếu androidAbusiveContentHandlingEnabled thì assertPostMomentSucceeded.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Posts a new moment (photo/video) to friends.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reactToMoment",
@@ -370,7 +463,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Adds an emoji reaction to a moment.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reportMoment",
@@ -381,7 +477,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 200 = ok; log 'reportMoment failed' khi lỗi.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Reports a moment for abuse.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "acceptFriendRequest",
@@ -391,7 +490,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Accepts an incoming friend request.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "blockFriend",
@@ -401,7 +503,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Blocks a user.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteFollowRequest",
@@ -412,7 +517,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a follow request (sent or received).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteFriendRequest",
@@ -423,7 +531,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a friend request (sent or received).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "getFriendRecommendations",
@@ -434,7 +545,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Returns friend recommendations.",
+      "success_response": null,
+      "response_note": "Called; server returned HTTP 401 {\"error\": {\"message\": \"Unauthenticated\", \"status\": \"UNAUTHENTICATED\"}} despite a valid Bearer token — endpoint may require AppCheck or a different auth path."
     },
     {
       "name": "getFriendshipStatus",
@@ -444,7 +558,9 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "live",
+      "function": "Returns the friendship status with a given user.",
+      "success_response": "current-user"
     },
     {
       "name": "removeFriend",
@@ -454,7 +570,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 401 hoặc response.errors khác rỗng -> throw 'error removing friend'. Các hit @1608953/@1774859 chỉ là đọc method removeFriend của hook useFriends(), không phải lời gọi callable.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Removes a friend.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendFollowRequest",
@@ -464,7 +583,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a follow request to a celebrity account.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendFriendRequest",
@@ -474,7 +596,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload {user_uid} là mutation variables của useSendFriendRequest (vd caller @1587273 build {user_uid}); V2 = copy + recaptcha_token.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a friend request.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendFriendRequestV2",
@@ -485,7 +610,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload = copy của {user_uid} + recaptcha_token (khi recaptcha bật; ngược lại gọi sendFriendRequest).",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a friend request with a reCAPTCHA token.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "suggestFriends",
@@ -495,7 +623,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Suggests friends based on the phone contacts list.",
+      "success_response": null,
+      "response_note": "Requires uploading the phone contacts list — not called (privacy)."
     },
     {
       "name": "toggleFriendHidden",
@@ -505,7 +636,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Hides or unhides a friend's moments from the feed.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "unblockUser",
@@ -515,7 +649,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Unblocks a user.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "createGroup",
@@ -531,7 +668,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "initial_message là object lồng {content, client_token, intensity} (null-safe). Hit @1266567 là định nghĩa wrapper trong group-client.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Creates a new group chat.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "getGroupChatsUpdates",
@@ -541,7 +681,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Fetches updates for a list of group chats.",
+      "success_response": null,
+      "response_note": "Skipped — getGroupsState returned no groups for this account, so no group id was available."
     },
     {
       "name": "getGroupMessages",
@@ -554,7 +697,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "client_cache_options.current_messages = [{id, created_at}]. Hit @1266555 là định nghĩa wrapper trong group-client, không phải lời gọi callable.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Fetches messages of a group chat.",
+      "success_response": null,
+      "response_note": "Skipped — getGroupsState returned no groups for this account, so no group id was available."
     },
     {
       "name": "getGroupsState",
@@ -565,7 +711,15 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "live",
+      "function": "Fetches the current state of the user's groups for syncing.",
+      "success_response": {
+        "data": {
+          "groups": [],
+          "removed_group_ids": []
+        },
+        "status": 200
+      }
     },
     {
       "name": "groupChatOp",
@@ -584,7 +738,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Field thay đổi theo op type: @1274738 send-message {type,group_id,client_token,intensity,message,moment_id}; @1274878 {type,group_id,timestamp}; @1274957/@1275249/@1275435 {type,group_id,message_id}; @1275072 {type,group_id,message_id,emoji}; @1275373 {type,group_id,muted}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Performs a group chat operation (send message, react, mute, ...).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "groupUserOp",
@@ -599,7 +756,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "@1274433 {type,group_id,user_id,recaptcha_token}; @1274543 thêm {timestamp, fully_remove_self}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Performs a group membership operation (add/remove/leave, ...).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "updateGroup",
@@ -611,7 +771,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "@1274289 {group_id,name}; @1274358 {group_id,image_url}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Changes a group's name or picture.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteChatMessage",
@@ -622,7 +785,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 200 = ok.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a chat message.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "markAsRead",
@@ -632,7 +798,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Wrapper group-client @1266628 chỉ forward arg đầu (không xác định tĩnh được); field conversation_uid từ callsite 1:1 @1732631.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Marks a conversation as read.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "removeChatMessageReaction",
@@ -644,7 +813,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Chung 1 đoạn code với sendChatMessageReaction, chọn send/remove theo flag; call chung @1733567.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Removes a reaction from a chat message.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reportMessage",
@@ -655,7 +827,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Wrapper group-client @1266674 chỉ forward arg đầu (không xác định tĩnh được); field từ callsite @1733030.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Reports a chat message.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendChatMessageReaction",
@@ -667,7 +842,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Chung 1 đoạn code với removeChatMessageReaction, chọn send/remove theo flag; call chung @1733567.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Adds a reaction to a chat message.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "sendChatMessageV2",
@@ -680,7 +858,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a chat message (text, optionally attached to a moment).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "changeProfileInfo",
@@ -696,7 +877,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Mỗi callsite update 1 field riêng: profile_picture_url (@1336449/@1336570), badge (@1357298), first_name+last_name (@1456708), birthday={encoded_mdd} (@1473306), username_discoverability_disabled (@1477608), targeted_ads_opt_out (@1477726).",
-      "verified": "static"
+      "verified": "static",
+      "function": "Updates profile info (picture, name, birthday, badge, ...).",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteUserAccount",
@@ -704,7 +888,10 @@
       "request_fields": [],
       "request_fields_unknown": false,
       "response_notes": "Gọi với object rỗng {}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes the current user's account.",
+      "success_response": null,
+      "response_note": "Deletes the account — never called."
     },
     {
       "name": "fetchUserV2",
@@ -714,7 +901,20 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 200 -> data.data parse qua safeParseUser rồi cache (setUser/setTimestamp); response trả kèm phone=null.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Fetches a user's profile by uid.",
+      "success_response": {
+        "data": {
+          "uid": "UID",
+          "first_name": "Tên",
+          "last_name": "Tên",
+          "badge": null,
+          "profile_picture_url": "https://.../placeholder",
+          "temp": false,
+          "username": "username"
+        },
+        "status": 200
+      }
     },
     {
       "name": "fetchUsers",
@@ -724,7 +924,22 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "live",
+      "function": "Fetches profiles for a list of uids in one call.",
+      "success_response": {
+        "data": [
+          {
+            "uid": "UID",
+            "first_name": "Tên",
+            "last_name": "Tên",
+            "badge": null,
+            "profile_picture_url": "https://.../placeholder",
+            "temp": false,
+            "username": "username"
+          }
+        ],
+        "status": 200
+      }
     },
     {
       "name": "getUserByUsername",
@@ -734,7 +949,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "status 200 = ok.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Finds a user by username.",
+      "success_response": null,
+      "response_note": "Called; server returned HTTP 401 {\"error\": {\"message\": \"Unauthenticated\", \"status\": \"UNAUTHENTICATED\"}} despite a valid Bearer token — endpoint may require AppCheck or a different auth path."
     },
     {
       "name": "requestUserDataExport",
@@ -744,7 +962,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload {email} do submit handler t8 build từ email state (@1478963); khi androidDataExportRecaptchaEnabled thì gửi copy + recaptcha_token. Response data.status 'pending'|'completed' (completed -> file_url).",
-      "verified": "static"
+      "verified": "static",
+      "function": "Requests an export of the account's data by email.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "setNotificationToken",
@@ -755,7 +976,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Response validate bằng validateFunctionResponseWithNestedData. Hit @950885 gọi wrapper setNotificationToken của module 2568 với data null (luồng sign-out), không phải callable trực tiếp.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Registers an FCM token for push notifications.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "setUserPreferences",
@@ -765,7 +989,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Saves the user's personal preferences.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteRollcallComment",
@@ -777,7 +1004,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a comment on a Rollcall post.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "deleteRollcallPost",
@@ -787,7 +1017,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Deletes a Rollcall post.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "getRollcallPosts",
@@ -798,7 +1031,14 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "queryFn validate payload bằng GetRollcallPostsRequestSchema; callsite initialData @1293274 truyền thẳng _closure2_slot0 (userUid) — không khớp schema {year, week_of_year}.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Fetches Rollcall posts for a given year and week.",
+      "success_response": {
+        "data": {
+          "posts": []
+        },
+        "status": 200
+      }
     },
     {
       "name": "likeRollcallComment",
@@ -811,7 +1051,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Likes or unlikes a Rollcall comment.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "postRollcall",
@@ -824,7 +1067,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Payload build @1347500: week_of_year/year từ arg, items = processed assets, tagged_users = arg thứ 5 (optional). Hit @1841806 là lời gọi wrapper postRollcall, không phải callable trực tiếp.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Posts a new Rollcall for the week.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "postRollcallComment",
@@ -841,7 +1087,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "2 shape: snake_case @1347896 {body,post_item_uid,post_uid,post_user_uid,reply_user_uid} và camelCase @1831102 {body,postUid,postItemUid,postUserUid}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Comments on a Rollcall post.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "postRollcallReaction",
@@ -861,7 +1110,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "2 shape: snake_case @1348007 {post_item_uid,post_uid,post_user_uid,reaction,scale,x,y,rotation} và camelCase @1835395 {postItemUid,postUid,postUserUid,reaction,rotation}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Adds a reaction to a photo in a Rollcall post.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reportRollcallComment",
@@ -873,7 +1125,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Reports a Rollcall comment.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reportRollcallPost",
@@ -884,7 +1139,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Reports a Rollcall post.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "checkLinkBasedRewardedReferralRedemption",
@@ -894,7 +1152,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Checks whether a referral link can be redeemed for a reward.",
+      "success_response": null,
+      "response_note": "Requires a referral token — none available."
     },
     {
       "name": "fetchRewardedReferrals",
@@ -902,7 +1163,15 @@
       "request_fields": [],
       "request_fields_unknown": false,
       "response_notes": "Gọi không có argument.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Lists referrals that earned a reward.",
+      "success_response": {
+        "data": {
+          "rewarded_referrals": [],
+          "cash_outs": []
+        },
+        "status": 200
+      }
     },
     {
       "name": "getLinkBasedRewardedReferralSenderState",
@@ -912,7 +1181,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Returns the referral state of the link sender for a campaign.",
+      "success_response": null,
+      "response_note": "Requires a valid campaign value — none known."
     },
     {
       "name": "linkBasedRewardedReferralRecipientOp",
@@ -926,7 +1198,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "@1236073 {type,referral_token,phone,verification_code}; @1236135 {type,referral_token,phone,is_retry}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Performs a referral-recipient operation (enter code, verify phone, ...).",
+      "success_response": null,
+      "response_note": "Part of the phone-verification referral flow — not called."
     },
     {
       "name": "linkBasedRewardedReferralSenderPhoneOp",
@@ -939,7 +1214,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "3 dạng call: @1235813 {type,phone,is_retry}; @1235871 {type}; @1236014 {type,phone,verification_code}.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Performs a sender phone-verification operation for link referrals.",
+      "success_response": null,
+      "response_note": "Part of the phone-verification referral flow — not called."
     },
     {
       "name": "fetchUserForInviteToken",
@@ -949,7 +1227,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Validate response: phải có user data; nếu là celebrity thì phải có celebrity_data.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Fetches the user behind an invite token.",
+      "success_response": null,
+      "response_note": "Requires an invite token — none available."
     },
     {
       "name": "generateInviteToken",
@@ -957,7 +1238,10 @@
       "request_fields": [],
       "request_fields_unknown": false,
       "response_notes": "Gọi không có argument.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Generates a new invite token.",
+      "success_response": null,
+      "response_note": "Creates a new invite token — not called (write operation)."
     },
     {
       "name": "createDynamicLink",
@@ -967,7 +1251,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Creates a Firebase Dynamic Link.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "reportAd",
@@ -983,7 +1270,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Thành công iff data.status===200 (số 422 trong file là jump target, không phải status code).",
-      "verified": "static"
+      "verified": "static",
+      "function": "Reports an ad.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "resolveDynamicLink",
@@ -993,7 +1283,14 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "Hit @1673475 là Firebase Dynamic Links SDK resolveDynamicLink(url string, module 3056), KHÔNG phải callable này.",
-      "verified": "static"
+      "verified": "live",
+      "function": "Resolves a Dynamic Link to its destination URL.",
+      "success_response": {
+        "data": {
+          "link": "https://.../placeholder"
+        },
+        "status": 200
+      }
     },
     {
       "name": "sendSupportMessage",
@@ -1009,7 +1306,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "debug_info chỉ thêm khi androidSendDebugInfo bật; body = device-info + '\\n\\n' + message; status 200 = ok.",
-      "verified": "static"
+      "verified": "static",
+      "function": "Sends a support message to the Locket team.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     },
     {
       "name": "setClientData",
@@ -1020,7 +1320,10 @@
       ],
       "request_fields_unknown": false,
       "response_notes": "",
-      "verified": "static"
+      "verified": "static",
+      "function": "Uploads client data (time zone, experiments, ...) to the server.",
+      "success_response": null,
+      "response_note": "Write endpoint — not called during this read-only probe."
     }
   ],
   "storage": {
@@ -1218,5 +1521,31 @@
     "Noi dung day du cac default JSON.stringify(getDefault...()) (paywall, upsell, quick reactions, camera config...)",
     "Gia tri return cua finalizeTemporaryUser khi status != 200",
     "Tong so callable chinh xac (mot so slot r-number trong)"
-  ]
+  ],
+  "response_probe_2026_11_27": {
+    "method": "Read-only probe with the user's own account (sign-in once via identitytoolkit REST, Android headers). Only fetch/get/validate endpoints called; markMomentAsViewed allowed by the user after fetching the latest moment. No moment posted, no upload, no chat sent, no add/delete, no data changed.",
+    "called_endpoints": [
+      "fetchRewardedReferrals",
+      "fetchUserV2",
+      "fetchUsers",
+      "getFriendRecommendations",
+      "getFriendshipStatus",
+      "getGroupChatsUpdates",
+      "getGroupMessages",
+      "getGroupsState",
+      "getLatestMomentV2",
+      "getMomentViews",
+      "getRollcallPosts",
+      "getSampledMoments",
+      "getUserByUsername",
+      "markMomentAsViewed",
+      "resolveDynamicLink",
+      "suggestUsernames",
+      "validateEmailAddress",
+      "validateUsername"
+    ],
+    "success_responses": 11,
+    "null_responses": 69,
+    "anonymization": "uid -> 'UID', personal names -> 'Tên', username -> 'username', email -> 'email@example.com', URLs -> 'https://.../placeholder', tokens/hashes -> '...', free text (caption/body/message) -> 'nội dung'. Field names, types, enum values and counts preserved."
+  }
 }

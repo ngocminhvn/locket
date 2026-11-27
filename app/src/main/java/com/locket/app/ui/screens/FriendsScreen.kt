@@ -349,7 +349,7 @@ fun FriendsScreen(
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = friend.displayName.ifBlank { friend.username.ifBlank { "Bạn bè" } },
+                                text = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } },
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,

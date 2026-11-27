@@ -24,7 +24,13 @@ class MainActivity : ComponentActivity() {
         val sessionManager = (application as LocketApplication).sessionManager
         val apiClient = LocketApiClient(
             getToken = { sessionManager.idToken },
-            getUid = { sessionManager.currentUser.uid }
+            getUid = { sessionManager.currentUser.uid },
+            getRefreshToken = { sessionManager.refreshToken },
+            isTokenStale = { sessionManager.isTokenStale },
+            onTokensRefreshed = { idToken, refreshToken ->
+                sessionManager.idToken = idToken
+                sessionManager.refreshToken = refreshToken
+            }
         )
         val viewModel = LocketViewModel(sessionManager, apiClient)
 

@@ -12,9 +12,27 @@ class SessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("locket_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
+    var savedEmail: String?
+        get() = prefs.getString("saved_email", null)
+        set(value) = prefs.edit().putString("saved_email", value).apply()
+
+    var tokenObtainedAtMs: Long
+        get() = prefs.getLong("id_token_obtained_at", 0L)
+        set(value) = prefs.edit().putLong("id_token_obtained_at", value).apply()
+
     var idToken: String?
         get() = prefs.getString("id_token", null)
-        set(value) = prefs.edit().putString("id_token", value).apply()
+        set(value) {
+            prefs.edit().putString("id_token", value).apply()
+            if (!value.isNullOrBlank()) tokenObtainedAtMs = System.currentTimeMillis()
+        }
+
+    // idToken chi song 1 gio -> coi la cu sau 50 phut, refresh truoc 10 phut
+    val isTokenStale: Boolean
+        get() {
+            val t = tokenObtainedAtMs
+            return t == 0L || System.currentTimeMillis() - t > 50 * 60 * 1000L
+        }
 
     var refreshToken: String?
         get() = prefs.getString("refresh_token", null)

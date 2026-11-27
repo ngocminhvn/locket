@@ -42,7 +42,7 @@ fun LoginScreen(
     // Step: 1 = Enter identifier, 2 = Enter password / OTP
     var step by remember { mutableStateOf(1) }
 
-    var emailInput by remember { mutableStateOf("") }
+    var emailInput by remember { mutableStateOf(viewModel.sessionManager.savedEmail ?: "") }
     var phoneInput by remember { mutableStateOf("+84") }
     var passwordInput by remember { mutableStateOf("") }
     var otpInput by remember { mutableStateOf("") }
