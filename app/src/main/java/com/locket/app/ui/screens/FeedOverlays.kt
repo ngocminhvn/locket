@@ -313,6 +313,15 @@ private class SwipeEmojiPickerHost(
             styledBody = body
             fun style(child: View) {
                 child.findViewById<TextView>(EmojiPickerR.id.category_name)?.apply {
+                    // Category names are already available on the icon tabs.
+                    // Keep only the recent section label and a one-pixel
+                    // scroll anchor for each other group.
+                    val isRecent = text.toString() == context.getString(EmojiPickerR.string.emoji_category_recent)
+                    visibility = if (isRecent) View.VISIBLE else View.GONE
+                    val rowHeight = if (isRecent) ViewGroup.LayoutParams.WRAP_CONTENT else 1
+                    if (child.layoutParams.height != rowHeight) {
+                        child.layoutParams = child.layoutParams.apply { height = rowHeight }
+                    }
                     textSize = 13f
                     letterSpacing = 0f
                     isAllCaps = false
