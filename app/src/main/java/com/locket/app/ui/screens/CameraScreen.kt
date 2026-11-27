@@ -178,6 +178,7 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var shutterElapsed by remember { mutableLongStateOf(0L) }
     val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null
     SideEffect {
         onSwipeEnabledChange(canSwipe)
@@ -449,11 +450,13 @@ fun CameraScreen(
         val capture = imageCapture
         if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
+        shutterElapsed = SystemClock.elapsedRealtime()
 
         // Normal photos use the same transformed frame the user sees.
         // Never silently switch to a differently processed still photograph.
-        val wantsStill = capture.flashMode != ImageCapture.FLASH_MODE_OFF ||
-            flashMode != ImageCapture.FLASH_MODE_OFF || extensionActive
+        // Extension preview frames are also valid snapshots. A real still
+        // is needed only when the configured flash must actually fire.
+        val wantsStill = capture.flashMode != ImageCapture.FLASH_MODE_OFF
         if (!wantsStill) {
             val started = SystemClock.elapsedRealtime()
             if (previewView.previewStreamState.value != PreviewView.StreamState.STREAMING) {
@@ -486,8 +489,8 @@ fun CameraScreen(
             return
         }
 
-        // Real still capture is reserved for explicitly selected flash or
-        // camera extensions; those intentionally can differ from the preview.
+        // Real still capture is reserved for flash; it may intentionally
+        // differ from the preview because it illuminates the scene.
         val mirrorPhoto = frontCamera && cameraPreferences.mirror
         val mainExecutor = ContextCompat.getMainExecutor(context)
         capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
@@ -657,6 +660,17 @@ fun CameraScreen(
 
     val review = capturedBitmap?.let { bitmap ->
         val isPhoto = capturedVideo == null
+        LaunchedEffect(bitmap) {
+            val start = shutterElapsed
+            if (start != 0L) {
+                // Observe the following frame boundary after composition,
+                // separately from the synchronous camera readback.
+                withFrameNanos { }
+                withFrameNanos { }
+                android.util.Log.d("LocketCamera", "review frame boundary ${SystemClock.elapsedRealtime() - start}ms")
+                shutterElapsed = 0L
+            }
+        }
         val prepared = remember(bitmap, isPhoto) {
             if (isPhoto) viewModel.prepareMomentThumbnail(bitmap) else null
         }
@@ -669,8 +683,11 @@ fun CameraScreen(
             if (prepared == null) return@LaunchedEffect
             var temp: File? = null
             try {
-                // Display the frozen real frame immediately while its JPEG
-                // snapshot and independent upload thumbnail are prepared.
+                // Keep JPEG encoding away from the first review draw.
+                withFrameNanos { }
+                withFrameNanos { }
+                delay(150)
+                // The file is only for saving; the review keeps the original pixels.
                 try {
                     withContext(Dispatchers.IO) {
                         val file = File.createTempFile("locket-snapshot-", ".jpg", context.cacheDir)
