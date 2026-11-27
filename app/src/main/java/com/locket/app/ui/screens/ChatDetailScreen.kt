@@ -3,6 +3,12 @@ package com.locket.app.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
@@ -67,6 +73,8 @@ fun ChatDetailScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var inputMessage by remember(friend.uid) { mutableStateOf("") }
     var showQuickEmojis by remember { mutableStateOf(false) }
     var sending by remember(friend.uid) { mutableStateOf(false) }
@@ -85,6 +93,8 @@ fun ChatDetailScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val myUid = currentUser.uid
     val listState = rememberLazyListState()
+    val newestFirst = remember(messages) { messages.asReversed() }
+    val currentMessages by rememberUpdatedState(messages)
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
 
@@ -125,7 +135,8 @@ fun ChatDetailScreen(
             },
             onError = { err ->
                 sending = false
-                Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                if (!clearInput && inputMessage.isBlank()) inputMessage = text
+                Toast.makeText(context, "Không gửi được: $err", Toast.LENGTH_LONG).show()
             })
     }
 
@@ -135,17 +146,15 @@ fun ChatDetailScreen(
         onDispose { viewModel.closeChat() }
     }
 
-    // Tin moi ve thi cuon xuong duoi — chi khi tin moi nhat doi (key la id
-    // tin cuoi): tai them tin cu khong doi tin moi nhat nen khong keo xuong.
+    // Reverse layout anchors the newest message at the composer even when IME
+    // changes the viewport or the last item is a large square photo.
     LaunchedEffect(messages.lastOrNull()?.id) {
         if (messages.isNotEmpty()) {
-            listState.scrollToItem(messages.lastIndex)
+            listState.scrollToItem(0)
             chatSettled = true
         }
     }
 
-    // Polling nhe khi dang mo chat: refresh moi ~12s de tin moi ve gan
-    // realtime hon. Dung khi roi man vi LaunchedEffect bi huy.
     LaunchedEffect(activeConversationId) {
         val convId = activeConversationId ?: return@LaunchedEffect
         while (true) {
@@ -154,23 +163,21 @@ fun ChatDetailScreen(
         }
     }
 
-    // Cuon toi dau danh sach (tin cu nhat) thi tai them tin cu.
-    // LazyColumn khong reverseLayout: dau danh sach = index 0 = tin cu nhat.
-    LaunchedEffect(activeConversationId) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { idx ->
-                val convId = viewModel.activeConversationId.value ?: return@collect
-                if (!chatSettled || idx != 0) return@collect
-                if (messages.isEmpty() || !viewModel.chatHasMoreOlder.value || viewModel.isLoadingOlderChat.value) return@collect
-                val info = listState.layoutInfo
-                if (info.visibleItemsInfo.isEmpty() || info.totalItemsCount <= info.visibleItemsInfo.size) return@collect
-                val anchorOffset = listState.firstVisibleItemScrollOffset
-                viewModel.loadOlderChatMessages(convId) { added ->
-                    // Tin cu chen len dau day tin dang xem xuong `added` vi
-                    // tri — cuon lai dung cho do de giu vi tri doc.
-                    if (added > 0) listState.scrollToItem(added, anchorOffset)
-                }
+    // Older messages append at the far end of the reversed list. Stable
+    // message keys preserve the current scroll position without index math.
+    LaunchedEffect(activeConversationId, chatSettled) {
+        if (!chatSettled) return@LaunchedEffect
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val count = currentMessages.size
+            count > 0 && info.visibleItemsInfo.any { it.index >= count - 2 } &&
+                info.visibleItemsInfo.size < count
+        }.collect { nearOldest ->
+            val convId = viewModel.activeConversationId.value ?: return@collect
+            if (nearOldest && viewModel.chatHasMoreOlder.value && !viewModel.isLoadingOlderChat.value) {
+                viewModel.loadOlderChatMessages(convId)
             }
+        }
     }
 
     fun formatTime(createdAtMs: Long): String {
@@ -187,6 +194,59 @@ fun ChatDetailScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
+            // Header Bar: Back arrow, Avatar with yellow border, Friend name
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(chatColor)
+                    .statusBarsPadding()
+                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Quay lại",
+                        tint = Color.White
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2C2C2E)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (friend.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = friend.avatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Text(
+                    text = displayName,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
             // Message Stream: tin nhan that tu server (cache Room + sync)
             if (isChatLoading && messages.isEmpty()) {
                 Box(
@@ -217,28 +277,11 @@ fun ChatDetailScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = 8.dp),
-                    contentPadding = PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 76.dp, bottom = 8.dp),
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Dang tai them tin cu: vong loading nho o dau danh sach
-                    // (chi them item nay khi dang tai, khong doi index tin).
-                    if (isLoadingOlderChat) {
-                        item(key = "loading-older") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = LocketYellow,
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            }
-                        }
-                    }
-                    items(messages, key = { it.id }) { msg ->
+                    items(newestFirst, key = { it.id }) { msg ->
                         val timeStr = formatTime(msg.createdAtMs)
                         if (msg.thumbnailUrl != null) {
                             // Shared Moment Card in Chat (tin kem moment that)
@@ -363,6 +406,24 @@ fun ChatDetailScreen(
                             }
                         }
                     }
+                    // Dang tai them tin cu: vong loading nho o dau danh sach
+                    // (chi them item nay khi dang tai, khong doi index tin).
+                    if (isLoadingOlderChat) {
+                        item(key = "loading-older") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LocketYellow,
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -384,6 +445,8 @@ fun ChatDetailScreen(
                     ),
                     cursorBrush = SolidColor(Color.White),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendText(inputMessage, true) }),
                     decorationBox = { inner ->
                         Box {
                             if (inputMessage.isEmpty()) Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.60f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
@@ -392,8 +455,10 @@ fun ChatDetailScreen(
                     }
                 )
                 if (inputMessage.isNotBlank()) {
-                    TextButton(onClick = { sendText(inputMessage, true) }, enabled = !sending) {
-                        Text("Gửi", color = LocketYellow, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { sendText(inputMessage, true) }, enabled = !sending, modifier = Modifier.size(36.dp)) {
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = if (sending) 0.4f else 0.9f)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ArrowUpward, "Gửi", tint = chatColor, modifier = Modifier.size(20.dp))
+                        }
                     }
                 } else {
                     for (emoji in listOf("🔥", "😍", "💛")) {
@@ -401,64 +466,16 @@ fun ChatDetailScreen(
                             Text(emoji, fontSize = 25.sp)
                         }
                     }
-                    IconButton(onClick = { showQuickEmojis = true }, modifier = Modifier.size(34.dp)) {
+                    IconButton(onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        showQuickEmojis = true
+                    }, enabled = !sending, modifier = Modifier.size(34.dp)) {
                         Icon(Icons.Default.AddReaction, "Thêm biểu cảm", tint = Color.White.copy(alpha = 0.55f))
                     }
                 }
             }
         }
-            // Header Bar: Back arrow, Avatar with yellow border, Friend name
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(chatColor.copy(alpha = 0.98f), chatColor.copy(alpha = 0.65f), Color.Transparent)))
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Quay lại",
-                        tint = Color.White
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (friend.avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = friend.avatarUrl,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Text(
-                    text = displayName,
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
 
     }
 
