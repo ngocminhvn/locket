@@ -301,6 +301,120 @@ class LocketApiClient(
     // chua live-verify: xem ghi chu tung ham)
     // ==========================================
 
+    data class AccountDetails(val email: String?, val phone: String?, val birthdayMdd: Int?)
+
+    suspend fun fetchAccountDetails(): Result<AccountDetails> = withContext(Dispatchers.IO) {
+        try {
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
+            val uid = getUid().orEmpty()
+            val token = getToken().orEmpty()
+            val payload = JsonObject().apply { addProperty("idToken", token) }
+            val req = Request.Builder()
+                .url("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=$FIREBASE_API_KEY")
+                .addHeader("X-Android-Package", ANDROID_PACKAGE)
+                .addHeader("X-Android-Cert", ANDROID_CERT)
+                .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+            val account = client.newCall(req).execute().use { response ->
+                check(response.isSuccessful) { "Không đọc được tài khoản (HTTP ${response.code})" }
+                gson.fromJson(response.body?.string(), JsonObject::class.java)
+                    .getAsJsonArray("users")?.firstOrNull()?.asJsonObject
+                    ?: error("Không tìm thấy tài khoản")
+            }
+            check(optString(account, "localId") == uid) { "Tài khoản không khớp" }
+            var birthday: Int? = null
+            var phone = optString(account, "phoneNumber").ifBlank { null }
+            var email = optString(account, "email").ifBlank { null }
+            val profileRequest = Request.Builder().url("$FIRESTORE_BASE_URL/users/$uid")
+                .addHeader("Authorization", "Bearer $token").get().build()
+            client.newCall(profileRequest).execute().use { response ->
+                if (response.isSuccessful) {
+                    val fields = asObj(gson.fromJson(response.body?.string(), JsonObject::class.java), "fields")
+                    val birthdayFields = asObj(asObj(asObj(fields, "birthday"), "mapValue"), "fields")
+                    val encoded = asObj(birthdayFields, "encoded_mdd")
+                    birthday = optString(encoded, "integerValue").ifBlank { optString(encoded, "stringValue") }.toIntOrNull()
+                    if (phone == null) phone = extractString(fields, "phone").ifBlank { extractString(fields, "phone_number") }.ifBlank { null }
+                    if (email == null) email = extractString(fields, "email").ifBlank { null }
+                }
+            }
+            Result.success(AccountDetails(email, phone, birthday))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun changeAccountEmail(email: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
+            val uid = getUid()
+            val payload = JsonObject().apply { add("data", JsonObject().apply { addProperty("email", email.trim()) }) }
+            val response = callEndpoint("updateEmailAddress", payload) ?: error("Không nhận được phản hồi")
+            if (response.get("status")?.asInt == 601) error("Email đã được sử dụng")
+            val customToken = optString(asObj(response, "data"), "token")
+            check(response.get("status")?.asInt == 200 && customToken.isNotBlank()) { callableError(response, "Không đổi được email") }
+            val auth = exchangeCustomToken(customToken)
+            check(auth.success && auth.uid == uid && !auth.idToken.isNullOrBlank() && !auth.refreshToken.isNullOrBlank()) {
+                "Máy chủ đã phản hồi đổi email nhưng không xác thực lại được. Hãy kiểm tra tài khoản trước khi thử lại."
+            }
+            onTokensRefreshed(auth.idToken!!, auth.refreshToken!!)
+            Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun requestEditedPhoneCode(phone: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
+            val payload = JsonObject().apply { add("data", JsonObject().apply {
+                addProperty("phone", phone)
+                addProperty("operation", "change_number")
+                addProperty("device_model", android.os.Build.MODEL)
+            }) }
+            val response = callEndpoint("sendVerificationCode", payload) ?: error("Không nhận được phản hồi")
+            check(response.get("status")?.asInt == 200) { callableError(response, "Không gửi được mã xác nhận") }
+            val method = optString(asObj(response, "data"), "method")
+            check(method.isNotBlank() && method != "firebase") {
+                "Máy chủ yêu cầu xác thực SMS qua Firebase SDK; luồng này chưa được hỗ trợ."
+            }
+            Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun verifyEditedPhone(phone: String, code: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
+            val payload = JsonObject().apply { add("data", JsonObject().apply {
+                addProperty("phone", phone)
+                addProperty("verification_code", code)
+            }) }
+            val response = callEndpoint("verifyEditedPhoneNumber", payload) ?: error("Không nhận được phản hồi")
+            val status = response.get("status")?.asInt ?: 0
+            val serverError = optString(asObj(response, "data"), "error")
+            check(status in 200..299 && serverError.isBlank()) {
+                serverError.ifBlank { callableError(response, "Không xác nhận được số điện thoại") }
+            }
+            Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun changeBirthday(month: Int, day: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
+            java.time.MonthDay.of(month, day)
+            val payload = JsonObject().apply { add("data", JsonObject().apply {
+                add("birthday", JsonObject().apply { addProperty("encoded_mdd", month * 100 + day) })
+            }) }
+            val response = callEndpoint("changeProfileInfo", payload)
+            check(response != null && ((response.get("status")?.asInt ?: 0) in 200..299 ||
+                response.get("success")?.takeIf { it.isJsonPrimitive }?.asBoolean == true ||
+                asObj(response, "data")?.get("success")?.takeIf { it.isJsonPrimitive }?.asBoolean == true)) {
+                callableError(response, "Không đổi được sinh nhật")
+            }
+            Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
     /**
      * Doi ten hien thi: changeProfileInfo {first_name, last_name} — dung
      * dung 2 field nhu callsite goc duy nhat doi ten (decompiled.js

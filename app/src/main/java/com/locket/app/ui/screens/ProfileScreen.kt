@@ -374,6 +374,10 @@ fun ProfileScreen(
             ModCenterSettings()
             Spacer(modifier = Modifier.height(24.dp))
 
+            SectionTitle("Tổng quát")
+            GeneralProfileSettings(viewModel, user.displayName) { showEditNameDialog = true }
+            Spacer(modifier = Modifier.height(24.dp))
+
             // Section: Riêng tư & bảo mật
             SectionTitle("Riêng tư & bảo mật")
             // Danh sach that: doc tu Firestore users/{uid}/blocked_users

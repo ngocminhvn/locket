@@ -897,6 +897,21 @@ class LocketViewModel(
 
     // ---- Ho so: doi ten / username / anh dai dien / link moi (batch 5) ----
 
+    suspend fun readGeneralAccount() = apiClient.fetchAccountDetails()
+
+    suspend fun changeGeneralEmail(email: String): Result<Unit> {
+        val result = apiClient.changeAccountEmail(email)
+        if (result.isSuccess) {
+            sessionManager.savedEmail = email.trim()
+            refreshProfile()
+        }
+        return result
+    }
+
+    suspend fun requestGeneralPhoneCode(phone: String) = apiClient.requestEditedPhoneCode(phone)
+    suspend fun changeGeneralPhone(phone: String, code: String) = apiClient.verifyEditedPhone(phone, code)
+    suspend fun changeGeneralBirthday(month: Int, day: Int) = apiClient.changeBirthday(month, day)
+
     /** Doc lai profile tu server (fetchUserV2) roi cap nhat UI + session. */
     fun refreshProfile(onDone: () -> Unit = {}) {
         viewModelScope.launch {
