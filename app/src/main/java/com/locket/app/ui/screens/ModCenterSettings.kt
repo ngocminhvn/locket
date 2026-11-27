@@ -209,16 +209,16 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     // Nut tat "Hien luot xem" (chip luot xem tren moment cua minh,
     // Batch 7a). Mac dinh bat; tat thi an chip.
     val showViewCount by viewModel.showViewCount.collectAsState()
-    Row(Modifier.fillMaxWidth().clickable { viewModel.setShowViewCount(!showViewCount) }
-        .padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Visibility, null, tint = Color.White)
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Text("Hiện lượt xem", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Text("Hiện số lượt xem trên khoảnh khắc của bạn", color = LocketTextDim, fontSize = 14.sp)
-        }
-        Switch(checked = showViewCount, onCheckedChange = { viewModel.setShowViewCount(it) })
-    }
+    ProfileSettingsRow(
+        icon = { Icon(Icons.Default.Visibility, null, tint = Color(0xFFCCCCCC)) },
+        title = "Hiện lượt xem",
+        subtitle = "Hiện số lượt xem trên khoảnh khắc của bạn",
+        trailing = {
+            Switch(checked = showViewCount, onCheckedChange = { viewModel.setShowViewCount(it) },
+                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LocketYellow))
+        },
+        onClick = { viewModel.setShowViewCount(!showViewCount) }
+    )
 
     release?.let { update ->
         AlertDialog(onDismissRequest = { if (progress == null) { release = null; downloaded = null } },
@@ -262,13 +262,5 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
 @Composable
 private fun ModRow(icon: @Composable () -> Unit, title: String, subtitle: String? = null,
     enabled: Boolean = true, onClick: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
-        .padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        icon()
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            if (!subtitle.isNullOrBlank()) Text(subtitle, color = LocketTextDim, fontSize = 14.sp)
-        }
-    }
+    ProfileSettingsRow(icon = icon, title = title, subtitle = subtitle, enabled = enabled, onClick = onClick)
 }

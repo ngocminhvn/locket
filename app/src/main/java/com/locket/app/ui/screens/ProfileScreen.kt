@@ -144,13 +144,14 @@ fun ProfileScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
                 .statusBarsPadding()
-                .padding(bottom = 40.dp),
+                .navigationBarsPadding()
+                .verticalScroll(scrollState)
+                .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // The navigation controls share the same vertical space as the avatar.
-            Box(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 Box(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).size(116.dp),
                     contentAlignment = Alignment.BottomEnd
@@ -209,8 +210,7 @@ fun ProfileScreen(
             Text(
                 text = user.displayName.ifBlank { user.username.ifBlank { "Tài khoản Locket" } },
                 color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.SemiBold
+                style = profileTextStyle(24.sp, 29.sp, FontWeight.SemiBold)
             )
             Spacer(modifier = Modifier.height(4.dp))
             Row(
@@ -220,8 +220,7 @@ fun ProfileScreen(
                 Text(
                     text = if (isUploadingAvatar) "Đang tải ảnh lên..." else "Chỉnh ảnh",
                     color = LocketYellow,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = profileTextStyle(14.sp, 18.sp, FontWeight.SemiBold),
                     modifier = Modifier.clickable(enabled = !isUploadingAvatar) {
                         avatarPicker.launch("image/*")
                     }
@@ -229,13 +228,12 @@ fun ProfileScreen(
                 Text(
                     text = "Đổi tên",
                     color = LocketYellow,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = profileTextStyle(14.sp, 18.sp, FontWeight.SemiBold),
                     modifier = Modifier.clickable { showEditNameDialog = true }
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Separate rounded cards with the narrow gap from the reference.
             Column(
@@ -246,15 +244,15 @@ fun ProfileScreen(
                     modifier = Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
                         .background(Color(0xFF1E1E1E))
-                        .heightIn(min = 104.dp).padding(horizontal = 16.dp, vertical = 16.dp),
+                        .heightIn(min = 100.dp).padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // No Rollcall thumbnail or participant count is available in the current data model.
                     Icon(Icons.Outlined.Campaign, null, tint = Color.White, modifier = Modifier.size(32.dp))
                     Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Rollcall", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                        Text("Chia sẻ ảnh với bạn bè", color = LocketTextDim, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 21.sp)
+                        Text("Rollcall", color = Color.White, style = profileTextStyle(17.sp, 21.sp, FontWeight.Bold))
+                        Text("Chia sẻ ảnh với bạn bè", color = LocketTextDim, style = profileTextStyle(16.sp, 21.sp, FontWeight.Medium))
                     }
                     Spacer(Modifier.width(8.dp))
                     Box(
@@ -271,7 +269,7 @@ fun ProfileScreen(
                             .padding(horizontal = 14.dp, vertical = 11.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("CHỌN ẢNH", color = LocketYellow, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("CHỌN ẢNH", color = LocketYellow, style = profileTextStyle(14.sp, 18.sp, FontWeight.Bold))
                     }
                 }
 
@@ -296,9 +294,9 @@ fun ProfileScreen(
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Mời bạn bè tham gia Locket!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 20.sp)
+                        Text("Mời bạn bè tham gia Locket!", color = Color.White, style = profileTextStyle(16.sp, 20.sp, FontWeight.Bold))
                         if (user.username.isNotBlank()) {
-                            Text("locket.cam/${user.username}", color = LocketTextDim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("locket.cam/${user.username}", color = LocketTextDim, style = profileTextStyle(15.sp, 19.sp, FontWeight.Medium))
                         }
                     }
                     IconButton(onClick = { showQrModal = true }, modifier = Modifier.size(34.dp)) {
@@ -360,15 +358,15 @@ fun ProfileScreen(
                 onClick = { Toast.makeText(context, "Gói đăng ký Locket Gold", Toast.LENGTH_SHORT).show() }
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             SectionTitle("Mod Center")
             ModCenterSettings(viewModel)
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             SectionTitle("Tổng quát")
             GeneralProfileSettings(viewModel, user.displayName) { showEditNameDialog = true }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Section: Riêng tư & bảo mật
             SectionTitle("Riêng tư & bảo mật")
@@ -388,7 +386,7 @@ fun ProfileScreen(
                 onClick = { Toast.makeText(context, "Privacy", Toast.LENGTH_SHORT).show() }
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Section: Vùng nguy hiểm
             SectionTitle("Vùng nguy hiểm")
@@ -436,8 +434,7 @@ private fun SectionTitle(title: String) {
     Text(
         text = title,
         color = Color.White,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Bold,
+        style = profileTextStyle(20.sp, 25.sp, FontWeight.Bold),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 17.dp, vertical = 8.dp)
@@ -452,25 +449,7 @@ private fun SettingsItem(
     trailing: @Composable (() -> Unit)? = null,
     onClick: () -> Unit = {}
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 17.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) { icon() }
-        Spacer(modifier = Modifier.width(14.dp))
-        Text(
-            text = title,
-            color = textColor,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
-        )
-        trailing?.invoke()
-    }
+    ProfileSettingsRow(icon = icon, title = title, titleColor = textColor, trailing = trailing, onClick = onClick)
 }
 
 /**

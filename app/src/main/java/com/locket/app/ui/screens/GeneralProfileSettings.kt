@@ -161,13 +161,8 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
 
 @Composable
 private fun GeneralRow(icon: ImageVector, title: String, subtitle: String? = null, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = Color(0xFFCCCCCC), modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            subtitle?.let { Text(it, color = LocketTextDim, fontSize = 14.sp) }
-        }
-    }
+    ProfileSettingsRow(
+        icon = { Icon(icon, null, tint = Color(0xFFCCCCCC), modifier = Modifier.size(24.dp)) },
+        title = title, subtitle = subtitle, onClick = onClick
+    )
 }
