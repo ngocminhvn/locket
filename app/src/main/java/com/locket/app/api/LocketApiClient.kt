@@ -199,6 +199,8 @@ class LocketApiClient(
                 .build()
             val request = Request.Builder()
                 .url("https://securetoken.googleapis.com/v1/token?key=$FIREBASE_API_KEY")
+                .addHeader("X-Android-Package", ANDROID_PACKAGE)
+                .addHeader("X-Android-Cert", ANDROID_CERT)
                 .post(formBody)
                 .build()
             val response = client.newCall(request).execute()
