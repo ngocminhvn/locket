@@ -245,7 +245,7 @@ fun CameraScreen(
                 previewView.setScreenFlashWindow(activity?.window)
                 fun bind(selector: CameraSelector, extension: Boolean, hdr: Boolean, advanced: Boolean, includeVideo: Boolean): Camera {
                     val info = cameraProvider.getCameraInfo(selector)
-                    val preview = Preview.Builder().apply {
+                    val preview = Preview.Builder().setTargetRotation(rotation).apply {
                         if (advanced && cameraPreferences.stabilization && !extension &&
                             Preview.getPreviewCapabilities(info).isStabilizationSupported) setPreviewStabilizationEnabled(true)
                     }.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
@@ -610,6 +610,48 @@ fun CameraScreen(
         }
     }
 
+    val review = capturedBitmap?.let { bitmap ->
+        val moments by viewModel.moments.collectAsState()
+        val ownStreak = remember(moments, currentUser.uid) {
+            viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
+        }
+        rememberMomentReviewSlots(
+            bitmap = bitmap,
+            previewBitmap = capturedPreview ?: bitmap,
+            videoFile = capturedVideo,
+            friends = friends,
+            replyToFriend = replyToFriend,
+            streak = ownStreak,
+            isPosting = isPosting,
+            onCancel = {
+                if (!isPosting) {
+                    clearCapture()
+                    viewModel.setReplyToFriend(null)
+                }
+            },
+            onSend = { caption, recipients ->
+                isPosting = true
+                viewModel.postMoment(
+                    bitmap = bitmap,
+                    videoFile = capturedVideo,
+                    caption = caption,
+                    recipients = recipients,
+                    onSuccess = {
+                        isPosting = false
+                        clearCapture()
+                        viewModel.setReplyToFriend(null)
+                        Toast.makeText(context, "Đã gửi khoảnh khắc", Toast.LENGTH_SHORT).show()
+                        onNavigate("feed")
+                    },
+                    onError = { error ->
+                        isPosting = false
+                        Toast.makeText(context, "Lỗi gửi: $error", Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -621,8 +663,12 @@ fun CameraScreen(
         ) {
             // Top Bar (Matches 02-camera.jpg with real friend count and user avatar)
             val friendsLabel = "${friends.size} Bạn bè"
-            if (sharedHeaderHeight != null) Spacer(Modifier.height(sharedHeaderHeight))
-            else LocketTopBar(
+            if (sharedHeaderHeight != null || review != null) {
+                val height = sharedHeaderHeight ?: (66.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                Box(Modifier.fillMaxWidth().height(height)) {
+                    review?.header?.invoke()
+                }
+            } else LocketTopBar(
                 title = friendsLabel,
                 avatarUrl = currentUser.profilePictureUrl,
                 onSpeakerClick = {
@@ -648,6 +694,11 @@ fun CameraScreen(
                         modifier = Modifier.fillMaxSize(),
                         factory = { previewView }
                     )
+                }
+                if (review != null) {
+                    review.frame()
+                } else {
+                if (hasCameraPermission) {
                     // This transparent gesture surface is below the controls, so tapping
                     // flash or a quick-zoom button never also meters the camera.
                     Box(Modifier.matchParentSize().pointerInput(boundCamera) {
@@ -877,12 +928,17 @@ fun CameraScreen(
                         )
                     }
                 }
+                }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                review?.indicators?.invoke()
+            }
 
-            // Shutter & Controls Row
-            Row(
+            // Shutter and review controls occupy the same 98 dp row.
+            if (review != null) {
+                review.controls()
+            } else Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp),
@@ -951,64 +1007,31 @@ fun CameraScreen(
             }
 
             Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier.clickable { openLatest() }.padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text("Lịch sử", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
+                if (review == null) Row(
+                    modifier = Modifier.clickable { openLatest() }.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Lịch sử", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                }
             }
             Spacer(modifier = Modifier.weight(0.55f))
 
             // Bottom Navigation Bar
-            if (sharedFooterHeight != null) Spacer(Modifier.height(sharedFooterHeight))
-            else LocketBottomBar(
+            if (sharedFooterHeight != null || review != null) {
+                Spacer(Modifier.height(sharedFooterHeight ?: (70.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())))
+            } else LocketBottomBar(
                 currentScreen = "camera",
                 onNavigate = onNavigate
             )
         }
 
-        capturedBitmap?.let { bitmap ->
-            val moments by viewModel.moments.collectAsState()
-            val ownStreak = remember(moments, currentUser.uid) {
-                viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
+        if (review != null) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
+                review.recipients()
             }
-            SendMomentScreen(
-                bitmap = bitmap,
-                previewBitmap = capturedPreview ?: bitmap,
-                videoFile = capturedVideo,
-                friends = friends,
-                replyToFriend = replyToFriend,
-                streak = ownStreak,
-                isPosting = isPosting,
-                onCancel = {
-                    if (!isPosting) {
-                        clearCapture()
-                        viewModel.setReplyToFriend(null)
-                    }
-                },
-                onSend = { caption, recipients ->
-                    isPosting = true
-                    viewModel.postMoment(
-                        bitmap = bitmap,
-                        videoFile = capturedVideo,
-                        caption = caption,
-                        recipients = recipients,
-                        onSuccess = {
-                            isPosting = false
-                            clearCapture()
-                            viewModel.setReplyToFriend(null)
-                            Toast.makeText(context, "Đã gửi khoảnh khắc", Toast.LENGTH_SHORT).show()
-                            onNavigate("feed")
-                        },
-                        onError = { error ->
-                            isPosting = false
-                            Toast.makeText(context, "Lỗi gửi: $error", Toast.LENGTH_LONG).show()
-                        }
-                    )
-                }
-            )
         }
     }
 }
@@ -1062,7 +1085,7 @@ private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
 
 
 // Only the on-screen review is downscaled. The original square bitmap still
-// goes to save and upload, without a new JPEG compression pass.
+// goes to save and upload at full cropped resolution.
 private fun cameraReviewBitmap(bitmap: Bitmap, maxSize: Int): Bitmap {
     val largest = maxOf(bitmap.width, bitmap.height)
     if (largest <= maxSize) return bitmap

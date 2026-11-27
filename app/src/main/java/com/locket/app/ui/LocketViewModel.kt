@@ -713,9 +713,21 @@ class LocketViewModel(
     ) {
         viewModelScope.launch {
             _isSyncing.value = true
-            val stream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-            val bytes = stream.toByteArray()
+            val bytes = try {
+                withContext(Dispatchers.Default) {
+                    ByteArrayOutputStream().use { stream ->
+                        check(bitmap.compress(Bitmap.CompressFormat.JPEG, if (videoFile == null) 100 else 85, stream))
+                        stream.toByteArray()
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _isSyncing.value = false
+                throw e
+            } catch (e: Exception) {
+                _isSyncing.value = false
+                onError("Không thể mã hóa ảnh: ${e.message ?: "lỗi không xác định"}")
+                return@launch
+            }
 
             // 1. Upload to Firebase Storage
             val uploadRes = apiClient.uploadMomentThumbnail(bytes)
