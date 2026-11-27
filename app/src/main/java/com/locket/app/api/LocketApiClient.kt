@@ -1367,6 +1367,42 @@ class LocketApiClient(
         }
     }
 
+    /**
+     * Luot xem 1 moment: getMomentViews {moment_uid} (bundle 1025858,
+     * callsite ~1598928; response data.data.moment_views =
+     * [{user, viewed_at}], map qua toMomentView {userId, timestamp}).
+     * CHI OWNER xem duoc — probe 27/11 tra 401 "User does not have access
+     * to this moment" cho moment cua ban. Tra ve SO LUOT XEM (do dai
+     * moment_views, trang dau). end_before (cursor phan trang) khong gui
+     * o trang dau, dung nhu lan goi dau cua goc; format timestamp cua
+     * end_before chua co response that de xac minh nen chua loop them
+     * trang — so hien la so nguoi xem o trang dau.
+     * Loi/401 -> Result.failure de UI an chip, khong hien so gia.
+     * Chua live-verify cho moment cua minh.
+     */
+    suspend fun getMomentViews(momentUid: String): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureFreshToken()) error("Chưa đăng nhập")
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply { addProperty("moment_uid", momentUid) })
+            }
+            val response = callEndpoint("getMomentViews", payload) ?: error("Không nhận được phản hồi")
+            val status = response.get("status")?.asInt
+            if (status != null && status != 200) error(callableError(response, "Không xem được lượt xem"))
+            // moment_views nam o response.data (phong thu them data.data.*).
+            val viewsArr: JsonArray? = when {
+                response.has("moment_views") -> response.getAsJsonArray("moment_views")
+                response.get("data")?.isJsonObject == true && response.getAsJsonObject("data").has("moment_views") -> response.getAsJsonObject("data").getAsJsonArray("moment_views")
+                response.get("data")?.isJsonObject == true && response.getAsJsonObject("data").get("data")?.isJsonObject == true -> response.getAsJsonObject("data").getAsJsonObject("data").getAsJsonArray("moment_views")
+                else -> null
+            }
+            if (viewsArr == null) error("Máy chủ trả thiếu moment_views")
+            Result.success(viewsArr.size())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // ==========================================
     // 3b. XOA / BAO CAO MOMENT & CHAN / AN BAN
     // ==========================================

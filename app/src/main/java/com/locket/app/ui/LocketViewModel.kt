@@ -146,6 +146,26 @@ class LocketViewModel(
         }
     }
 
+    // Luot xem moment CUA MINH (Batch 7a): map momentId -> so luot xem.
+    // Chi co gia tri khi server tra 200; loi/401 -> khong co entry ->
+    // UI an chip, khong hien so gia.
+    private val _momentViewCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val momentViewCounts: StateFlow<Map<String, Int>> = _momentViewCounts.asStateFlow()
+
+    /**
+     * Tai luot xem cho 1 moment CUA MINH (owner_uid == myUid). Khong goi
+     * cho moment cua ban (server tra 401 "User does not have access to
+     * this moment"). Loi thi giu gia tri cu (hoac rong -> an chip).
+     */
+    fun refreshMomentViews(moment: Moment) {
+        if (moment.userUid != sessionManager.currentUser.uid) return
+        viewModelScope.launch {
+            apiClient.getMomentViews(moment.id).onSuccess { count ->
+                _momentViewCounts.value = _momentViewCounts.value + (moment.id to count)
+            }
+        }
+    }
+
     /** Ngay hom nay dang YYYYMMDD (Gregorian), nhu getGregorianYYYYMMDD goc. */
     private fun todayYyyymmdd(): String =
         SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())

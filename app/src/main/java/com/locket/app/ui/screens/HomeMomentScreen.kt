@@ -47,10 +47,20 @@ fun HomeMomentScreen(
     val context = LocalContext.current
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val momentViewCounts by viewModel.momentViewCounts.collectAsState()
     var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(reactionSerial) {
         if (reactionSerial > 0 && currentMoment?.id == reactionEvent?.first) {
             floatingReaction = reactionEvent?.second
+        }
+    }
+
+    // Luot xem (Batch 7a): chi tai cho moment CUA MINH (server 401 cho
+    // moment cua ban). Loi -> khong co so lieu -> an chip.
+    LaunchedEffect(currentMoment?.id, currentUser.uid) {
+        val moment = currentMoment
+        if (moment != null && moment.userUid == currentUser.uid) {
+            viewModel.refreshMomentViews(moment)
         }
     }
 
@@ -223,6 +233,23 @@ fun HomeMomentScreen(
                         color = LocketTextDim,
                         fontSize = 16.sp
                     )
+
+                    // Luot xem (Batch 7a): chi moment CUA MINH, chi hien
+                    // khi server tra 200 (co so lieu that). Loi/401 -> an.
+                    val ownViewCount = momentViewCounts[currentMoment.id]
+                    if (currentMoment.userUid == currentUser.uid && ownViewCount != null) {
+                        Icon(
+                            Icons.Default.Visibility,
+                            contentDescription = null,
+                            tint = LocketTextDim,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "$ownViewCount lượt xem",
+                            color = LocketTextDim,
+                            fontSize = 16.sp
+                        )
+                    }
                 }
 
 
