@@ -38,7 +38,8 @@ class LocketViewModel(
     val moments: StateFlow<List<Moment>> = _moments.asStateFlow()
 
     private val momentWriteLock = Mutex()
-    private var historyCursor: String? = null
+    private var historyCursor: LocketApiClient.HistoryCursor? = null
+    private val feedSyncLock = Mutex()
     private var historyJob: Job? = null
     private val _historyLoading = MutableStateFlow(false)
     val historyLoading = _historyLoading.asStateFlow()
@@ -208,9 +209,11 @@ class LocketViewModel(
             }
 
             // 3. Fetch live moments feed
-            val feedRes = apiClient.fetchMomentsFeed()
-            val rawMoments = feedRes.getOrNull()
-            if (rawMoments != null) {
+            feedSyncLock.withLock {
+            val feedRes = apiClient.fetchMomentsFeed(sessionManager.feedSyncToken)
+            val feed = feedRes.getOrNull()
+            if (feed != null && _isLoggedIn.value && currentUid == sessionManager.currentUser.uid) {
+                val rawMoments = feed.moments
                 if (rawMoments.isNotEmpty()) {
                     val friendsMap = currentFriendsList.associateBy { it.uid }
                     val myUid = _currentUser.value.uid
@@ -236,6 +239,10 @@ class LocketViewModel(
                 }
             }
 
+                if (feed != null && _isLoggedIn.value && currentUid == sessionManager.currentUser.uid) {
+                    sessionManager.feedSyncToken = feed.syncToken
+                }
+            }
             if (historyCursor == null && _historyHasMore.value && _historyError.value == null) loadOlderMoments()
 
             // 4. Fetch live conversations

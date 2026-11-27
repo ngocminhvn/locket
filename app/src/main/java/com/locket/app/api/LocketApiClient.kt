@@ -599,80 +599,38 @@ class LocketApiClient(
     // 3. MOMENTS & FEED (LIVE API)
     // ==========================================
 
-    suspend fun fetchMomentsFeed(): Result<List<Moment>> = withContext(Dispatchers.IO) {
-        val token = getToken()
-        val uid = getUid()
-        if (token.isNullOrBlank()) {
-            return@withContext Result.failure(Exception("Chưa đăng nhập"))
-        }
+    data class FeedSync(val moments: List<Moment>, val syncToken: String?)
 
-        val momentsList = mutableListOf<Moment>()
-
+    suspend fun fetchMomentsFeed(syncToken: String? = null): Result<FeedSync> = withContext(Dispatchers.IO) {
         try {
-            // 1. Call getLatestMomentV2
+            if (!ensureFreshToken()) error("Chưa đăng nhập")
             val payload = JsonObject().apply {
                 add("data", JsonObject().apply {
                     addProperty("should_count_missed_moments", false)
                     addProperty("include_group_moments", true)
+                    if (!syncToken.isNullOrBlank()) addProperty("sync_token", syncToken)
                 })
             }
-            val latestResp = callEndpoint("getLatestMomentV2", payload)
-            if (latestResp != null && latestResp.get("status")?.asInt == 200) {
-                val dataArr = momentArray(latestResp)
-                if (dataArr != null && dataArr.size() > 0) {
-                    for (elem in dataArr) {
-                        val mObj = elem.asJsonObject
-                        parseMomentJson(mObj)?.let { momentsList.add(it) }
-                    }
-                }
+            val response = callEndpoint("getLatestMomentV2", payload) ?: error("Không tải được feed")
+            val status = response.get("status")?.asInt ?: 0
+            val nextToken = optString(response, "sync_token").ifBlank { syncToken }
+            if (status == 304) return@withContext Result.success(FeedSync(emptyList(), nextToken))
+            if (status != 200) error("Feed HTTP $status")
+            val errors = response.get("errors")
+            if (errors?.isJsonArray == true && errors.asJsonArray.size() > 0) error("Máy chủ trả lỗi feed")
+            val records = momentArray(response)?.mapNotNull { item ->
+                if (item.isJsonObject) parseMomentJson(item.asJsonObject) else null
+            }.orEmpty()
+            val names = resolveUserNames(records.map { it.userUid })
+            val resolved = records.map { m ->
+                val name = names[m.userUid]
+                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
             }
-
-            // 2. Call getSampledMoments for more recent moments
-            val sampledPayload = JsonObject().apply {
-                add("data", JsonObject().apply {
-                    addProperty("start", 0)
-                    addProperty("end", 30)
-                    addProperty("count", 30)
-                })
-            }
-            val sampledResp = callEndpoint("getSampledMoments", sampledPayload)
-            if (sampledResp != null && sampledResp.get("status")?.asInt == 200) {
-                val dataArr = momentArray(sampledResp)
-                if (dataArr != null) {
-                    for (elem in dataArr) {
-                        val mObj = elem.asJsonObject
-                        val parsed = parseMomentJson(mObj) ?: continue
-                        if (momentsList.none { it.id == parsed.id }) {
-                            momentsList.add(parsed)
-                        }
-                    }
-                }
-            }
-
-            // 4. Resolve ten that — getLatestMomentV2 KHONG tra ten, chi co uid (user)
-            //    nen goi fetchUsers 1 lan cho toan bo owner uid distinct.
-            val myUid = getUid()
-            val ownerUids = momentsList.map { it.userUid }.distinct()
-            val names = resolveUserNames(ownerUids)
-            val resolvedMoments = momentsList.map { m ->
-                when {
-                    m.userUid == myUid -> m.copy(userName = "Bạn")
-                    names.containsKey(m.userUid) -> {
-                        val (name, avatar) = names[m.userUid]!!
-                        m.copy(userName = name, userAvatarUrl = avatar)
-                    }
-                    m.userName.isNotBlank() -> m
-                    else -> m.copy(userName = m.userUid) // fallback dung nhu app goc: hien uid
-                }
-            }
-
-            Result.success(resolvedMoments)
+            Result.success(FeedSync(resolved, nextToken))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            if (momentsList.isNotEmpty()) {
-                Result.success(momentsList)
-            } else {
-                Result.failure(e)
-            }
+            Result.failure(e)
         }
     }
 
@@ -685,11 +643,12 @@ class LocketApiClient(
         }
     }
 
-    data class HistoryPage(val moments: List<Moment>, val nextPageToken: String?)
+    data class HistoryCursor(val date: String, val documentName: String)
+    data class HistoryPage(val moments: List<Moment>, val nextPageToken: HistoryCursor?)
 
-    // Firestore listDocuments returns a cursor for the next batch. No fixed
-    // number of pages: follow that cursor until the backend exhausts history.
-    suspend fun fetchHistoryPage(pageToken: String? = null): Result<HistoryPage> = withContext(Dispatchers.IO) {
+    // Query by date with an exact timestamp/document-name boundary; preserve
+    // nanoseconds and tie-breaking so equal timestamps never skip records.
+    suspend fun fetchHistoryPage(pageToken: HistoryCursor? = null): Result<HistoryPage> = withContext(Dispatchers.IO) {
         try {
             ensureFreshToken()
             val token = getToken()
@@ -697,22 +656,42 @@ class LocketApiClient(
             if (token.isNullOrBlank() || uid.isNullOrBlank()) {
                 return@withContext Result.failure(IllegalStateException("Chưa đăng nhập"))
             }
-            val url = okhttp3.HttpUrl.Builder()
-                .scheme("https").host("firestore.googleapis.com")
-                .addPathSegments("v1/projects/locket-4252a/databases/locket/documents/history")
-                .addPathSegment(uid).addPathSegment("entries")
-                .addQueryParameter("pageSize", "40")
-                .addQueryParameter("orderBy", "date desc")
-                .apply { if (!pageToken.isNullOrBlank()) addQueryParameter("pageToken", pageToken) }
-                .build()
-            val request = Request.Builder().url(url).addHeader("Authorization", "Bearer $token").get().build()
-            val root = client.newCall(request).execute().use { response ->
+            val url = "$FIRESTORE_HISTORY_URL/history/$uid:runQuery"
+            val query = JsonObject().apply {
+                add("from", gson.toJsonTree(listOf(mapOf("collectionId" to "entries"))))
+                add("orderBy", gson.toJsonTree(listOf(
+                    mapOf("field" to mapOf("fieldPath" to "date"), "direction" to "DESCENDING"),
+                    mapOf("field" to mapOf("fieldPath" to "__name__"), "direction" to "DESCENDING")
+                )))
+                addProperty("limit", 24)
+                if (pageToken != null) add("startAt", JsonObject().apply {
+                    addProperty("before", false)
+                    add("values", gson.toJsonTree(listOf(
+                        mapOf("timestampValue" to pageToken.date),
+                        mapOf("referenceValue" to pageToken.documentName)
+                    )))
+                })
+            }
+            val payload = JsonObject().apply { add("structuredQuery", query) }
+            val request = Request.Builder().url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+            val rows = client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("Không tải được lịch sử (HTTP ${response.code})")
-                gson.fromJson(response.body?.string().orEmpty(), JsonObject::class.java)
+                gson.fromJson(response.body?.string().orEmpty(), JsonArray::class.java)
                     ?: error("Phản hồi lịch sử trống")
             }
-            val records = root.getAsJsonArray("documents")?.mapNotNull { entry ->
-                val doc = entry.asJsonObject
+            val documents = rows.mapNotNull { row ->
+                row.asJsonObject.get("document")?.takeIf { it.isJsonObject }?.asJsonObject
+            }
+            val next = if (documents.size < 24) null else {
+                val last = documents.last()
+                val date = last.getAsJsonObject("fields")?.getAsJsonObject("date")?.let { optString(it, "timestampValue") }.orEmpty()
+                val name = optString(last, "name")
+                if (date.isBlank() || name.isBlank()) error("Thiếu con trỏ ngày lịch sử")
+                HistoryCursor(date, name)
+            }
+            val records = documents.mapNotNull { doc ->
                 val fields = doc.getAsJsonObject("fields") ?: return@mapNotNull null
                 val id = extractString(fields, "canonical_uid").ifBlank {
                     optString(doc, "name").substringAfterLast('/')
@@ -732,7 +711,7 @@ class LocketApiClient(
                 val name = names[m.userUid]
                 if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
             }
-            Result.success(HistoryPage(resolved, optString(root, "nextPageToken").ifBlank { null }))
+            Result.success(HistoryPage(resolved, next))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {

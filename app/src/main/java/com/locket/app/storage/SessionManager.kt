@@ -12,6 +12,11 @@ class SessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("locket_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
+    // Scope the server-issued cursor to the authenticated account.
+    var feedSyncToken: String?
+        get() = prefs.getString("feed_sync_token_" + currentUser.uid, null)
+        set(value) = prefs.edit().putString("feed_sync_token_" + currentUser.uid, value).apply()
+
     var savedEmail: String?
         get() = prefs.getString("saved_email", null)
         set(value) = prefs.edit().putString("saved_email", value).apply()
