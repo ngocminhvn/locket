@@ -326,20 +326,28 @@ class LocketApiClient(
 
             val friendsList = mutableListOf<Friend>()
 
-            // 1. Try callable fetchUsers
-            val payload = JsonObject().apply {
-                add("data", JsonObject().apply {
-                    add("user_uids", gson.toJsonTree(friendUids))
-                })
+            // 1. Try callable fetchUsers (chia nho: server chi nhan toi da 20 uid/call,
+            // 21+ tra "Malformed request", da verify live voi 23 ban)
+            val allUsers = mutableListOf<com.google.gson.JsonElement>()
+            for (batch in friendUids.chunked(10)) {
+                val payload = JsonObject().apply {
+                    add("data", JsonObject().apply {
+                        add("user_uids", gson.toJsonTree(batch))
+                    })
+                }
+                val usersResp = callEndpoint("fetchUsers", payload)
+                val dataElem = usersResp?.get("data")
+                val batchArr = when {
+                    dataElem?.isJsonArray == true -> dataElem.asJsonArray
+                    dataElem?.isJsonObject == true && dataElem.asJsonObject.has("users") -> dataElem.asJsonObject.getAsJsonArray("users")
+                    dataElem?.isJsonObject == true && dataElem.asJsonObject.has("data") -> dataElem.asJsonObject.getAsJsonArray("data")
+                    else -> null
+                }
+                if (batchArr != null) allUsers.addAll(batchArr)
             }
-            val usersResp = callEndpoint("fetchUsers", payload)
-            val dataElem = usersResp?.get("data")
-            val dataArr = when {
-                dataElem?.isJsonArray == true -> dataElem.asJsonArray
-                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("users") -> dataElem.asJsonObject.getAsJsonArray("users")
-                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("data") -> dataElem.asJsonObject.getAsJsonArray("data")
-                else -> null
-            }
+            val dataArr: JsonArray? = if (allUsers.isNotEmpty()) {
+                JsonArray().apply { allUsers.forEach { add(it) } }
+            } else null
 
             if (dataArr != null && dataArr.size() > 0) {
                 for (uElem in dataArr) {
@@ -429,40 +437,44 @@ class LocketApiClient(
         val distinct = uids.filter { it.isNotBlank() }.distinct()
         if (distinct.isEmpty()) return@withContext emptyMap()
         val result = mutableMapOf<String, Pair<String, String>>()
-        try {
-            val payload = JsonObject().apply {
-                add("data", JsonObject().apply {
-                    add("user_uids", gson.toJsonTree(distinct))
-                })
-            }
-            val resp = callEndpoint("fetchUsers", payload)
-            val dataElem = resp?.get("data")
-            val dataArr = when {
-                dataElem?.isJsonArray == true -> dataElem.asJsonArray
-                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("users") -> dataElem.asJsonObject.getAsJsonArray("users")
-                dataElem?.isJsonObject == true && dataElem.asJsonObject.has("data") -> dataElem.asJsonObject.getAsJsonArray("data")
-                else -> null
-            }
-            if (dataArr != null) {
-                for (uElem in dataArr) {
-                    val u = uElem.asJsonObject
-                    val uid = u.get("uid")?.asString ?: continue
-                    val first = u.get("first_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
-                    val last = u.get("last_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
-                    val username = u.get("username")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
-                    val avatar = u.get("profile_picture_url")?.takeIf { !it.isJsonNull }?.asString ?: ""
-                    val displayName = when {
-                        first.isNotEmpty() && last.isNotEmpty() -> "$first $last"
-                        first.isNotEmpty() -> first
-                        last.isNotEmpty() -> last
-                        username.isNotEmpty() -> username
-                        else -> uid
-                    }
-                    result[uid] = displayName to avatar
+        // fetchUsers chi nhan toi da 20 uid/call (21+ server tra "Malformed request", da verify live)
+        // -> chia nho moi batch 10 uid cho an toan.
+        for (batch in distinct.chunked(10)) {
+            try {
+                val payload = JsonObject().apply {
+                    add("data", JsonObject().apply {
+                        add("user_uids", gson.toJsonTree(batch))
+                    })
                 }
+                val resp = callEndpoint("fetchUsers", payload)
+                val dataElem = resp?.get("data")
+                val dataArr = when {
+                    dataElem?.isJsonArray == true -> dataElem.asJsonArray
+                    dataElem?.isJsonObject == true && dataElem.asJsonObject.has("users") -> dataElem.asJsonObject.getAsJsonArray("users")
+                    dataElem?.isJsonObject == true && dataElem.asJsonObject.has("data") -> dataElem.asJsonObject.getAsJsonArray("data")
+                    else -> null
+                }
+                if (dataArr != null) {
+                    for (uElem in dataArr) {
+                        val u = uElem.asJsonObject
+                        val uid = u.get("uid")?.asString ?: continue
+                        val first = u.get("first_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                        val last = u.get("last_name")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                        val username = u.get("username")?.takeIf { !it.isJsonNull }?.asString?.trim() ?: ""
+                        val avatar = u.get("profile_picture_url")?.takeIf { !it.isJsonNull }?.asString ?: ""
+                        val displayName = when {
+                            first.isNotEmpty() && last.isNotEmpty() -> "$first $last"
+                            first.isNotEmpty() -> first
+                            last.isNotEmpty() -> last
+                            username.isNotEmpty() -> username
+                            else -> uid
+                        }
+                        result[uid] = displayName to avatar
+                    }
+                }
+            } catch (e: Exception) {
+                // batch nay loi thi bo qua, batch khac van chay; phan con lai caller fallback ve uid
             }
-        } catch (e: Exception) {
-            // tra ve nhung gi resolve duoc; phan con lai caller fallback ve uid
         }
         result
     }
