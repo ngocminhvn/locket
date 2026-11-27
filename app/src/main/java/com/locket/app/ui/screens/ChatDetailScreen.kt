@@ -2,6 +2,17 @@ package com.locket.app.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.material.icons.filled.AddReaction
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -56,7 +67,9 @@ fun ChatDetailScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    var inputMessage by remember { mutableStateOf("") }
+    var inputMessage by remember(friend.uid) { mutableStateOf("") }
+    var showQuickEmojis by remember { mutableStateOf(false) }
+    var sending by remember(friend.uid) { mutableStateOf(false) }
     var reactingTo by remember { mutableStateOf<ChatMessage?>(null) }
     // Buoc xac nhan trong menu tin nhan: null = chon emoji/menu,
     // "delete" = xac nhan thu hoi, "report" = xac nhan bao cao.
@@ -74,6 +87,47 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
+
+    val visiblePhoto = remember(messages, listState) {
+        derivedStateOf {
+            val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { it.key }.toSet()
+            val firstPhoto = messages.firstOrNull { it.id in visibleKeys && !it.thumbnailUrl.isNullOrBlank() }
+            firstPhoto?.thumbnailUrl ?: messages.lastOrNull { !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
+        }
+    }.value
+    var photoTint by remember(friend.uid) { mutableStateOf(LocketBlack) }
+    LaunchedEffect(visiblePhoto, friend.uid) {
+        if (visiblePhoto == null) {
+            photoTint = LocketBlack
+            return@LaunchedEffect
+        }
+        try {
+            val result = context.imageLoader.execute(ImageRequest.Builder(context)
+                .data(visiblePhoto).size(48).allowHardware(false).build())
+            val drawable = (result as? SuccessResult)?.drawable
+            if (drawable != null) {
+                photoTint = withContext(Dispatchers.Default) { chatPhotoTint(drawable.toBitmap(48, 48)) }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { photoTint = LocketBlack }
+    }
+    val chatColor by animateColorAsState(photoTint, label = "chat-photo-tint")
+    val bubbleColor = androidx.compose.ui.graphics.lerp(chatColor, Color.White, 0.13f)
+    val composerColor = androidx.compose.ui.graphics.lerp(chatColor, Color.White, 0.19f)
+
+    fun sendText(text: String, clearInput: Boolean = false) {
+        if (text.isBlank() || sending) return
+        sending = true
+        viewModel.sendChatMessage(friend.uid, text,
+            onSuccess = {
+                sending = false
+                if (clearInput && inputMessage == text) inputMessage = ""
+            },
+            onError = { err ->
+                sending = false
+                Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+            })
+    }
 
     // Mo man chat: tim cuoc tro chuyen that theo uid ban, tai tin that.
     LaunchedEffect(friend.uid) {
@@ -120,69 +174,18 @@ fun ChatDetailScreen(
 
     fun formatTime(createdAtMs: Long): String {
         if (createdAtMs <= 0L) return ""
-        return SimpleDateFormat("HH:mm dd/MM", Locale.getDefault()).format(Date(createdAtMs))
+        return SimpleDateFormat("HH:mm d 'thg' M", Locale.getDefault()).format(Date(createdAtMs))
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LocketBlack)
+            .background(chatColor)
+            .imePadding()
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Header Bar: Back arrow, Avatar with yellow border, Friend name
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Quay lại",
-                        tint = Color.White
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (friend.avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = friend.avatarUrl,
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Text(
-                    text = displayName,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
             // Message Stream: tin nhan that tu server (cache Room + sync)
             if (isChatLoading && messages.isEmpty()) {
                 Box(
@@ -212,8 +215,9 @@ fun ChatDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .padding(horizontal = 8.dp),
+                    contentPadding = PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 76.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     // Dang tai them tin cu: vong loading nho o dau danh sach
                     // (chi them item nay khi dang tai, khong doi index tin).
@@ -248,6 +252,7 @@ fun ChatDetailScreen(
                                         text = timeStr,
                                         color = LocketTextDim,
                                         fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(bottom = 8.dp)
                                     )
                                 }
@@ -255,7 +260,7 @@ fun ChatDetailScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .aspectRatio(1.0f)
-                                        .clip(RoundedCornerShape(32.dp))
+                                        .clip(RoundedCornerShape(42.dp))
                                         .background(Color(0xFF1E1E1E))
                                         .combinedClickable(
                                             onClick = {},
@@ -279,24 +284,24 @@ fun ChatDetailScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.Gray)
-                                        )
+                                        val senderAvatar = if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
+                                        ChatAvatar(senderAvatar, 24)
                                         Text(
-                                            text = if (msg.isMe) "Bạn • $timeStr" else "$displayName • $timeStr",
+                                            text = if (msg.isMe) "Bạn" else displayName,
                                             color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
+                                        Text(chatMomentAge(msg.createdAtMs), color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 // Text kem theo moment (neu co)
                                 if (msg.text.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    MessageBubble(msg = msg, onLongClick = { reactingTo = msg })
+                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, onLongClick = { reactingTo = msg })
                                 }
                                 ReactionRow(reactions = msg.reactions)
                             }
@@ -308,13 +313,13 @@ fun ChatDetailScreen(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .clip(RoundedCornerShape(28.dp))
                                         .background(Color.White)
                                         .combinedClickable(
                                             onClick = {},
                                             onLongClick = { reactingTo = msg }
                                         )
-                                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                                        .padding(horizontal = 18.dp, vertical = 12.dp)
                                 ) {
                                     Text(
                                         text = msg.text,
@@ -333,25 +338,17 @@ fun ChatDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF2C2C2E)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                                    }
+                                    ChatAvatar(friend.avatarUrl, 32)
 
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .background(Color(0xFF2C2C2E))
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .background(bubbleColor)
                                             .combinedClickable(
                                                 onClick = {},
                                                 onLongClick = { reactingTo = msg }
                                             )
-                                            .padding(horizontal = 18.dp, vertical = 10.dp)
+                                            .padding(horizontal = 18.dp, vertical = 12.dp)
                                     ) {
                                         Text(
                                             text = msg.text,
@@ -368,54 +365,123 @@ fun ChatDetailScreen(
                 }
             }
 
-            // Bottom Message Bar
+            // Composer: a compact pill with real quick emoji sending.
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .liquidGlassEffect(RoundedCornerShape(28.dp), backgroundColor = Color(0xD9222224))
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(RoundedCornerShape(34.dp)).background(composerColor)
+                    .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextField(
+                BasicTextField(
                     value = inputMessage,
                     onValueChange = { inputMessage = it },
-                    placeholder = { Text("Gửi tin nhắn...", color = Color(0xFF8E8E93), fontSize = 15.sp) },
                     modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        fontFamily = LocketFontFamily
                     ),
-                    singleLine = true
+                    cursorBrush = SolidColor(Color.White),
+                    singleLine = true,
+                    decorationBox = { inner ->
+                        Box {
+                            if (inputMessage.isEmpty()) Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.60f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            inner()
+                        }
+                    }
                 )
-
                 if (inputMessage.isNotBlank()) {
-                    Text(
-                        text = "Gửi",
-                        color = LocketYellow,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clickable {
-                                val text = inputMessage
-                                viewModel.sendChatMessage(
-                                    receiverUid = friend.uid,
-                                    message = text,
-                                    onSuccess = { inputMessage = "" },
-                                    onError = { err ->
-                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                    }
-                                )
-                            }
-                            .padding(8.dp)
-                    )
+                    TextButton(onClick = { sendText(inputMessage, true) }, enabled = !sending) {
+                        Text("Gửi", color = LocketYellow, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    for (emoji in listOf("🔥", "😍", "💛")) {
+                        Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = !sending) { sendText(emoji) }, contentAlignment = Alignment.Center) {
+                            Text(emoji, fontSize = 25.sp)
+                        }
+                    }
+                    IconButton(onClick = { showQuickEmojis = true }, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Default.AddReaction, "Thêm biểu cảm", tint = Color.White.copy(alpha = 0.55f))
+                    }
                 }
             }
         }
+            // Header Bar: Back arrow, Avatar with yellow border, Friend name
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(chatColor.copy(alpha = 0.98f), chatColor.copy(alpha = 0.65f), Color.Transparent)))
+                    .statusBarsPadding()
+                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Quay lại",
+                        tint = Color.White
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2C2C2E)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (friend.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = friend.avatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Text(
+                    text = displayName,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+    }
+
+    if (showQuickEmojis) {
+        AlertDialog(
+            onDismissRequest = { showQuickEmojis = false },
+            title = { Text("Chọn biểu cảm") },
+            containerColor = composerColor,
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (line in listOf(listOf("😂", "🥰", "🥺", "❤️"), listOf("👍", "😢", "😮", "🎉"))) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            line.forEach { emoji ->
+                                Text(emoji, fontSize = 28.sp, modifier = Modifier.clickable(enabled = !sending) {
+                                    showQuickEmojis = false
+                                    sendText(emoji)
+                                }.padding(6.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showQuickEmojis = false }) { Text("Đóng") } }
+        )
     }
 
     // Menu tin nhan (nhan giu 1 tin nhan that):
@@ -613,17 +679,17 @@ fun ChatDetailScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(msg: ChatMessage, onLongClick: () -> Unit) {
+private fun MessageBubble(msg: ChatMessage, bubbleColor: Color, onLongClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (msg.isMe) Arrangement.End else Arrangement.Start
     ) {
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(if (msg.isMe) Color.White else Color(0xFF2C2C2E))
+                .clip(RoundedCornerShape(28.dp))
+                .background(if (msg.isMe) Color.White else bubbleColor)
                 .combinedClickable(onClick = {}, onLongClick = onLongClick)
-                .padding(horizontal = 18.dp, vertical = 10.dp)
+                .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
             Text(
                 text = msg.text,
@@ -646,4 +712,53 @@ private fun ReactionRow(reactions: List<com.locket.app.model.MessageReaction>) {
             Text(text = r.emoji, fontSize = 16.sp)
         }
     }
+}
+
+@Composable
+private fun ChatAvatar(url: String, sizeDp: Int) {
+    Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(Color(0xFF353535)), contentAlignment = Alignment.Center) {
+        if (url.isNotBlank()) {
+            AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size((sizeDp * 0.55f).dp))
+        }
+    }
+}
+
+private fun chatMomentAge(timestamp: Long): String {
+    if (timestamp <= 0L) return ""
+    val minutes = ((System.currentTimeMillis() - timestamp) / 60_000L).coerceAtLeast(0L)
+    return when {
+        minutes < 1 -> "Vừa xong"
+        minutes < 60 -> "${minutes}m"
+        minutes < 1440 -> "${minutes / 60}h"
+        minutes < 10080 -> "${minutes / 1440}d"
+        else -> "${minutes / 10080}w"
+    }
+}
+
+// Sample the actual shared photo on a small bitmap, emphasizing colored pixels.
+private fun chatPhotoTint(bitmap: android.graphics.Bitmap): Color {
+    var red = 0f
+    var green = 0f
+    var blue = 0f
+    var total = 0f
+    for (y in 0 until bitmap.height step 2) {
+        for (x in 0 until bitmap.width step 2) {
+            val pixel = bitmap.getPixel(x, y)
+            val r = android.graphics.Color.red(pixel) / 255f
+            val g = android.graphics.Color.green(pixel) / 255f
+            val b = android.graphics.Color.blue(pixel) / 255f
+            val weight = 0.15f + (maxOf(r, g, b) - minOf(r, g, b)) * 2f
+            red += r * weight
+            green += g * weight
+            blue += b * weight
+            total += weight
+        }
+    }
+    if (total <= 0f) return LocketBlack
+    val max = maxOf(red, green, blue) / total
+    if (max < 0.04f) return LocketBlack
+    val scale = 0.25f / (max * total)
+    return Color(red * scale, green * scale, blue * scale)
 }

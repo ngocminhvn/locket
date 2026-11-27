@@ -2,6 +2,7 @@ package com.locket.app.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
@@ -89,8 +93,8 @@ fun ConversationsScreen(
                 Text(
                     text = "Trò chuyện",
                     color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
 
                 Box(
@@ -126,23 +130,25 @@ fun ConversationsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
+                contentPadding = PaddingValues(top = 8.dp, bottom = 84.dp)
             ) {
                 items(conversations, key = { it.id }) { conv ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                onOpenChatDetail(conv.friend)
-                            },
+                            .background(if (conv.unreadCount > 0) Color(0xFF101010) else Color.Transparent)
+                            .clickable { onOpenChatDetail(conv.friend) }
+                            .heightIn(min = 84.dp)
+                            .padding(horizontal = 13.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(54.dp)
+                                .size(59.dp)
+                                .border(2.5.dp, Color(0xFF292929), CircleShape)
+                                .padding(5.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF2A2A2C)),
+                                .background(Color(0xFF202020)),
                             contentAlignment = Alignment.Center
                         ) {
                             if (conv.friend.avatarUrl.isNotBlank()) {
@@ -153,18 +159,21 @@ fun ConversationsScreen(
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(28.dp)
-                                )
+                                val initials = conv.friend.displayName.ifBlank { conv.friend.username }
+                                    .split(Regex("\\s+")).filter { it.isNotBlank() }.take(2)
+                                    .joinToString("") { it.take(1).uppercase() }
+                                if (initials.isNotBlank()) {
+                                    Text(initials, color = LocketTextDim, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.Person, null, tint = LocketTextDim, modifier = Modifier.size(26.dp))
+                                }
                             }
                         }
 
                         Spacer(modifier = Modifier.width(14.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 // Ten that; chua resolve duoc thi hien username, roi UID that —
                                 // khong de trong (bug anh chup man hinh: hang khong ten).
@@ -172,38 +181,27 @@ fun ConversationsScreen(
                                 // duoi UID "3"/"Yp1" hien ra nhu 1 dong ten rieng) — cat 1 dong.
                                 text = conv.friend.displayName.ifBlank { conv.friend.username.ifBlank { conv.friend.uid } },
                                 color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
+                            Spacer(Modifier.width(8.dp))
+                            Text(conversationDate(conv), color = LocketTextDim, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = conv.lastMessage,
                                 color = LocketTextDim,
-                                fontSize = 14.sp,
-                                maxLines = 1
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = conv.timeAgo,
-                                color = LocketTextDim,
-                                fontSize = 13.sp
-                            )
-                            // Chua doc that (is_read == false tren server): cham vang.
-                            if (conv.unreadCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .background(LocketYellow, CircleShape)
-                                )
-                            }
-                        }
+
                     }
                 }
             }
@@ -217,7 +215,8 @@ fun ConversationsScreen(
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 80.dp)
+                .navigationBarsPadding()
+                .padding(end = 20.dp, bottom = 16.dp)
                 .size(56.dp)
         ) {
             Icon(
@@ -259,6 +258,25 @@ fun ConversationsScreen(
                 onDismiss = { showNewChatDialog = false }
             )
         }
+    }
+}
+
+private fun conversationDate(conv: Conversation): String {
+    val timestamp = conv.lastMessageAtMs ?: return conv.timeAgo
+    val zone = ZoneId.systemDefault()
+    val date = Instant.ofEpochMilli(timestamp).atZone(zone).toLocalDate()
+    val today = java.time.LocalDate.now(zone)
+    val elapsed = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
+    val minutes = elapsed / 60_000L
+    val days = ChronoUnit.DAYS.between(date, today).coerceAtLeast(0)
+    return when {
+        minutes < 1 -> "Vừa xong"
+        minutes < 60 -> "${minutes}m"
+        minutes < 1440 -> "${minutes / 60}h"
+        days < 7 -> "${days.coerceAtLeast(1)}d"
+        days < 28 -> "${days / 7}w"
+        date.year == today.year -> "${date.dayOfMonth} thg ${date.monthValue}"
+        else -> "${date.dayOfMonth}/${date.monthValue}/${date.year}"
     }
 }
 
