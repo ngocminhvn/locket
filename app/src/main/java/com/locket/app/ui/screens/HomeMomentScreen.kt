@@ -3,6 +3,14 @@ package com.locket.app.ui.screens
 import android.widget.Toast
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import android.widget.VideoView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -45,7 +53,8 @@ fun HomeMomentScreen(
     footerHeight: Dp,
     reactionEvent: Pair<String, String>?,
     reactionSerial: Int,
-    isActive: Boolean = true
+    isActive: Boolean = true,
+    onZoomChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val friends by viewModel.friends.collectAsState()
@@ -74,6 +83,13 @@ fun HomeMomentScreen(
     // thao tac nguy hiem). Chi hien muc phu hop: moment cua minh thi chi
     // co "Xoa khoanh khac", moment cua nguoi khac thi Bao cao / An / Chan.
     var menuAction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
+    var zoom by remember(currentMoment?.id) { mutableFloatStateOf(1f) }
+    var pan by remember(currentMoment?.id) { mutableStateOf(Offset.Zero) }
+    val zoomCallback by rememberUpdatedState(onZoomChange)
+    LaunchedEffect(isActive) { if (!isActive) { zoom = 1f; pan = Offset.Zero; menuAction = null } }
+    androidx.activity.compose.BackHandler(isActive && zoom > 1f) {
+        zoom = 1f; pan = Offset.Zero; zoomCallback(false)
+    }
 
     Box(
         modifier = Modifier
@@ -96,6 +112,12 @@ fun HomeMomentScreen(
                     .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
                     .clickable {
+                        if (zoom > 1f) {
+                            zoom = 1f
+                            pan = Offset.Zero
+                            zoomCallback(false)
+                            return@clickable
+                        }
                         // Bam 1 lan vao moment = tra loi bang anh: mo camera, nguoi nhan
                         // mac dinh la chu cua moment nay. Khong doi moment bang bam nua
                         // (app goc khong lam vay); doi moment bang loc ban be / xem lich su.
@@ -119,7 +141,32 @@ fun HomeMomentScreen(
                     AsyncImage(
                         model = currentMoment.thumbnailUrl,
                         contentDescription = "Moment",
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize()
+                            .then(if (videoUrl.isNullOrBlank()) Modifier.pointerInput(currentMoment.id) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    var transforming = false
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val pressed = event.changes.count { it.pressed }
+                                        if (pressed >= 2 || (zoom > 1f && pressed > 0)) {
+                                            transforming = true
+                                            val next = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
+                                            val limitX = size.width * (next - 1f) / 2f
+                                            val limitY = size.height * (next - 1f) / 2f
+                                            val moved = pan + event.calculatePan()
+                                            pan = Offset(moved.x.coerceIn(-limitX, limitX), moved.y.coerceIn(-limitY, limitY))
+                                            zoom = next
+                                            zoomCallback(true)
+                                            event.changes.forEach { it.consume() }
+                                        } else if (transforming) event.changes.forEach { it.consume() }
+                                    } while (event.changes.any { it.pressed })
+                                    if (transforming) zoomCallback(zoom > 1.01f)
+                                }
+                            }.graphicsLayer {
+                                scaleX = zoom; scaleY = zoom
+                                translationX = pan.x; translationY = pan.y
+                            } else Modifier),
                         contentScale = ContentScale.Crop,
                         error = ColorPainter(Color(0xFF252527)),
                         onLoading = { imageLoading = true },
@@ -144,15 +191,14 @@ fun HomeMomentScreen(
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(bottom = 16.dp)
-                                .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = Color(0xB31E1E20))
-                                .padding(horizontal = 16.dp, vertical = 7.dp)
+                                .padding(horizontal = 16.dp, vertical = 16.dp)
+                                .background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(18.dp))
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = currentMoment.caption,
                                 color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
+                                style = profileTextStyle(16.sp, 20.sp, FontWeight.Bold)
                             )
                         }
                     }
@@ -184,7 +230,7 @@ fun HomeMomentScreen(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(12.dp)
-                            .size(36.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
                             .background(Color(0xB31E1E20))
                             .clickable { menuAction = "menu" },
@@ -200,7 +246,7 @@ fun HomeMomentScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             // User info; caption is shown only once inside the image.
             if (currentMoment != null) {
@@ -273,7 +319,11 @@ fun HomeMomentScreen(
 
         // Menu tuy chon cua moment + hop thoai xac nhan (pattern giong
         // ChatDetailScreen: 1 AlertDialog, text doi theo menuAction).
-        if (menuAction != null && currentMoment != null) {
+        if (menuAction == "menu" && currentMoment != null) {
+            MomentActionsSheet(currentMoment, currentMoment.userUid == currentUser.uid,
+                onDismiss = { menuAction = null }, onAction = { menuAction = it })
+        }
+        if (menuAction != null && menuAction != "menu" && currentMoment != null) {
             val moment = currentMoment
             val isOwn = moment.userUid == currentUser.uid
             val firstName = moment.userName.trim().substringBefore(' ').ifBlank { moment.userUid }
@@ -295,43 +345,6 @@ fun HomeMomentScreen(
                 },
                 text = {
                     when (menuAction) {
-                        "menu" -> Column(modifier = Modifier.fillMaxWidth()) {
-                            if (isOwn) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { menuAction = "delete" }
-                                        .padding(vertical = 10.dp)
-                                ) {
-                                    Text("Xóa khoảnh khắc", color = Color(0xFFFF6B6B), fontSize = 16.sp)
-                                }
-                            } else {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { menuAction = "report" }
-                                        .padding(vertical = 10.dp)
-                                ) {
-                                    Text("Báo cáo", color = Color(0xFFFF6B6B), fontSize = 16.sp)
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { menuAction = "hide" }
-                                        .padding(vertical = 10.dp)
-                                ) {
-                                    Text("Ẩn bạn này", color = Color.White, fontSize = 16.sp)
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { menuAction = "block" }
-                                        .padding(vertical = 10.dp)
-                                ) {
-                                    Text("Chặn người này", color = Color(0xFFFF6B6B), fontSize = 16.sp)
-                                }
-                            }
-                        }
                         // Y nghia 2 lua chon lay tu chuoi goc
                         // delete_photo_globally_confirmation /
                         // delete_photo_confirmation (xem ApiClient).
@@ -486,6 +499,14 @@ internal fun MomentReactionBar(
 ) {
     val context = LocalContext.current
     var messageText by remember(currentMoment?.id) { mutableStateOf("") }
+    var showEmoji by remember(currentMoment?.id) { mutableStateOf(false) }
+    fun react(emoji: String) {
+        currentMoment?.let {
+            onReaction(emoji)
+            viewModel.reactToMoment(it.id, it.userUid, emoji)
+        }
+    }
+    if (showEmoji) MomentEmojiSheet(onDismiss = { showEmoji = false }, onPick = { react(it); showEmoji = false })
             // Reaction Bar (Calls real reactToMoment API & sends real chat message)
             Row(
                 modifier = Modifier
@@ -533,7 +554,7 @@ internal fun MomentReactionBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = emoji, fontSize = 26.sp)
+                        Text(text = emoji, fontSize = 27.sp)
                     }
                 }
 
@@ -572,12 +593,12 @@ internal fun MomentReactionBar(
                 } else {
                     IconButton(
                         onClick = {
-                            Toast.makeText(context, "Chọn biểu cảm", Toast.LENGTH_SHORT).show()
+                            if (currentMoment != null) showEmoji = true
                         },
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.EmojiEmotions,
+                            imageVector = Icons.Default.AddReaction,
                             contentDescription = "Emoji",
                             tint = Color.White,
                             modifier = Modifier.size(22.dp)

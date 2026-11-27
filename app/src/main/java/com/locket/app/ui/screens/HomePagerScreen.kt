@@ -65,6 +65,8 @@ fun HomePagerScreen(
     var previousFilter by remember { mutableStateOf(selectedFriend?.uid) }
     var cameraReviewVisible by remember { mutableStateOf(false) }
     var showFriendFilter by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
+    var zoomLocked by remember { mutableStateOf(false) }
     var reactionEvent by remember { mutableStateOf<Pair<String, String>?>(null) }
     var reactionSerial by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
@@ -81,8 +83,10 @@ fun HomePagerScreen(
     val cameraSelected = pagerState.settledPage == 0
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
     val showChrome = !(cameraSelected && cameraReviewVisible)
+    LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
+    BackHandler(enabled = showFriendFilter) { showFriendFilter = false }
     SideEffect {
-        onTabSwipeEnabledChange(!showFriendFilter && !pagerState.isScrollInProgress &&
+        onTabSwipeEnabledChange(!showFriendFilter && !showShare && !zoomLocked && !pagerState.isScrollInProgress &&
             (!cameraSelected || (cameraSwipeEnabled && !cameraReviewVisible)))
     }
 
@@ -148,7 +152,7 @@ fun HomePagerScreen(
         state = pagerState,
         beyondViewportPageCount = 3,
         key = { page -> if (page == 0) "camera" else moments.getOrNull(page - 1)?.id ?: "loading-tail" },
-        userScrollEnabled = pagerState.settledPage != 0 || cameraSwipeEnabled,
+        userScrollEnabled = !zoomLocked && !showFriendFilter && (pagerState.settledPage != 0 || cameraSwipeEnabled),
         modifier = Modifier.fillMaxSize().pointerInput(Unit) {
             // Native upward swipe reveals the next page. Also accept pulling
             // downward at the camera's top boundary, as requested, without
@@ -219,7 +223,8 @@ fun HomePagerScreen(
                 footerHeight = feedFooterHeight,
                 reactionEvent = reactionEvent,
                 reactionSerial = reactionSerial,
-                isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress
+                isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
+                onZoomChange = { if (pagerState.settledPage == page) zoomLocked = it }
             )
         }
     }
@@ -237,7 +242,8 @@ fun HomePagerScreen(
                 showDropdownArrow = !cameraSelected,
                 avatarUrl = currentUser.profilePictureUrl,
                 onSpeakerClick = { viewModel.syncAllData() },
-                onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = true },
+                onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = !showFriendFilter },
+                dropdownExpanded = showFriendFilter,
                 onAvatarClick = onOpenProfile
             )
         }
@@ -271,14 +277,19 @@ fun HomePagerScreen(
                         scope.launch { pagerState.animateScrollToPage(0) }
                     },
                     onChatClick = { onNavigate("chat") },
-                    onShareClick = { onNavigate("profile") },
+                    onShareClick = { if (activeMoment != null) showShare = true },
                     separated = true
                 )
             }
         }
     }
+    if (showShare && activeMoment != null) {
+        MomentActionsSheet(activeMoment, activeMoment.userUid == currentUser.uid,
+            onDismiss = { showShare = false }, onAction = { showShare = false }, shareOnly = true)
+    }
     if (showFriendFilter) {
-        FriendFilterSheet(
+        FeedFriendPopup(
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = headerHeight + 8.dp),
             friends = friends,
             selectedFriend = selectedFriend,
             onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },

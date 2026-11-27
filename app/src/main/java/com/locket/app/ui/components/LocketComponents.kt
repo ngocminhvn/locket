@@ -73,7 +73,8 @@ fun LocketTopBar(
     avatarUrl: String = "",
     onSpeakerClick: () -> Unit = {},
     onTitleClick: () -> Unit = {},
-    onAvatarClick: () -> Unit = {}
+    onAvatarClick: () -> Unit = {},
+    dropdownExpanded: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -124,7 +125,7 @@ fun LocketTopBar(
             )
             if (showDropdownArrow) {
                 Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
+                    imageVector = if (dropdownExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(20.dp)
@@ -229,11 +230,11 @@ fun FeedBottomBar(
                 Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
             }
             Row(
-                Modifier.clip(CircleShape).background(Color(0xFF202022)).padding(horizontal = 10.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically
+                Modifier.clip(CircleShape).background(Color(0xFF202022)).padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onHistoryClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Apps, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(25.dp))
+                    Icon(Icons.Default.CalendarMonth, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(25.dp))
                 }
                 Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape).clickable(onClick = onShutterClick),
                     contentAlignment = Alignment.Center) {
