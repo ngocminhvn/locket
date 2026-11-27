@@ -306,8 +306,8 @@ private class SwipeEmojiPickerHost(
 
     private fun configureBody() {
         val body = picker.findViewById<RecyclerView>(EmojiPickerR.id.emoji_picker_body) ?: return
-        val visibility = if (searching) View.INVISIBLE else View.VISIBLE
-        if (body.visibility != visibility) body.visibility = visibility
+        val bodyVisibility = if (searching) View.INVISIBLE else View.VISIBLE
+        if (body.visibility != bodyVisibility) body.visibility = bodyVisibility
         body.isNestedScrollingEnabled = false
         if (styledBody !== body) {
             styledBody = body
@@ -317,7 +317,7 @@ private class SwipeEmojiPickerHost(
                     // Keep only the recent section label and a one-pixel
                     // scroll anchor for each other group.
                     val isRecent = text.toString() == context.getString(EmojiPickerR.string.emoji_category_recent)
-                    visibility = if (isRecent) View.VISIBLE else View.GONE
+                    this.visibility = if (isRecent) View.VISIBLE else View.GONE
                     val rowHeight = if (isRecent) ViewGroup.LayoutParams.WRAP_CONTENT else 1
                     if (child.layoutParams.height != rowHeight) {
                         child.layoutParams = child.layoutParams.apply { height = rowHeight }
