@@ -17,6 +17,15 @@ class SessionManager(context: Context) {
         get() = prefs.getString("feed_sync_token_" + currentUser.uid, null)
         set(value) = prefs.edit().putString("feed_sync_token_" + currentUser.uid, value).apply()
 
+    // Ngay YYYYMMDD (Gregorian) gan nhat da bao server cap nhat streak qua
+    // postMomentV2 (field update_streak_for_yyyymmdd). Goc so sanh voi
+    // streak.last_updated_yyyymmdd (bundle ~1257420-1257480): khac ngay
+    // hom nay thi gui field, giong thi khong gui. Luu theo uid nhu
+    // feedSyncToken; logout xoa het prefs nen reset theo tai khoan.
+    var streakLastUpdatedYyyymmdd: String?
+        get() = prefs.getString("streak_last_updated_yyyymmdd_" + currentUser.uid, null)
+        set(value) = prefs.edit().putString("streak_last_updated_yyyymmdd_" + currentUser.uid, value).apply()
+
     var savedEmail: String?
         get() = prefs.getString("saved_email", null)
         set(value) = prefs.edit().putString("saved_email", value).apply()

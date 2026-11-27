@@ -58,8 +58,14 @@ fun HomePagerScreen(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage) {
+    // Page 0 = camera, page 1..moments.size = moment. Khi settled sang 1
+    // moment thi danh dau da xem (markMomentAsViewed, goc dedupe theo
+    // viewedMomentUids — xem LocketViewModel.markMomentViewed). Them moments
+    // vao key de van danh dau khi feed ve sau luc page da settled (vd mo app
+    // luc cache trong); dedupe ben ViewModel nen goi lai cung khong gui trung.
+    LaunchedEffect(pagerState.settledPage, moments) {
         if (pagerState.settledPage == 0) viewModel.selectFriend(null)
+        else moments.getOrNull(pagerState.settledPage - 1)?.let { viewModel.markMomentViewed(it.id) }
     }
 
     // Prefetch anh cua cac moment ke tiep truoc khi user vuot toi, de anh

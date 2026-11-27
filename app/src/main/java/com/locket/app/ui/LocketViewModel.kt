@@ -22,7 +22,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 class LocketViewModel(
     val sessionManager: SessionManager,
@@ -54,6 +57,29 @@ class LocketViewModel(
     // Chi truy cap tu main thread (LaunchedEffect + viewModelScope mac dinh
     // chay tren Main) nen khong can dong bo them.
     private val prefetchedThumbnails = mutableSetOf<String>()
+
+    // UID moment da goi markMomentAsViewed trong phien (dedupe + cap 100,
+    // giong goc: viewedMomentUids, bundle ~1247103 — includes thi bo qua,
+    // push roi length > 100 thi slice(-100)). Chi truy cap tu main thread
+    // nhu prefetchedThumbnails.
+    private val viewedMomentUids = ArrayDeque<String>()
+
+    /**
+     * Danh dau 1 moment da xem len server, fire-and-forget: khong chan UI,
+     * loi thi bo qua lang. Khong goi lai moment da xem trong phien.
+     */
+    fun markMomentViewed(momentUid: String) {
+        if (momentUid.isBlank() || viewedMomentUids.contains(momentUid)) return
+        viewedMomentUids.addLast(momentUid)
+        while (viewedMomentUids.size > 100) viewedMomentUids.removeFirst()
+        viewModelScope.launch {
+            runCatching { apiClient.markMomentAsViewed(momentUid) }
+        }
+    }
+
+    /** Ngay hom nay dang YYYYMMDD (Gregorian), nhu getGregorianYYYYMMDD goc. */
+    private fun todayYyyymmdd(): String =
+        SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
 
     /**
      * Prefetch thumbnail vao disk cache cua Coil truoc khi user vuot toi.
@@ -415,15 +441,23 @@ class LocketViewModel(
                 } else null
 
                 // 2. Call postMomentV2 callable
+                // Streak server: chi gui update_streak_for_yyyymmdd khi ngay
+                // da luu != hom nay (getStreakUploadPayload, bundle
+                // ~1257420-1257480); chi luu ngay moi khi post thanh cong.
+                // calculateStreak local van giu lam fallback hien thi.
+                val today = todayYyyymmdd()
+                val updateStreakFor = today.takeIf { sessionManager.streakLastUpdatedYyyymmdd != it }
                 val postRes = apiClient.postMoment(
                     thumbnailUrl = uploadRes.downloadUrl,
                     caption = caption,
                     recipients = recipients,
                     md5 = md5,
-                    videoUrl = videoUrl
+                    videoUrl = videoUrl,
+                    updateStreakForYyyymmdd = updateStreakFor
                 )
 
                 if (postRes.success) {
+                    if (updateStreakFor != null) sessionManager.streakLastUpdatedYyyymmdd = updateStreakFor
                     // Fetch server records; never synthesize IDs, timestamps or local feed rows.
                     videoFile?.delete()
                     _isSyncing.value = false

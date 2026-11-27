@@ -606,7 +606,11 @@ class LocketApiClient(
             if (!ensureFreshToken()) error("Chưa đăng nhập")
             val payload = JsonObject().apply {
                 add("data", JsonObject().apply {
-                    addProperty("should_count_missed_moments", false)
+                    // Goc getLatestMomentV2 (bundle ~1025200, flows 9):
+                    // {should_count_missed_moments: true, last_fetch: 1,
+                    //  sync_token, include_group_moments}.
+                    addProperty("should_count_missed_moments", true)
+                    addProperty("last_fetch", 1)
                     addProperty("include_group_moments", true)
                     if (!syncToken.isNullOrBlank()) addProperty("sync_token", syncToken)
                 })
@@ -757,6 +761,31 @@ class LocketApiClient(
                 Result.success(true)
             } else {
                 Result.failure(Exception("Lỗi gửi biểu cảm"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Danh dau 1 moment da xem (callable markMomentAsViewed, spec JSON
+     * xac minh LIVE: request {moment_uid}, tra status 200).
+     * Goc chi goi khi chua co trong list viewedMomentUids noi bo, cap 100
+     * (bundle ~1247103; gate RC androidMarkMomentAsViewed — repo khong
+     * doc RC nen bo qua gate). Dedupe + cap nam o ViewModel.
+     */
+    suspend fun markMomentAsViewed(momentUid: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("moment_uid", momentUid)
+                })
+            }
+            val resp = callEndpoint("markMomentAsViewed", payload)
+            if (resp != null && resp.get("status")?.asInt in 200..299) {
+                Result.success(true)
+            } else {
+                Result.failure(Exception("Lỗi đánh dấu đã xem"))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -1091,7 +1120,13 @@ class LocketApiClient(
         caption: String = "",
         recipients: List<String> = emptyList(),
         md5: String,
-        videoUrl: String? = null
+        videoUrl: String? = null,
+        // Ngay YYYYMMDD (Gregorian) can bao server cap nhat streak, chi
+        // truyen khi streak chua ghi nhan hom nay (getStreakUploadPayload,
+        // bundle ~1257420-1257480: last_updated_yyyymmdd !== today ->
+        // {update_streak_for_yyyymmdd: today}, nguoc lai khong co field).
+        // null = hom nay da ghi nhan roi, khong gui field.
+        updateStreakForYyyymmdd: String? = null
     ): PostResult = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
@@ -1110,6 +1145,9 @@ class LocketApiClient(
                 add("overlays", gson.toJsonTree(emptyList<String>()))
                 addProperty("md5", md5)
                 if (!videoUrl.isNullOrBlank()) addProperty("video_url", videoUrl)
+                if (!updateStreakForYyyymmdd.isNullOrBlank()) {
+                    addProperty("update_streak_for_yyyymmdd", updateStreakForYyyymmdd)
+                }
             }
             val payload = JsonObject().apply {
                 add("data", innerData)
