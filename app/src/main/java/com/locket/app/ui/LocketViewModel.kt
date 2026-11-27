@@ -895,6 +895,95 @@ class LocketViewModel(
         }
     }
 
+    // ---- Ho so: doi ten / username / anh dai dien / link moi (batch 5) ----
+
+    /** Doc lai profile tu server (fetchUserV2) roi cap nhat UI + session. */
+    fun refreshProfile(onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val uid = sessionManager.currentUser.uid
+            if (uid.isBlank()) {
+                onDone()
+                return@launch
+            }
+            apiClient.fetchUserProfile(uid).onSuccess { user ->
+                _currentUser.value = user
+                sessionManager.currentUser = user
+            }
+            onDone()
+        }
+    }
+
+    /** Doi ten hien thi qua changeProfileInfo {first_name, last_name}. */
+    fun updateProfileName(
+        firstName: String,
+        lastName: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.changeProfileInfo(firstName, lastName)
+            if (res.isSuccess) refreshProfile(onSuccess)
+            else onError(res.exceptionOrNull()?.message ?: "Lỗi đổi tên hồ sơ")
+        }
+    }
+
+    /** Dat/doi username qua setUsername V1 (khong AppCheck/recaptcha). */
+    fun updateUsername(
+        username: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val res = apiClient.setUsername(username)
+            if (res.isSuccess) refreshProfile(onSuccess)
+            else onError(res.exceptionOrNull()?.message ?: "Lỗi đặt tên người dùng")
+        }
+    }
+
+    /**
+     * Doi anh dai dien: upload JPEG len Storage
+     * users/{uid}/public/profile_pic.jpg (locket-img) roi
+     * changeProfileInfo {profile_picture_url} nhu goc.
+     */
+    fun updateProfilePicture(
+        imageBytes: ByteArray,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val up = apiClient.uploadProfilePicture(imageBytes)
+            if (!up.success || up.downloadUrl.isNullOrBlank()) {
+                onError(up.errorMessage ?: "Lỗi tải ảnh lên")
+                return@launch
+            }
+            val res = apiClient.changeProfilePictureUrl(up.downloadUrl)
+            if (res.isSuccess) refreshProfile(onSuccess)
+            else onError(res.exceptionOrNull()?.message ?: "Lỗi đổi ảnh đại diện")
+        }
+    }
+
+    /**
+     * Link moi that (generateInviteToken + createDynamicLink). Chi tao 1
+     * lan roi giu trong RAM — goc cache theo uid trong MMKV
+     * (getInviteLink/setInviteLink); repo chua luu persistent.
+     */
+    private val _inviteLink = MutableStateFlow<String?>(null)
+    val inviteLink: StateFlow<String?> = _inviteLink.asStateFlow()
+
+    private val _inviteLinkLoading = MutableStateFlow(false)
+    val inviteLinkLoading: StateFlow<Boolean> = _inviteLinkLoading.asStateFlow()
+
+    fun loadInviteLink(onError: (String) -> Unit = {}) {
+        if (_inviteLink.value != null || _inviteLinkLoading.value) return
+        viewModelScope.launch {
+            _inviteLinkLoading.value = true
+            apiClient.createInviteLink()
+                .onSuccess { _inviteLink.value = it }
+                .onFailure { onError(it.message ?: "Không tạo được link mời") }
+            _inviteLinkLoading.value = false
+        }
+    }
+
     /**
      * An moment cua 1 ban khoi feed: goi toggleFriendHidden {user_uid}
      * (server tu doi trang thai), xong bo moment cua ho khoi feed hien

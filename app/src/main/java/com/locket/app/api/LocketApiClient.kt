@@ -295,6 +295,233 @@ class LocketApiClient(
         }
     }
 
+    // ==========================================
+    // HỒ SƠ (PROFILE) + MỜI BẠN BÈ
+    // (batch 5 — tat ca da xac minh static trong bundle goc 1.247.3,
+    // chua live-verify: xem ghi chu tung ham)
+    // ==========================================
+
+    /**
+     * Doi ten hien thi: changeProfileInfo {first_name, last_name} — dung
+     * dung 2 field nhu callsite goc duy nhat doi ten (decompiled.js
+     * ~1456708: trim() ca 2 truoc khi gui, khong gui field nao khac).
+     */
+    suspend fun changeProfileInfo(firstName: String, lastName: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("first_name", firstName.trim())
+                    addProperty("last_name", lastName.trim())
+                })
+            }
+            val resp = callEndpoint("changeProfileInfo", payload)
+            if (callableSuccess(resp)) Result.success(true)
+            else Result.failure(Exception(callableError(resp, "Lỗi đổi tên hồ sơ")))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Doi anh dai dien (buoc 2): changeProfileInfo {profile_picture_url} —
+     * callsite goc ~1336449, sau khi upload xong lay downloadURL.
+     */
+    suspend fun changeProfilePictureUrl(pictureUrl: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("profile_picture_url", pictureUrl)
+                })
+            }
+            val resp = callEndpoint("changeProfileInfo", payload)
+            if (callableSuccess(resp)) Result.success(true)
+            else Result.failure(Exception(callableError(resp, "Lỗi đổi ảnh đại diện")))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Dat/doi username (V1): setUsername {username}.
+     * Goc uu tien setUsernameV2 {username, recaptcha_token} khi lay duoc
+     * AppCheck token 'claim_username' (+ recaptcha CLAIM_USERNAME) —
+     * decompiled.js ~1471142-1471150. Repo khong co AppCheck/recaptcha nen
+     * dung V1 (nhanh fallback cua goc). CHUA LIVE-VERIFY: probe 2026-11-27
+     * thay getUserByUsername/validateUsername tra 401 du token hop le (co
+     * the can App Check); setUsername V1 co the bi tu choi tuong tu — ham
+     * nay tra ve loi server that de UI bao, khong bao success gia.
+     */
+    suspend fun setUsername(username: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    addProperty("username", username.trim())
+                })
+            }
+            val resp = callEndpoint("setUsername", payload)
+            if (callableSuccess(resp)) Result.success(true)
+            else Result.failure(Exception(callableError(resp, "Lỗi đặt tên người dùng")))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Tao invite token moi: generateInviteToken {} (khong argument).
+     * Response goc: data.invite_token (getInviteTokenFromResponse,
+     * decompiled.js ~1230953: r0.data.invite_token; phong thu them dang
+     * invite_token truc tiep / data.data.invite_token).
+     */
+    suspend fun generateInviteToken(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JsonObject().apply { add("data", JsonObject()) }
+            val resp = callEndpoint("generateInviteToken", payload)
+            val token = resp?.let {
+                optString(asObj(it, "data"), "invite_token")
+                    .ifBlank { optString(it, "invite_token") }
+                    .ifBlank { optString(asObj(asObj(it, "data"), "data"), "invite_token") }
+            } ?: ""
+            if (token.isNotBlank()) Result.success(token)
+            else Result.failure(Exception(callableError(resp, "Không tạo được mã mời")))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Link moi day du cua goc (generateInviteLink, decompiled.js
+     * ~1230800-1231260):
+     *  1. generateInviteToken -> token
+     *  2. deep link = https://locket.camera/invites/{token}?type={platform}
+     *     (locketDomain tu app.config extra.firebase.dynamicLinks
+     *     .locketDomain = "https://locket.camera"; parseInviteLink doc
+     *     token = doan cuoi path, platform = ?type=)
+     *  3. createDynamicLink {dynamicLinkInfo} -> short link
+     *     (response data.data.link; domainUriPrefix
+     *     "https://locket.camera/links", androidPackageName /
+     *     iosBundleId = "com.locket.Locket", iosAppStoreId "1600525061").
+     * Tra ve short link neu tao duoc; neu createDynamicLink loi thi
+     * fallback ve deep link (van mo dung app goc qua parseInviteLink)
+     * thay vi bao loi — QR van quet duoc.
+     * platform mac dinh "Link" (1 trong invite_link_types cua Remote
+     * Config; loai chung cho QR/chia se link).
+     */
+    suspend fun createInviteLink(platform: String = "Link"): Result<String> = withContext(Dispatchers.IO) {
+        val tokenRes = generateInviteToken()
+        if (tokenRes.isFailure) {
+            return@withContext Result.failure(
+                tokenRes.exceptionOrNull() ?: Exception("Không tạo được mã mời")
+            )
+        }
+        val token = tokenRes.getOrThrow()
+        val deepLink = "https://locket.camera/invites/$token?type=$platform"
+        try {
+            val dynamicLinkInfo = JsonObject().apply {
+                addProperty("link", deepLink)
+                addProperty("domainUriPrefix", "https://locket.camera/links")
+                add("androidInfo", JsonObject().apply {
+                    addProperty("androidPackageName", "com.locket.Locket")
+                })
+                add("iosInfo", JsonObject().apply {
+                    addProperty("iosBundleId", "com.locket.Locket")
+                    addProperty("iosAppStoreId", "1600525061")
+                })
+            }
+            val payload = JsonObject().apply {
+                add("data", JsonObject().apply {
+                    add("dynamicLinkInfo", dynamicLinkInfo)
+                })
+            }
+            val resp = callEndpoint("createDynamicLink", payload)
+            val shortLink = resp?.let {
+                optString(asObj(asObj(it, "data"), "data"), "link")
+                    .ifBlank { optString(asObj(it, "data"), "link") }
+                    .ifBlank { optString(it, "link") }
+            } ?: ""
+            Result.success(shortLink.ifBlank { deepLink })
+        } catch (e: Exception) {
+            // createDynamicLink loi (vd 401/App Check) — deep link van dung
+            Result.success(deepLink)
+        }
+    }
+
+    /**
+     * Upload anh dai dien goc (uploadProfilePicture, decompiled.js
+     * ~1336359-1336449): Storage bucket locket-img, path
+     * users/{uid}/public/profile_pic.jpg, putFile -> getDownloadURL ->
+     * changeProfileInfo {profile_picture_url}.
+     * (Goc dung .jpg hoac .webp tuy dinh dang goc; repo nen anh chon ve
+     * JPEG nen luon dung .jpg. Goc xoa file anh cu khi URL doi — repo
+     * chua lam buoc xoa cu vi can parse filename tu URL cu.)
+     * Dung cung kieu REST Storage nhu uploadMomentThumbnail da co.
+     */
+    suspend fun uploadProfilePicture(imageBytes: ByteArray): UploadResult = withContext(Dispatchers.IO) {
+        val token = getToken()
+        val uid = getUid()
+        if (token.isNullOrBlank() || uid.isNullOrBlank()) {
+            return@withContext UploadResult(false, errorMessage = "Chưa đăng nhập")
+        }
+        try {
+            val encodedPath = "users%2F$uid%2Fpublic%2Fprofile_pic.jpg"
+            val uploadUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o?uploadType=media&name=$encodedPath"
+            val request = Request.Builder()
+                .url(uploadUrl)
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "image/jpeg")
+                .addHeader("Cache-Control", "public, max-age=604800")
+                .post(imageBytes.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+            val response = client.newCall(request).execute()
+            val respStr = response.body?.string() ?: ""
+            if (response.isSuccessful) {
+                val json = gson.fromJson(respStr, JsonObject::class.java)
+                val downloadTokens = json.get("downloadTokens")?.asString ?: ""
+                val publicUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o/$encodedPath?alt=media&token=$downloadTokens"
+                UploadResult(success = true, downloadUrl = publicUrl)
+            } else {
+                UploadResult(false, errorMessage = "Upload ảnh đại diện thất bại (HTTP ${response.code}): $respStr")
+            }
+        } catch (e: Exception) {
+            UploadResult(false, errorMessage = e.localizedMessage ?: "Lỗi tải ảnh lên Storage")
+        }
+    }
+
+    /**
+     * Callable ghi (changeProfileInfo/setUsername/...) tra ve dang khac
+     * nhau tuy endpoint: {status: 200} (kieu sendFriendRequest) hoac
+     * {success: true} / {data: {success: true}} (kieu changeProfileInfo
+     * cua goc, ~1336372: r5.data.success). Thanh cong khi status 2xx,
+     * hoac success == true; neu khong co ca 2 thi chi can khong co
+     * mang errors.
+     */
+    private fun callableSuccess(resp: JsonObject?): Boolean {
+        if (resp == null) return false
+        resp.get("status")?.takeIf { !it.isJsonNull }?.let {
+            return try { it.asInt in 200..299 } catch (e: Exception) { false }
+        }
+        resp.get("success")?.takeIf { !it.isJsonNull }?.let {
+            return try { it.asBoolean } catch (e: Exception) { false }
+        }
+        asObj(resp, "data")?.get("success")?.takeIf { !it.isJsonNull }?.let {
+            return try { it.asBoolean } catch (e: Exception) { false }
+        }
+        val errors = resp.getAsJsonArray("errors")
+        return errors == null || errors.size() == 0
+    }
+
+    /** Trich loi that tu response callable: errors[0] / error.message / message. */
+    private fun callableError(resp: JsonObject?, fallback: String): String {
+        resp?.getAsJsonArray("errors")?.firstOrNull()?.let { el ->
+            val msg = if (el.isJsonPrimitive) el.asString
+            else if (el.isJsonObject) el.asJsonObject?.get("message")?.takeIf { !it.isJsonNull }?.asString
+            else null
+            if (!msg.isNullOrBlank()) return msg
+        }
+        asObj(resp, "error")?.get("message")?.takeIf { !it.isJsonNull }?.asString?.let { return it }
+        resp?.get("message")?.takeIf { !it.isJsonNull }?.asString?.let { return it }
+        return fallback
+    }
+
     suspend fun fetchFriends(userUid: String): Result<List<Friend>> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
@@ -1719,6 +1946,12 @@ class LocketApiClient(
     private fun extractString(fields: JsonObject?, fieldName: String): String {
         val v = fields?.getAsJsonObject(fieldName)?.get("stringValue") ?: return ""
         return if (v.isJsonNull) "" else try { v.asString } catch (e: Exception) { "" }
+    }
+
+    /** Doc object con cua JSON callable: null khi field vang mat / null / khong phai object. */
+    private fun asObj(obj: JsonObject?, fieldName: String): JsonObject? {
+        val el = obj?.get(fieldName) ?: return null
+        return if (el.isJsonObject) el.asJsonObject else null
     }
 
     /** Doc chuoi tu JSON callable: tra "" khi field vang mat hoac null (JsonNull.asString() se throw). */

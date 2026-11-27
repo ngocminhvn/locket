@@ -1,6 +1,18 @@
 package com.locket.app.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,16 +36,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 @Composable
 fun ProfileScreen(
@@ -42,13 +62,58 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
 
     var showQrModal by remember { mutableStateOf(false) }
     var showLoginDialog by remember { mutableStateOf(false) }
     var showPhoneLoginDialog by remember { mutableStateOf(false) }
     var showTokenDialog by remember { mutableStateOf(false) }
     var showBlockedUsers by remember { mutableStateOf(false) }
+    var showEditNameDialog by remember { mutableStateOf(false) }
+    var showEditUsernameDialog by remember { mutableStateOf(false) }
+    var isUploadingAvatar by remember { mutableStateOf(false) }
     var goldBadgeActive by remember { mutableStateOf(true) }
+
+    // Chon anh dai dien tu gallery -> nen ve JPEG -> upload that len
+    // Storage users/{uid}/public/profile_pic.jpg (xem ApiClient
+    // .uploadProfilePicture, dung duong dan goc da xac minh).
+    val avatarPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null || isUploadingAvatar) return@rememberLauncherForActivityResult
+        isUploadingAvatar = true
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                try {
+                    val bitmap = context.contentResolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it)
+                    } ?: return@withContext null
+                    ByteArrayOutputStream().use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                        out.toByteArray()
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (bytes == null) {
+                isUploadingAvatar = false
+                Toast.makeText(context, "Không đọc được ảnh đã chọn", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            viewModel.updateProfilePicture(
+                imageBytes = bytes,
+                onSuccess = {
+                    isUploadingAvatar = false
+                    Toast.makeText(context, "Đã đổi ảnh đại diện", Toast.LENGTH_SHORT).show()
+                },
+                onError = { err ->
+                    isUploadingAvatar = false
+                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    }
 
     val user by viewModel.currentUser.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
@@ -149,7 +214,8 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Name & Edit photo
+            // Name & Edit photo — "Chỉnh ảnh" mo gallery that (upload
+            // Storage + changeProfileInfo), "Sửa tên" mo dialog doi ten that.
             Text(
                 text = user.displayName.ifBlank { user.username.ifBlank { "Tài khoản Locket" } },
                 color = Color.White,
@@ -157,15 +223,27 @@ fun ProfileScreen(
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Chỉnh ảnh",
-                color = LocketYellow,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable {
-                    Toast.makeText(context, "Chỉnh ảnh đại diện", Toast.LENGTH_SHORT).show()
-                }
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isUploadingAvatar) "Đang tải ảnh lên..." else "Chỉnh ảnh",
+                    color = LocketYellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable(enabled = !isUploadingAvatar) {
+                        avatarPicker.launch("image/*")
+                    }
+                )
+                Text(
+                    text = "Sửa tên",
+                    color = LocketYellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { showEditNameDialog = true }
+                )
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -298,6 +376,13 @@ fun ProfileScreen(
                         }
                     }
                 )
+                // Ten nguoi dung that (setUsername V1) — hien username hien
+                // tai, bam de dat/doi; loi server (vd 401/App Check) bao that.
+                SettingsItem(
+                    icon = { Icon(Icons.Default.AlternateEmail, null, tint = LocketYellow) },
+                    title = if (user.username.isNotBlank()) "Tên người dùng: @${user.username}" else "Đặt tên người dùng",
+                    onClick = { showEditUsernameDialog = true }
+                )
                 SettingsItem(
                     icon = { Icon(Icons.Default.Sync, null, tint = LocketYellow) },
                     title = "Đồng bộ lại toàn bộ dữ liệu từ server",
@@ -366,7 +451,23 @@ fun ProfileScreen(
 
         // Modals & Dialogs
         if (showQrModal) {
-            QrShareBottomSheet(user = user, onDismiss = { showQrModal = false })
+            QrShareBottomSheet(user = user, viewModel = viewModel, onDismiss = { showQrModal = false })
+        }
+
+        if (showEditNameDialog) {
+            EditNameDialog(
+                currentDisplayName = user.displayName,
+                viewModel = viewModel,
+                onDismiss = { showEditNameDialog = false }
+            )
+        }
+
+        if (showEditUsernameDialog) {
+            EditUsernameDialog(
+                currentUsername = user.username,
+                viewModel = viewModel,
+                onDismiss = { showEditUsernameDialog = false }
+            )
         }
 
         if (showLoginDialog) {
@@ -565,12 +666,37 @@ private fun BlockedUsersBottomSheet(
     }
 }
 
+/**
+ * QR moi THAT: ma QR ve tu link moi that (generateInviteToken +
+ * createDynamicLink cua goc — xem ApiClient.createInviteLink), khong
+ * phai icon tinh. Layout sheet giu nguyen nhu cu (nen vang + avatar
+ * giua + 4 nut hanh dong). "Save QR" luu bitmap QR that vao Thu vien
+ * qua MediaStore va bao ket qua that; "Sao chép" copy link moi that.
+ * Messenger/Zalo van la Toast cho — ngoai pham vi batch nay.
+ */
 @Composable
 private fun QrShareBottomSheet(
     user: com.locket.app.model.User,
+    viewModel: LocketViewModel,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val inviteLink by viewModel.inviteLink.collectAsState()
+    val inviteLinkLoading by viewModel.inviteLinkLoading.collectAsState()
+    var isSavingQr by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.loadInviteLink { err ->
+            Toast.makeText(context, "Lỗi tạo link mời: $err", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // QR that tu link moi; null = chua co link (dang tai hoac loi).
+    val qrBitmap = remember(inviteLink) {
+        inviteLink?.let { generateQrBitmap(it, 512) }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -611,12 +737,24 @@ private fun QrShareBottomSheet(
                         modifier = Modifier.size(170.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.QrCode2,
-                            contentDescription = "QR Code",
-                            tint = Color.Black,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        if (qrBitmap != null) {
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "Mã QR mời bạn bè",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (inviteLinkLoading) {
+                            CircularProgressIndicator(color = Color.Black)
+                        } else {
+                            // Chua co link (loi mang/server): giu icon cu lam
+                            // placeholder, khong ve QR gia tu chuoi rong.
+                            Icon(
+                                imageVector = Icons.Default.QrCode2,
+                                contentDescription = "QR Code",
+                                tint = Color.Black,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .size(46.dp)
@@ -625,7 +763,16 @@ private fun QrShareBottomSheet(
                                 .background(Color.White),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Person, null, tint = Color.Black, modifier = Modifier.size(30.dp))
+                            if (user.profilePictureUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = user.profilePictureUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Person, null, tint = Color.Black, modifier = Modifier.size(30.dp))
+                            }
                         }
                     }
 
@@ -650,10 +797,34 @@ private fun QrShareBottomSheet(
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
                 ShareActionItem("Save QR", Icons.Default.Download) {
-                    Toast.makeText(context, "Đã lưu mã QR", Toast.LENGTH_SHORT).show()
+                    val bitmap = qrBitmap
+                    if (bitmap == null) {
+                        Toast.makeText(context, "Chưa tạo được mã QR, thử lại sau", Toast.LENGTH_SHORT).show()
+                        return@ShareActionItem
+                    }
+                    if (isSavingQr) return@ShareActionItem
+                    isSavingQr = true
+                    scope.launch {
+                        val saved = withContext(Dispatchers.IO) {
+                            saveQrBitmapToGallery(context, bitmap)
+                        }
+                        isSavingQr = false
+                        saved.onSuccess { fileName ->
+                            Toast.makeText(context, "Đã lưu mã QR ($fileName) vào Thư viện", Toast.LENGTH_SHORT).show()
+                        }.onFailure { err ->
+                            Toast.makeText(context, "Lỗi lưu mã QR: ${err.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
                 ShareActionItem("Sao chép", Icons.Default.Link) {
-                    Toast.makeText(context, "Đã sao chép link profile", Toast.LENGTH_SHORT).show()
+                    val link = inviteLink
+                    if (link.isNullOrBlank()) {
+                        Toast.makeText(context, "Chưa tạo được link mời, thử lại sau", Toast.LENGTH_SHORT).show()
+                        return@ShareActionItem
+                    }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Locket invite link", link))
+                    Toast.makeText(context, "Đã sao chép link mời", Toast.LENGTH_SHORT).show()
                 }
                 ShareActionItem("Messenger", Icons.Default.Chat) {
                     Toast.makeText(context, "Chia sẻ Messenger", Toast.LENGTH_SHORT).show()
@@ -665,6 +836,214 @@ private fun QrShareBottomSheet(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+/** Ve QR that tu 1 chuoi (link moi) bang ZXing — khong phai icon tinh. */
+private fun generateQrBitmap(content: String, size: Int): Bitmap? {
+    return try {
+        val hints = mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.MARGIN to 1
+        )
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        for (x in 0 until size) {
+            for (y in 0 until size) {
+                bitmap.setPixel(
+                    x, y,
+                    if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                )
+            }
+        }
+        bitmap
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/**
+ * Luu bitmap QR that vao Thu vien (Pictures/Locket) qua MediaStore.
+ * Tra ve ten file that khi luu duoc, loi that khi khong luu duoc.
+ */
+private fun saveQrBitmapToGallery(context: Context, bitmap: Bitmap): Result<String> {
+    return try {
+        val fileName = "locket-qr-${System.currentTimeMillis()}.png"
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Locket")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = context.contentResolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+        ) ?: return Result.failure(Exception("Không tạo được file trong Thư viện"))
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                return Result.failure(Exception("Không ghi được ảnh QR"))
+            }
+        } ?: return Result.failure(Exception("Không mở được file trong Thư viện"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val done = ContentValues().apply {
+                put(MediaStore.Images.Media.IS_PENDING, 0)
+            }
+            context.contentResolver.update(uri, done, null, null)
+        }
+        Result.success(fileName)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+}
+
+/**
+ * Dialog doi ten hien thi that (changeProfileInfo {first_name,
+ * last_name}). Goc chi luu first_name/last_name rieng, khong co truong
+ * displayName — tach ten hien tai: tu cuoi = last_name, phan truoc =
+ * first_name.
+ */
+@Composable
+private fun EditNameDialog(
+    currentDisplayName: String,
+    viewModel: LocketViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val parts = remember(currentDisplayName) {
+        currentDisplayName.trim().split(" ").filter { it.isNotBlank() }
+    }
+    var firstName by remember {
+        mutableStateOf(parts.dropLast(1).joinToString(" "))
+    }
+    var lastName by remember {
+        mutableStateOf(parts.lastOrNull() ?: "")
+    }
+    var isLoading by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E22),
+        title = { Text("Sửa tên hồ sơ", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = firstName,
+                    onValueChange = { firstName = it },
+                    label = { Text("Tên") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = lastName,
+                    onValueChange = { lastName = it },
+                    label = { Text("Họ") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (firstName.isBlank() && lastName.isBlank()) {
+                        Toast.makeText(context, "Nhập tên hiển thị", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    isLoading = true
+                    viewModel.updateProfileName(
+                        firstName = firstName,
+                        lastName = lastName,
+                        onSuccess = {
+                            isLoading = false
+                            Toast.makeText(context, "Đã lưu tên", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
+                        onError = { err ->
+                            isLoading = false
+                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
+            ) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
+                else Text("Lưu", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
+        }
+    )
+}
+
+/**
+ * Dialog dat/doi username that (setUsername V1). Hien username hien tai;
+ * loi server (vd username da co nguoi dung / 401) bao that, khong bao
+ * success gia. Chua live-verify (xem ApiClient.setUsername).
+ */
+@Composable
+private fun EditUsernameDialog(
+    currentUsername: String,
+    viewModel: LocketViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var username by remember { mutableStateOf(currentUsername) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E22),
+        title = { Text("Tên người dùng", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Tên người dùng dùng trong link mời locket.cam/<tên của bạn>.",
+                    color = LocketTextDim, fontSize = 13.sp
+                )
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("Username") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (username.isBlank()) {
+                        Toast.makeText(context, "Nhập tên người dùng", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    isLoading = true
+                    viewModel.updateUsername(
+                        username = username,
+                        onSuccess = {
+                            isLoading = false
+                            Toast.makeText(context, "Đã lưu tên người dùng", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
+                        onError = { err ->
+                            isLoading = false
+                            Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = LocketYellow)
+            ) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
+                else Text("Lưu", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Hủy", color = Color.White) }
+        }
+    )
 }
 
 @Composable

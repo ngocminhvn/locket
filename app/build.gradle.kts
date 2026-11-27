@@ -84,6 +84,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
 
+    // QR that cho link moi (ZXing core — chi core, khong them lib thua)
+    implementation("com.google.zxing:core:3.5.3")
+
     // Secure Storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
