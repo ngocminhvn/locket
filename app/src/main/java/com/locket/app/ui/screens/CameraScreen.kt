@@ -13,7 +13,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Rational
-import android.util.Size
+import android.util.Size as AndroidSize
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1127,7 +1127,7 @@ private const val PHOTO_SIDE = 720
 private fun cameraPhotoResolutionSelector(): ResolutionSelector =
     ResolutionSelector.Builder()
         .setResolutionStrategy(
-            ResolutionStrategy(Size(960, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+            ResolutionStrategy(AndroidSize(960, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
         )
         .build()
 
