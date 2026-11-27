@@ -342,31 +342,6 @@ class LocketApiClient(
     }
 
     /**
-     * Dat/doi username (V1): setUsername {username}.
-     * Goc uu tien setUsernameV2 {username, recaptcha_token} khi lay duoc
-     * AppCheck token 'claim_username' (+ recaptcha CLAIM_USERNAME) —
-     * decompiled.js ~1471142-1471150. Repo khong co AppCheck/recaptcha nen
-     * dung V1 (nhanh fallback cua goc). CHUA LIVE-VERIFY: probe 2026-11-27
-     * thay getUserByUsername/validateUsername tra 401 du token hop le (co
-     * the can App Check); setUsername V1 co the bi tu choi tuong tu — ham
-     * nay tra ve loi server that de UI bao, khong bao success gia.
-     */
-    suspend fun setUsername(username: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val payload = JsonObject().apply {
-                add("data", JsonObject().apply {
-                    addProperty("username", username.trim())
-                })
-            }
-            val resp = callEndpoint("setUsername", payload)
-            if (callableSuccess(resp)) Result.success(true)
-            else Result.failure(Exception(callableError(resp, "Lỗi đặt tên người dùng")))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
      * Tao invite token moi: generateInviteToken {} (khong argument).
      * Response goc: data.invite_token (getInviteTokenFromResponse,
      * decompiled.js ~1230953: r0.data.invite_token; phong thu them dang
@@ -487,7 +462,7 @@ class LocketApiClient(
     }
 
     /**
-     * Callable ghi (changeProfileInfo/setUsername/...) tra ve dang khac
+     * Callable ghi (changeProfileInfo/...) tra ve dang khac
      * nhau tuy endpoint: {status: 200} (kieu sendFriendRequest) hoac
      * {success: true} / {data: {success: true}} (kieu changeProfileInfo
      * cua goc, ~1336372: r5.data.success). Thanh cong khi status 2xx,

@@ -927,19 +927,6 @@ class LocketViewModel(
         }
     }
 
-    /** Dat/doi username qua setUsername V1 (khong AppCheck/recaptcha). */
-    fun updateUsername(
-        username: String,
-        onSuccess: () -> Unit = {},
-        onError: (String) -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            val res = apiClient.setUsername(username)
-            if (res.isSuccess) refreshProfile(onSuccess)
-            else onError(res.exceptionOrNull()?.message ?: "Lỗi đặt tên người dùng")
-        }
-    }
-
     /**
      * Doi anh dai dien: upload JPEG len Storage
      * users/{uid}/public/profile_pic.jpg (locket-img) roi
