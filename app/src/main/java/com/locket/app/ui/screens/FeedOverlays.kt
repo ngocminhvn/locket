@@ -1,6 +1,29 @@
 package com.locket.app.ui.screens
 
 import android.content.Context
+import android.graphics.Paint
+import android.widget.TextView
+import android.text.TextUtils
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.emoji2.emojipicker.RecentEmojiProvider
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.Normalizer
+import java.util.Locale
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -71,46 +94,162 @@ private fun FilterFriendRow(friend: Friend?, selected: Boolean, onClick: () -> U
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val context = LocalContext.current
     val pick by rememberUpdatedState(onPick)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val scope = rememberCoroutineScope()
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val recent = remember(context) { SharedEmojiRecents(context) }
+    var query by remember { mutableStateOf("") }
+    val searching = query.isNotBlank()
+    val results by produceState<List<String>?>(initialValue = null, query, context) {
+        value = null
+        if (query.isNotBlank()) {
+            value = withContext(Dispatchers.IO) { EmojiSearchIndex.search(context, query) }
+        }
+    }
+    val headerHeight = dimensionResource(EmojiPickerR.dimen.emoji_picker_header_height)
+    fun clearSearch() {
+        query = ""
+        focus.clearFocus()
+        keyboard?.hide()
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Color(0xFF242424),
-        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        dragHandle = {
+            Box(Modifier.padding(vertical = 9.dp).size(width = 32.dp, height = 4.dp)
+                .clip(CircleShape).background(Color.White.copy(alpha = 0.35f)))
+        }
     ) {
-        // Keep the sheet anchors stable, but size the picker to the visible part
-        // of the sheet so the last emoji row is reachable in both positions.
         Box(Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
             val contentHeight = if (sheetState.targetValue == SheetValue.PartiallyExpanded) {
-                Modifier.height((screenHeight * 0.5f - 80.dp).coerceAtLeast(120.dp))
+                Modifier.height((screenHeight * 0.5f - 28.dp).coerceAtLeast(140.dp))
             } else {
                 Modifier.fillMaxHeight()
             }
             Column(Modifier.fillMaxWidth().then(contentHeight)
-                .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text("Chọn biểu cảm", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    factory = { context ->
-                        val picker = EmojiPickerView(context).apply {
-                            emojiGridColumns = 8
-                            setOnEmojiPickedListener { item -> pick(item.emoji) }
+                .navigationBarsPadding().padding(horizontal = 12.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+                        .height(40.dp).clip(RoundedCornerShape(24.dp))
+                        .background(Color.White.copy(alpha = 0.09f)).padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = query, onValueChange = { query = it },
+                        modifier = Modifier.weight(1f).onFocusChanged {
+                            if (it.isFocused) scope.launch { sheetState.expand() }
+                        },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                        cursorBrush = SolidColor(Color.White),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        decorationBox = { inner ->
+                            Box {
+                                if (query.isEmpty()) Text("Tìm kiếm emoji", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                                inner()
+                            }
                         }
-                        SwipeEmojiPickerHost(context, picker)
+                    )
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Default.Close, "Xóa tìm kiếm", tint = Color.LightGray, modifier = Modifier.size(18.dp))
+                        }
                     }
-                )
+                }
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            val picker = EmojiPickerView(ctx).apply {
+                                emojiGridColumns = 5
+                                setRecentEmojiProvider(recent)
+                                setOnEmojiPickedListener { item -> pick(item.emoji) }
+                            }
+                            SwipeEmojiPickerHost(ctx, picker)
+                        },
+                        update = { host -> host.setSearchMode(searching, ::clearSearch) }
+                    )
+                    if (searching) {
+                        Box(Modifier.fillMaxSize().padding(top = headerHeight).background(Color(0xFF242424))) {
+                            val found = results
+                            when {
+                                found == null -> CircularProgressIndicator(
+                                    modifier = Modifier.align(Alignment.Center).size(24.dp),
+                                    color = Color.LightGray, strokeWidth = 2.dp
+                                )
+                                found.isEmpty() -> Text("Không tìm thấy emoji",
+                                    modifier = Modifier.align(Alignment.Center), color = Color.LightGray, fontSize = 13.sp)
+                                else -> LazyVerticalGrid(
+                                    columns = GridCells.Fixed(5),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(found, key = { it }) { emoji ->
+                                        Box(Modifier.aspectRatio(1f).clickable {
+                                            recent.recordSelection(emoji)
+                                            pick(emoji)
+                                        }, contentAlignment = Alignment.Center) {
+                                            Text(emoji, fontSize = 36.sp, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+/** Real Unicode/CLDR search metadata only; all glyphs are drawn by the system. */
+private object EmojiSearchIndex {
+    private val marks = Regex("\\p{M}+")
+    private val spaces = Regex("\\s+")
+    private fun normalize(text: String) = Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(marks, "").replace('đ', 'd')
+
+    @Volatile private var entries: List<Pair<String, String>>? = null
+
+    fun search(context: Context, query: String): List<String> {
+        val list = entries ?: synchronized(this) {
+            entries ?: context.assets.open("emoji-search.tsv").bufferedReader().useLines { lines ->
+                lines.filter { !it.startsWith("#") }.mapNotNull { line ->
+                    val split = line.indexOf('\\t')
+                    if (split <= 0) null else line.substring(0, split) to line.substring(split + 1)
+                }.toList()
+            }.also { entries = it }
+        }
+        val raw = query.trim()
+        val words = normalize(raw).split(spaces).filter { it.isNotBlank() }
+        val paint = Paint()
+        return list.asSequence().filter { (emoji, keywords) ->
+            emoji.contains(raw) || (words.isNotEmpty() && words.all { keywords.contains(it) })
+        }.map { it.first }.distinct().filter { paint.hasGlyph(it) }.toList()
+    }
+}
+
+/** Reuse AndroidX's existing recents storage so search and browsing share history. */
+private class SharedEmojiRecents(context: Context) : RecentEmojiProvider {
+    private val prefs = context.getSharedPreferences("androidx.emoji2.emojipicker.preferences", Context.MODE_PRIVATE)
+    private val key = "pref_key_recent_emoji"
+    @Synchronized override fun recordSelection(emoji: String) {
+        val recent = listOf(emoji) + read().filterNot { it == emoji }
+        prefs.edit().putString(key, recent.take(100).joinToString(",")).apply()
+    }
+    private fun read() = prefs.getString(key, "").orEmpty().split(',').filter { it.isNotBlank() }
+    override suspend fun getRecentEmojiList(): List<String> = read()
+}
+
 /**
  * AndroidX supplies the system emoji, variants, recents and category tabs.
  * Keep its vertical RecyclerView gestures local to the picker; the sheet
- * is still draggable by its handle and title. Horizontal swipes reuse
+ * is still draggable by its handle. Horizontal swipes reuse
  * the existing category click action rather than maintaining a second list.
  */
 private class SwipeEmojiPickerHost(
@@ -124,9 +263,53 @@ private class SwipeEmojiPickerHost(
     private var tracking = false
     private var horizontal = false
     private var vertical = false
+    private var searching = false
+    private var onHeaderTap: () -> Unit = {}
+    private var styledBody: RecyclerView? = null
 
     init {
         addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    fun setSearchMode(active: Boolean, onHeaderTap: () -> Unit) {
+        this.onHeaderTap = onHeaderTap
+        searching = active
+        configureBody()
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        configureBody()
+    }
+
+    private fun configureBody() {
+        val body = picker.findViewById<RecyclerView>(EmojiPickerR.id.emoji_picker_body) ?: return
+        val visibility = if (searching) View.INVISIBLE else View.VISIBLE
+        if (body.visibility != visibility) body.visibility = visibility
+        body.isNestedScrollingEnabled = false
+        if (styledBody !== body) {
+            styledBody = body
+            fun style(child: View) {
+                child.findViewById<TextView>(EmojiPickerR.id.category_name)?.apply {
+                    textSize = 13f
+                    letterSpacing = 0f
+                    isAllCaps = false
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+                child.findViewById<TextView>(EmojiPickerR.id.emoji_picker_empty_category_view)?.apply {
+                    textSize = 12f
+                    letterSpacing = 0f
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }
+            }
+            for (i in 0 until body.childCount) style(body.getChildAt(i))
+            body.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
+                override fun onChildViewAttachedToWindow(view: View) = style(view)
+                override fun onChildViewDetachedFromWindow(view: View) = Unit
+            })
+        }
     }
 
     override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
@@ -138,6 +321,8 @@ private class SwipeEmojiPickerHost(
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                val header = picker.findViewById<View>(EmojiPickerR.id.emoji_picker_header)
+                if (searching && header != null && event.y <= header.bottom) onHeaderTap()
                 tracking = true
                 horizontal = false
                 vertical = false
