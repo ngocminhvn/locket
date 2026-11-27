@@ -294,7 +294,6 @@ private fun ModRow(icon: @Composable () -> Unit, title: String, subtitle: String
 internal data class CameraPreferences(
     val mirror: Boolean = true,
     val selfieFlash: Boolean = false,
-    val quality: Boolean = false,
     val lowLight: Boolean = false,
     val stabilization: Boolean = false,
     val videoHdr: Boolean = false,
@@ -306,7 +305,6 @@ private fun readCameraPreferences(context: Context): CameraPreferences {
     return CameraPreferences(
         mirror = p.getBoolean("mirror", true),
         selfieFlash = p.getBoolean("selfie_flash", false),
-        quality = p.getBoolean("quality", false),
         lowLight = p.getBoolean("low_light", false),
         stabilization = p.getBoolean("stabilization", false),
         videoHdr = p.getBoolean("video_hdr", false),
@@ -315,7 +313,7 @@ private fun readCameraPreferences(context: Context): CameraPreferences {
 }
 private fun saveCameraPreferences(context: Context, value: CameraPreferences) {
     cameraPrefs(context).edit().putBoolean("mirror", value.mirror)
-        .putBoolean("selfie_flash", value.selfieFlash).putBoolean("quality", value.quality)
+        .putBoolean("selfie_flash", value.selfieFlash).remove("quality")
         .putBoolean("low_light", value.lowLight).putBoolean("stabilization", value.stabilization)
         .putBoolean("video_hdr", value.videoHdr).putInt("extension", value.extension).apply()
 }
@@ -393,9 +391,6 @@ private fun CameraSettingsDialog(onClose: () -> Unit) {
                 }
                 CameraOption("Flash màn hình", hint(caps?.front, "Chiếu sáng khi chụp camera trước"), settings.selfieFlash,
                     caps?.front == true || settings.selfieFlash) { save(settings.copy(selfieFlash = it)) }
-                CameraOption("Chụp bằng cảm biến", "Tắt để lấy đúng frame xem trước; cả hai tối đa 720px", settings.quality, true) {
-                    save(settings.copy(quality = it))
-                }
                 CameraOption("Tăng sáng khi thiếu sáng", hint(caps?.lowLight, "Low Light Boost trên camera hỗ trợ"), settings.lowLight,
                     caps?.lowLight == true || settings.lowLight) { save(settings.copy(lowLight = it)) }
                 CameraOption("Chống rung xem trước", hint(caps?.stabilization, "Ổn định khung hình khi thiết bị hỗ trợ"), settings.stabilization,

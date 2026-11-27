@@ -162,7 +162,9 @@ fun CameraScreen(
     var screenActive by remember { mutableStateOf(true) }
     val previewView = remember(context) {
         PreviewView(context).apply {
-            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+            // TextureView supports transformed frame readback without the
+            // SurfaceView PixelCopy wait and composes correctly inside the pager.
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
@@ -247,7 +249,9 @@ fun CameraScreen(
                 fun bind(selector: CameraSelector, extension: Boolean, hdr: Boolean, advanced: Boolean, includeVideo: Boolean): Camera {
                     val info = cameraProvider.getCameraInfo(selector)
                     val preview = Preview.Builder().setTargetRotation(rotation).apply {
-                        if (!extension && advanced) setResolutionSelector(cameraPhotoResolutionSelector())
+                        // Do not constrain the live stream to the upload resolution.
+                        // Keep the ordinary photo preview SDR, avoiding HDR-to-SDR shifts.
+                        if (!hdr && !extension) setDynamicRange(DynamicRange.SDR)
                         if (advanced && cameraPreferences.stabilization && !extension &&
                             Preview.getPreviewCapabilities(info).isStabilizationSupported) setPreviewStabilizationEnabled(true)
                     }.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
@@ -446,42 +450,41 @@ fun CameraScreen(
         if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
 
-        // Normal photos are the actual displayed preview frame: its crop,
-        // zoom, rotation and color are already applied by CameraX.
-        // Do not trigger a second, high-resolution still capture.
+        // Normal photos use the same transformed frame the user sees.
+        // Never silently switch to a differently processed still photograph.
         val wantsStill = capture.flashMode != ImageCapture.FLASH_MODE_OFF ||
-            flashMode != ImageCapture.FLASH_MODE_OFF || extensionActive || cameraPreferences.quality
-        val frame = if (!wantsStill &&
-            previewView.previewStreamState.value == PreviewView.StreamState.STREAMING) {
-            try { previewView.bitmap } catch (_: Exception) { null }
-        } else null
-        if (frame != null && hasPreviewPixels(frame)) {
-            val unmirror = frontCamera && !cameraPreferences.mirror
-            scope.launch {
-                var photo: Bitmap? = null
-                try {
-                    photo = withContext(Dispatchers.Default) { cameraSquare720(frame, unmirror) }
-                    if (screenActive) {
-                        capturedBitmap = photo
-                        photo = null // UI owns the bitmap from this point.
-                    }
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (screenActive) Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
-                } finally {
-                    if (photo !== frame && capturedBitmap !== frame && !frame.isRecycled) frame.recycle()
-                    photo?.takeIf { !it.isRecycled }?.recycle()
-                    capturingPhoto = false
+            flashMode != ImageCapture.FLASH_MODE_OFF || extensionActive
+        if (!wantsStill) {
+            val started = SystemClock.elapsedRealtime()
+            if (previewView.previewStreamState.value != PreviewView.StreamState.STREAMING) {
+                capturingPhoto = false
+                Toast.makeText(context, "Camera chưa sẵn sàng, hãy thử lại", Toast.LENGTH_SHORT).show()
+                return
+            }
+            var frame: Bitmap? = null
+            var result: Bitmap? = null
+            try {
+                frame = previewView.bitmap
+                if (frame == null || !hasPreviewPixels(frame)) {
+                    Toast.makeText(context, "Không lấy được khung camera, hãy thử lại", Toast.LENGTH_SHORT).show()
+                } else {
+                    result = cameraSquare720(frame, frontCamera && !cameraPreferences.mirror)
+                    // Publish immediately; do not queue a second capture or JPEG encode.
+                    capturedBitmap = result
+                    android.util.Log.d("LocketCamera", "preview capture ${SystemClock.elapsedRealtime() - started}ms, ${result.width}x${result.height}")
                 }
+            } catch (e: Exception) {
+                android.util.Log.w("LocketCamera", "Preview capture failed", e)
+                Toast.makeText(context, "Không thể chụp ảnh, hãy thử lại", Toast.LENGTH_SHORT).show()
+            } finally {
+                if (frame !== result) frame?.recycle()
+                capturingPhoto = false
             }
             return
         }
-        frame?.recycle()
 
-        // Keep a real still capture for hardware/screen flash, explicitly
-        // selected sensor/extension capture, or an unavailable preview frame.
-        // The fallback has the same 720 px output and JPEG upload policy.
+        // Real still capture is reserved for explicitly selected flash or
+        // camera extensions; those intentionally can differ from the preview.
         val mirrorPhoto = frontCamera && cameraPreferences.mirror
         val mainExecutor = ContextCompat.getMainExecutor(context)
         capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
