@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -86,7 +87,8 @@ fun HomeMomentScreen(
     var zoom by remember(currentMoment?.id) { mutableFloatStateOf(1f) }
     var pan by remember(currentMoment?.id) { mutableStateOf(Offset.Zero) }
     val zoomCallback by rememberUpdatedState(onZoomChange)
-    LaunchedEffect(isActive) { if (!isActive) { zoom = 1f; pan = Offset.Zero; menuAction = null } }
+    var pinching by remember(currentMoment?.id) { mutableStateOf(false) }
+    LaunchedEffect(isActive) { if (!isActive) { zoom = 1f; pan = Offset.Zero; pinching = false; menuAction = null } }
     androidx.activity.compose.BackHandler(isActive && zoom > 1f) {
         zoom = 1f; pan = Offset.Zero; zoomCallback(false)
     }
@@ -146,22 +148,34 @@ fun HomeMomentScreen(
                                 awaitEachGesture {
                                     awaitFirstDown(requireUnconsumed = false)
                                     var transforming = false
-                                    do {
-                                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                                        val pressed = event.changes.count { it.pressed }
-                                        if (pressed >= 2 || (zoom > 1f && pressed > 0)) {
-                                            transforming = true
-                                            val next = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
-                                            val limitX = size.width * (next - 1f) / 2f
-                                            val limitY = size.height * (next - 1f) / 2f
-                                            val moved = pan + event.calculatePan()
-                                            pan = Offset(moved.x.coerceIn(-limitX, limitX), moved.y.coerceIn(-limitY, limitY))
-                                            zoom = next
-                                            zoomCallback(true)
-                                            event.changes.forEach { it.consume() }
-                                        } else if (transforming) event.changes.forEach { it.consume() }
-                                    } while (event.changes.any { it.pressed })
-                                    if (transforming) zoomCallback(zoom > 1.01f)
+                                    try {
+                                        do {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            val pressed = event.changes.count { it.pressed }
+                                            if (pressed >= 2) {
+                                                if (!transforming) {
+                                                    transforming = true
+                                                    pinching = true
+                                                    zoomCallback(true)
+                                                }
+                                                val factor = event.calculateZoom()
+                                                val next = (zoom * (if (factor.isFinite() && factor > 0f) factor else 1f)).coerceIn(1f, 4f)
+                                                val limitX = size.width * (next - 1f) / 2f
+                                                val limitY = size.height * (next - 1f) / 2f
+                                                val moved = pan + event.calculatePan()
+                                                pan = Offset(moved.x.coerceIn(-limitX, limitX), moved.y.coerceIn(-limitY, limitY))
+                                                zoom = next
+                                                event.changes.forEach { it.consume() }
+                                            } else if (transforming) event.changes.forEach { it.consume() }
+                                        } while (event.changes.any { it.pressed })
+                                    } finally {
+                                        if (transforming) {
+                                            zoom = 1f
+                                            pan = Offset.Zero
+                                            pinching = false
+                                            zoomCallback(false)
+                                        }
+                                    }
                                 }
                             }.graphicsLayer {
                                 scaleX = zoom; scaleY = zoom
@@ -187,7 +201,7 @@ fun HomeMomentScreen(
                     }
 
                     // Caption overlay inside photo (Matches frame_010.jpg)
-                    if (currentMoment.caption.isNotBlank()) {
+                    if (!pinching && currentMoment.caption.isNotBlank()) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -225,7 +239,7 @@ fun HomeMomentScreen(
                 // Nut "..." mo menu tuy chon cua moment (goc co menu tuy
                 // chon tren moment). Nut tron mo nhu top-bar hien tai,
                 // nen mo giong overlay caption trong anh.
-                if (currentMoment != null) {
+                if (currentMoment != null && !pinching) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -251,6 +265,7 @@ fun HomeMomentScreen(
             // User info; caption is shown only once inside the image.
             if (currentMoment != null) {
                 Row(
+                    modifier = Modifier.alpha(if (pinching) 0f else 1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

@@ -82,7 +82,7 @@ fun HomePagerScreen(
     // only the photo, caption and author scroll with the finger.
     val cameraSelected = pagerState.settledPage == 0
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
-    val showChrome = !(cameraSelected && cameraReviewVisible)
+    val showChrome = !(cameraSelected && cameraReviewVisible) && !zoomLocked
     LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
     BackHandler(enabled = showFriendFilter) { showFriendFilter = false }
     SideEffect {
@@ -161,12 +161,14 @@ fun HomePagerScreen(
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 val fromCamera = allowDownGesture
                 var delta = androidx.compose.ui.geometry.Offset.Zero
+                var multiTouch = false
                 do {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (event.changes.count { it.pressed } >= 2 || event.changes.any { it.id != down.id }) multiTouch = true
                     val pointer = event.changes.firstOrNull { it.id == down.id } ?: break
                     delta = pointer.position - down.position
                     if (!pointer.pressed) {
-                        if (fromCamera && allowDownGesture &&
+                        if (!multiTouch && fromCamera && allowDownGesture &&
                             delta.y > 52.dp.toPx() && delta.y > abs(delta.x) * 1.3f) {
                             latestAction()
                         }

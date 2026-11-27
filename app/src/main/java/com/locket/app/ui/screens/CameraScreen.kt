@@ -17,6 +17,10 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.camera.video.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.*
 import android.media.MediaMetadataRetriever
@@ -108,6 +112,9 @@ fun CameraScreen(
     var frontCamera by remember { mutableStateOf(true) }
     val cameraSelector = if (frontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
     var cameraError by remember { mutableStateOf<String?>(null) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
+    var pinchingCamera by remember { mutableStateOf(false) }
+    var cameraZoomRatio by remember { mutableFloatStateOf(1f) }
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
@@ -136,7 +143,7 @@ fun CameraScreen(
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isPosting by remember { mutableStateOf(false) }
-    val canSwipe = recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
+    val canSwipe = !pinchingCamera && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null && !isPosting
     SideEffect {
         onSwipeEnabledChange(canSwipe)
         onReviewVisibleChange(capturedBitmap != null)
@@ -161,6 +168,9 @@ fun CameraScreen(
     DisposableEffect(hasCameraPermission, cameraSelector, lifecycleOwner, previewView) {
         var active = true
         var provider: ProcessCameraProvider? = null
+        boundCamera = null
+        pinchingCamera = false
+        cameraZoomRatio = 1f
         imageCapture = null
         videoCapture = null
         hasFlash = false
@@ -212,6 +222,8 @@ fun CameraScreen(
                                     .build()
                                 cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, group)
                             }
+                            boundCamera = camera
+                            cameraZoomRatio = camera.cameraInfo.zoomState.value?.zoomRatio ?: 1f
                             hasFlash = camera.cameraInfo.hasFlashUnit()
                             imageCapture = photo
                         }
@@ -392,12 +404,67 @@ fun CameraScreen(
                     .aspectRatio(1.0f)
                     .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
+                    .pointerInput(boundCamera) {
+                        val camera = boundCamera ?: return@pointerInput
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var scaling = false
+                            var requestedZoom = cameraZoomRatio
+                            try {
+                                do {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val pressed = event.changes.count { it.pressed }
+                                    if (pressed >= 2) {
+                                        val limits = camera.cameraInfo.zoomState.value
+                                        if (!scaling) {
+                                            scaling = true
+                                            pinchingCamera = true
+                                            requestedZoom = limits?.zoomRatio ?: cameraZoomRatio
+                                        }
+                                        val factor = event.calculateZoom()
+                                        if (limits != null && factor.isFinite() && factor > 0f) {
+                                            val next = (requestedZoom * factor).coerceIn(limits.minZoomRatio, limits.maxZoomRatio)
+                                            if (kotlin.math.abs(next - requestedZoom) > 0.001f) {
+                                                requestedZoom = next
+                                                cameraZoomRatio = next
+                                                // Sensor/use-case zoom: applies to preview, captured photo and video.
+                                                val future = camera.cameraControl.setZoomRatio(next)
+                                                future.addListener({
+                                                    try {
+                                                        future.get()
+                                                    } catch (_: Exception) {
+                                                        // CameraX cancels superseded requests during a pinch.
+                                                    }
+                                                }, ContextCompat.getMainExecutor(context))
+                                            }
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } else if (scaling) {
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            } finally {
+                                pinchingCamera = false
+                            }
+                        }
+                    }
             ) {
                 if (hasCameraPermission) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { previewView }
                     )
+                    if (pinchingCamera && boundCamera != null) {
+                        Text(
+                            text = String.format(java.util.Locale.US, "%.1f×", cameraZoomRatio),
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                                .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
                     cameraError?.let { error ->
                         Text(error, color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp))
                     }
