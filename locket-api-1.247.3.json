@@ -1,0 +1,1222 @@
+{
+  "spec_version": "1.0",
+  "app": {
+    "package": "com.locket.Locket",
+    "version_name": "1.247.3",
+    "version_code": 636,
+    "min_sdk": 27,
+    "target_sdk": 36,
+    "stack": "Expo SDK 54.0.0 + React Native + Hermes HBC v96 (bundle assets/index.android.bundle, 10.6 MB)",
+    "source": "APKPure XAPK, SHA-256 6c8f360ca5fabb0569f8937f8a6729b70d4211a31fb31d036f92af4d5ba191b5 (da verify khop)",
+    "signature": "Play App Signing, cert SHA-1 187a27d3d7364a044307f56e66230f973dccd5b7, cert SHA-256 f7dd2c755cbbdf342b216c453e76e2ffcb34d688e5f91499bec0341648cbcb16",
+    "extracted_from": "decompiled.js (hermes-dec 0.1.8), 1.865.874 dong; static only"
+  },
+  "firebase": {
+    "project_id": "locket-4252a",
+    "api_key": "AIzaSyB5dTd-xiLD5dEfWq5OpptnQtnMpE0W0u8",
+    "api_key_restriction": "Android-restricted: chi chap nhan khi kem header X-Android-Package: com.locket.Locket + X-Android-Cert: 187A27D3D7364A044307F56E66230F973DCCD5B7 (REST khong header -> 403 blocked, da verify 2026-11-27)",
+    "app_id": "1:641029076083:android:eac8183b796b856d4fa606",
+    "sender_id": "641029076083",
+    "default_storage_bucket": "locket-4252a.appspot.com",
+    "storage_buckets": {
+      "default": "locket-4252a.appspot.com",
+      "image": "gs://locket-img",
+      "video": "gs://locket-video",
+      "rollcall": "gs://locket-rollcall"
+    }
+  },
+  "base_url": "https://api.locketcamera.com",
+  "cdn_base_url": "https://cdn.locketcamera.com/",
+  "protocol": {
+    "type": "Firebase Cloud Functions callable (httpsCallable) qua custom domain",
+    "custom_domain_source": "Remote Config key functions_domains, default [\"https://api.locketcamera.com\"], chon ngau nhien 1 entry, cache; rong/null -> SDK fallback us-central1",
+    "method": "POST https://api.locketcamera.com/<callable_name>",
+    "request_body": {
+      "data": "{...payload, analytics: {...}}"
+    },
+    "headers": {
+      "Authorization": "Bearer <Firebase ID token, SDK tu gan>",
+      "Content-Type": "application/json"
+    },
+    "response_envelope": {
+      "status": "number",
+      "errors": "string[] (optional)",
+      "data": "unknown (optional)"
+    },
+    "response_validation": "validateFunctionResponseWithNestedData: throw neu status >= 400 hoac errors non-empty; message = errors[0] hoac 'Unknown cloud function error'",
+    "status_codes": {
+      "200": "OK",
+      "304": "Khong co moment moi (getLatestMomentV2, dung cache)",
+      "400": "Loi client chung / sendVerificationCode -> Other",
+      "451": "Abusive content (ABUSIVE_CONTENT_STATUS_CODE)",
+      "600": "Da ton tai (sendVerificationCode: ExistingPhoneNumber; validateEmailAddress: email da thuoc tk khac)",
+      "601": "Khong tim thay / da dung (sendVerificationCode: UnknownPhoneNumber; updateEmailAddress: email_already_in_use)",
+      "602": "sendVerificationCode: UsePasswordInstead"
+    }
+  },
+  "auth": {
+    "phone_otp_2step": {
+      "step1_callable": "sendVerificationCode",
+      "step1_request": [
+        "phone (E.164)",
+        "operation ('sign_in' | 'change_number', gia tri khac unknown)",
+        "device_model (DeviceInfo.getModel())",
+        "use_password_if_available (tu RC android_auth_config, default true; chi co o onboarding, khong co o doi so)"
+      ],
+      "step1_status": {
+        "600": "ExistingPhoneNumber",
+        "601": "UnknownPhoneNumber",
+        "602": "UsePasswordInstead",
+        "400": "Other"
+      },
+      "step2_method_firebase": "data.method == 'firebase' -> Firebase signInWithPhoneNumber(phone, forceResend=true) -> SMS OTP -> confirmation.confirm(code)",
+      "step2_method_other": "checkVerificationCode({phone, verification_code}) -> data.token -> signInWithCustomToken(token); khong check status, chi check token co mat",
+      "change_number": "sendVerificationCode({phone, operation: 'change_number', device_model}) roi confirm: co Firebase confirmation object -> confirmation.confirm(code), khong co -> verifyEditedPhoneNumber({phone, verification_code}), loi neu data.error hoac status >= 400"
+    },
+    "email": {
+      "signup": "androidSignupRecaptchaEnabled()==false -> createAccountWithEmailPassword({email, password}); ==true -> thu AppCheck truoc, co token -> V1 (token do Functions SDK gan, khong nam trong body); AppCheck null -> reCAPTCHA Enterprise (RecaptchaAction SIGNUP) -> createAccountWithEmailPasswordV2({email, password, recaptcha_token}); response data.token -> signInWithCustomToken",
+      "signin": "signInWithPhonePassword({phone, password}) -> data.token -> signInWithCustomToken",
+      "link_email": "linkEmailPassword({email, password}) -> data.token -> signInWithCustomToken",
+      "change_email": "updateEmailAddress({email}); status 601 = email_already_in_use; data.token -> signInWithCustomToken",
+      "reset_password": "sendPasswordResetEmail({email} neu authType email, {phone} neu khac); yeu cau status 200",
+      "validate_email": "validateEmailAddress({email, operation: 'create_account'}); status 600 = email da ton tai",
+      "finalize_temporary_user": "finalizeTemporaryUser({first_name, last_name, require_username, username}); yeu cau status 200 roi updateProfile displayName",
+      "username": "validateUsername({username}), validateUsernameV2({username, recaptcha_token}), setUsername({username}), setUsernameV2({username, recaptcha_token}), suggestUsernames({first_name, last_name}), getUserByUsername({username})",
+      "note": "Email KHONG dang nhap truc tiep bang FirebaseAuth.signInWithEmail nhu naive-locket 2024; tat ca qua callable cua server"
+    },
+    "appcheck_recaptcha": {
+      "appcheck_provider": "Play Integrity (debug khi co co debug); initializeAppCheck isTokenAutoRefreshEnabled=true; getAppCheckToken(context, screen) dung o buoc signup email truoc reCAPTCHA",
+      "recaptcha": "reCAPTCHA Enterprise; RecaptchaAction LOGIN='login', SIGNUP='signup', custom(action); RC gates (default true): android_signup_recaptcha_enabled, android_usernames_recaptcha_enabled, android_friending_recaptcha_enabled, android_group_membership_recaptcha_enabled, android_data_export_recaptcha_enabled, android_location_caption_recaptcha_enabled",
+      "recaptcha_token_in_body": "createAccountWithEmailPasswordV2, sendFriendRequestV2, validateUsernameV2, setUsernameV2, requestUserDataExport (khi gate bat), groupUserOp/createGroup (co field recaptcha_token)"
+    },
+    "token_refresh": {
+      "id_token": "RNFB Auth getIdToken() / getIdTokenResult(); Groups WS goi getIdToken(true) truoc khi ket noi",
+      "refresh": "Ngoai JS bundle: 0 hit securetoken/grant_type/refresh_token/expiresIn trong decompiled.js; chi co trong native RNFB Auth SDK (dex strings: securetoken.googleapis.com/v1, identitytoolkit.googleapis.com/v2). Firebase Auth SDK tu refresh qua POST securetoken.googleapis.com/v1/token; grant_type=refresh_token, expiresIn=3600 la chuan Firebase Auth, CHUA xac minh tu bundle nay (Wan 1.1.9 dung dung co che nay o native TokenModule)"
+    }
+  },
+  "endpoints": [
+    {
+      "name": "checkVerificationCode",
+      "group": "auth",
+      "request_fields": [
+        "phone",
+        "verification_code"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "createAccountWithEmailPassword",
+      "group": "auth",
+      "request_fields": [
+        "email",
+        "password"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload r6 = a0 của wrapper, do caller build {email: userEmail, password} (@1857188); response data.token = custom token, dùng signInWithCustomToken.",
+      "verified": "static"
+    },
+    {
+      "name": "createAccountWithEmailPasswordV2",
+      "group": "auth",
+      "request_fields": [
+        "email",
+        "password",
+        "recaptcha_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload = copy của {email, password} + recaptcha_token; response data.token = custom token.",
+      "verified": "static"
+    },
+    {
+      "name": "finalizeTemporaryUser",
+      "group": "auth",
+      "request_fields": [
+        "first_name",
+        "last_name",
+        "require_username",
+        "username"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 200 = ok.",
+      "verified": "static"
+    },
+    {
+      "name": "linkEmailPassword",
+      "group": "auth",
+      "request_fields": [
+        "email",
+        "password"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "sendPasswordResetEmail",
+      "group": "auth",
+      "request_fields": [
+        "phone",
+        "email"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Chỉ 1 trong 2 field tùy loại đăng nhập (phone hoặc email); status 200 = ok, khác -> 'Failed to send password reset email'. Các hit @953154/@957818 là Firebase Auth native SDK (r0.native.sendPasswordResetEmail), KHÔNG phải callable này.",
+      "verified": "static"
+    },
+    {
+      "name": "sendVerificationCode",
+      "group": "auth",
+      "request_fields": [
+        "phone",
+        "operation",
+        "device_model",
+        "use_password_if_available"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "600 = ExistingPhoneNumber (số đã có tài khoản, dialog account_already_exists); 601 = UnknownPhoneNumber; 602 = UsePasswordInstead; 400 = Other; 200 + data.method='firebase' -> tiếp tục Firebase signInWithPhoneNumber. Luồng đổi số @1359495: 600 -> ném PhoneVerificationError 'couldnt_verify_number'.",
+      "verified": "static"
+    },
+    {
+      "name": "setUsername",
+      "group": "auth",
+      "request_fields": [
+        "username"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "setUsernameV2",
+      "group": "auth",
+      "request_fields": [
+        "username",
+        "recaptcha_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "signInWithPhonePassword",
+      "group": "auth",
+      "request_fields": [
+        "phone",
+        "password"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "suggestUsernames",
+      "group": "auth",
+      "request_fields": [
+        "first_name",
+        "last_name"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "updateEmailAddress",
+      "group": "auth",
+      "request_fields": [
+        "email"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "validateEmailAddress",
+      "group": "auth",
+      "request_fields": [
+        "email",
+        "operation"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "600 = email đã thuộc tài khoản khác (dialog email_account_already_exists, log logAttemptedAddEmailToExistingAccount); 200 = ok.",
+      "verified": "static"
+    },
+    {
+      "name": "validateUsername",
+      "group": "auth",
+      "request_fields": [
+        "username"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "validateUsernameV2",
+      "group": "auth",
+      "request_fields": [
+        "username",
+        "recaptcha_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "verifyEditedPhoneNumber",
+      "group": "auth",
+      "request_fields": [
+        "phone",
+        "verification_code"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Lỗi nếu data.error có giá trị hoặc status>=400 -> ném PhoneVerificationError ('couldnt_verify_number' / 'make_sure_you_entered_the_verification_code_correctly').",
+      "verified": "static"
+    },
+    {
+      "name": "deleteMomentV2",
+      "group": "moment",
+      "request_fields": [
+        "owner_uid",
+        "moment_uid",
+        "delete_globally"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getLatestMomentV2",
+      "group": "moment",
+      "request_fields": [
+        "should_count_missed_moments",
+        "last_fetch",
+        "sync_token",
+        "include_group_moments"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 304 = không có moment mới (bỏ qua xử lý); 200 + data[0] = moment mới nhất (canonical_uid, video_url, thumbnail_url, caption, user, date._seconds/_nanoseconds, overlays, md5, group_id).",
+      "verified": "static"
+    },
+    {
+      "name": "getMomentViews",
+      "group": "moment",
+      "request_fields": [
+        "moment_uid",
+        "end_before"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getSampledMoments",
+      "group": "moment",
+      "request_fields": [
+        "start",
+        "end",
+        "count"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Log lỗi 'getSampledMoments failed (status ...' khi thất bại.",
+      "verified": "static"
+    },
+    {
+      "name": "markMomentAsViewed",
+      "group": "moment",
+      "request_fields": [
+        "moment_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "markReactionAsViewed",
+      "group": "moment",
+      "request_fields": [
+        "moment_uid",
+        "reaction_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "postMomentV2",
+      "group": "moment",
+      "request_fields": [
+        "thumbnail_url",
+        "caption",
+        "recipients",
+        "overlays",
+        "md5",
+        "group.id",
+        "group.message_client_token",
+        "video_url"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "group chỉ có khi group_id set (group={id, message_client_token}); payload merge thêm getStreakUploadPayload() qua copyDataProperties (field streak không xác định tĩnh được); sau khi post, nếu androidAbusiveContentHandlingEnabled thì assertPostMomentSucceeded.",
+      "verified": "static"
+    },
+    {
+      "name": "reactToMoment",
+      "group": "moment",
+      "request_fields": [
+        "moment_uid",
+        "owner_uid",
+        "reaction",
+        "intensity"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "reportMoment",
+      "group": "moment",
+      "request_fields": [
+        "owner_uid",
+        "moment_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 200 = ok; log 'reportMoment failed' khi lỗi.",
+      "verified": "static"
+    },
+    {
+      "name": "acceptFriendRequest",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "blockFriend",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "deleteFollowRequest",
+      "group": "friend",
+      "request_fields": [
+        "user_uid",
+        "direction"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "deleteFriendRequest",
+      "group": "friend",
+      "request_fields": [
+        "user_uid",
+        "direction"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getFriendRecommendations",
+      "group": "friend",
+      "request_fields": [
+        "dismissed_user_ids",
+        "version"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getFriendshipStatus",
+      "group": "friend",
+      "request_fields": [
+        "user_id"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "removeFriend",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 401 hoặc response.errors khác rỗng -> throw 'error removing friend'. Các hit @1608953/@1774859 chỉ là đọc method removeFriend của hook useFriends(), không phải lời gọi callable.",
+      "verified": "static"
+    },
+    {
+      "name": "sendFollowRequest",
+      "group": "friend",
+      "request_fields": [
+        "celebrity_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "sendFriendRequest",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload {user_uid} là mutation variables của useSendFriendRequest (vd caller @1587273 build {user_uid}); V2 = copy + recaptcha_token.",
+      "verified": "static"
+    },
+    {
+      "name": "sendFriendRequestV2",
+      "group": "friend",
+      "request_fields": [
+        "user_uid",
+        "recaptcha_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload = copy của {user_uid} + recaptcha_token (khi recaptcha bật; ngược lại gọi sendFriendRequest).",
+      "verified": "static"
+    },
+    {
+      "name": "suggestFriends",
+      "group": "friend",
+      "request_fields": [
+        "contacts"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "toggleFriendHidden",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "unblockUser",
+      "group": "friend",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "createGroup",
+      "group": "group",
+      "request_fields": [
+        "name",
+        "image_url",
+        "users",
+        "initial_message.content",
+        "initial_message.client_token",
+        "initial_message.intensity",
+        "recaptcha_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "initial_message là object lồng {content, client_token, intensity} (null-safe). Hit @1266567 là định nghĩa wrapper trong group-client.",
+      "verified": "static"
+    },
+    {
+      "name": "getGroupChatsUpdates",
+      "group": "group",
+      "request_fields": [
+        "groups"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getGroupMessages",
+      "group": "group",
+      "request_fields": [
+        "group_id",
+        "before_timestamp",
+        "limit",
+        "client_cache_options.current_messages"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "client_cache_options.current_messages = [{id, created_at}]. Hit @1266555 là định nghĩa wrapper trong group-client, không phải lời gọi callable.",
+      "verified": "static"
+    },
+    {
+      "name": "getGroupsState",
+      "group": "group",
+      "request_fields": [
+        "current_group_ids",
+        "last_fetched_at"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "groupChatOp",
+      "group": "group",
+      "request_fields": [
+        "type",
+        "group_id",
+        "client_token",
+        "intensity",
+        "message",
+        "moment_id",
+        "timestamp",
+        "message_id",
+        "emoji",
+        "muted"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Field thay đổi theo op type: @1274738 send-message {type,group_id,client_token,intensity,message,moment_id}; @1274878 {type,group_id,timestamp}; @1274957/@1275249/@1275435 {type,group_id,message_id}; @1275072 {type,group_id,message_id,emoji}; @1275373 {type,group_id,muted}.",
+      "verified": "static"
+    },
+    {
+      "name": "groupUserOp",
+      "group": "group",
+      "request_fields": [
+        "type",
+        "group_id",
+        "user_id",
+        "recaptcha_token",
+        "timestamp",
+        "fully_remove_self"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "@1274433 {type,group_id,user_id,recaptcha_token}; @1274543 thêm {timestamp, fully_remove_self}.",
+      "verified": "static"
+    },
+    {
+      "name": "updateGroup",
+      "group": "group",
+      "request_fields": [
+        "group_id",
+        "name",
+        "image_url"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "@1274289 {group_id,name}; @1274358 {group_id,image_url}.",
+      "verified": "static"
+    },
+    {
+      "name": "deleteChatMessage",
+      "group": "chat",
+      "request_fields": [
+        "message_uid",
+        "conversation_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 200 = ok.",
+      "verified": "static"
+    },
+    {
+      "name": "markAsRead",
+      "group": "chat",
+      "request_fields": [
+        "conversation_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Wrapper group-client @1266628 chỉ forward arg đầu (không xác định tĩnh được); field conversation_uid từ callsite 1:1 @1732631.",
+      "verified": "static"
+    },
+    {
+      "name": "removeChatMessageReaction",
+      "group": "chat",
+      "request_fields": [
+        "conversation_id",
+        "message_id",
+        "emoji"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Chung 1 đoạn code với sendChatMessageReaction, chọn send/remove theo flag; call chung @1733567.",
+      "verified": "static"
+    },
+    {
+      "name": "reportMessage",
+      "group": "chat",
+      "request_fields": [
+        "message_uid",
+        "conversation_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Wrapper group-client @1266674 chỉ forward arg đầu (không xác định tĩnh được); field từ callsite @1733030.",
+      "verified": "static"
+    },
+    {
+      "name": "sendChatMessageReaction",
+      "group": "chat",
+      "request_fields": [
+        "conversation_id",
+        "message_id",
+        "emoji"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Chung 1 đoạn code với removeChatMessageReaction, chọn send/remove theo flag; call chung @1733567.",
+      "verified": "static"
+    },
+    {
+      "name": "sendChatMessageV2",
+      "group": "chat",
+      "request_fields": [
+        "msg",
+        "receiver_uid",
+        "moment_uid",
+        "client_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "changeProfileInfo",
+      "group": "user",
+      "request_fields": [
+        "profile_picture_url",
+        "badge",
+        "first_name",
+        "last_name",
+        "birthday.encoded_mdd",
+        "username_discoverability_disabled",
+        "targeted_ads_opt_out"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Mỗi callsite update 1 field riêng: profile_picture_url (@1336449/@1336570), badge (@1357298), first_name+last_name (@1456708), birthday={encoded_mdd} (@1473306), username_discoverability_disabled (@1477608), targeted_ads_opt_out (@1477726).",
+      "verified": "static"
+    },
+    {
+      "name": "deleteUserAccount",
+      "group": "user",
+      "request_fields": [],
+      "request_fields_unknown": false,
+      "response_notes": "Gọi với object rỗng {}.",
+      "verified": "static"
+    },
+    {
+      "name": "fetchUserV2",
+      "group": "user",
+      "request_fields": [
+        "user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 200 -> data.data parse qua safeParseUser rồi cache (setUser/setTimestamp); response trả kèm phone=null.",
+      "verified": "static"
+    },
+    {
+      "name": "fetchUsers",
+      "group": "user",
+      "request_fields": [
+        "user_uids"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getUserByUsername",
+      "group": "user",
+      "request_fields": [
+        "username"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "status 200 = ok.",
+      "verified": "static"
+    },
+    {
+      "name": "requestUserDataExport",
+      "group": "user",
+      "request_fields": [
+        "email"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload {email} do submit handler t8 build từ email state (@1478963); khi androidDataExportRecaptchaEnabled thì gửi copy + recaptcha_token. Response data.status 'pending'|'completed' (completed -> file_url).",
+      "verified": "static"
+    },
+    {
+      "name": "setNotificationToken",
+      "group": "user",
+      "request_fields": [
+        "notification_token",
+        "installation_id"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Response validate bằng validateFunctionResponseWithNestedData. Hit @950885 gọi wrapper setNotificationToken của module 2568 với data null (luồng sign-out), không phải callable trực tiếp.",
+      "verified": "static"
+    },
+    {
+      "name": "setUserPreferences",
+      "group": "user",
+      "request_fields": [
+        "preferences"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "deleteRollcallComment",
+      "group": "rollcall",
+      "request_fields": [
+        "post_uid",
+        "post_user_uid",
+        "post_comment_id"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "deleteRollcallPost",
+      "group": "rollcall",
+      "request_fields": [
+        "post_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "getRollcallPosts",
+      "group": "rollcall",
+      "request_fields": [
+        "year",
+        "week_of_year"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "queryFn validate payload bằng GetRollcallPostsRequestSchema; callsite initialData @1293274 truyền thẳng _closure2_slot0 (userUid) — không khớp schema {year, week_of_year}.",
+      "verified": "static"
+    },
+    {
+      "name": "likeRollcallComment",
+      "group": "rollcall",
+      "request_fields": [
+        "post_uid",
+        "post_user_uid",
+        "post_comment_id",
+        "like"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "postRollcall",
+      "group": "rollcall",
+      "request_fields": [
+        "week_of_year",
+        "year",
+        "items",
+        "tagged_users"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Payload build @1347500: week_of_year/year từ arg, items = processed assets, tagged_users = arg thứ 5 (optional). Hit @1841806 là lời gọi wrapper postRollcall, không phải callable trực tiếp.",
+      "verified": "static"
+    },
+    {
+      "name": "postRollcallComment",
+      "group": "rollcall",
+      "request_fields": [
+        "body",
+        "post_item_uid",
+        "post_uid",
+        "post_user_uid",
+        "reply_user_uid",
+        "postUid",
+        "postItemUid",
+        "postUserUid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "2 shape: snake_case @1347896 {body,post_item_uid,post_uid,post_user_uid,reply_user_uid} và camelCase @1831102 {body,postUid,postItemUid,postUserUid}.",
+      "verified": "static"
+    },
+    {
+      "name": "postRollcallReaction",
+      "group": "rollcall",
+      "request_fields": [
+        "post_item_uid",
+        "post_uid",
+        "post_user_uid",
+        "reaction",
+        "scale",
+        "x",
+        "y",
+        "rotation",
+        "postItemUid",
+        "postUid",
+        "postUserUid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "2 shape: snake_case @1348007 {post_item_uid,post_uid,post_user_uid,reaction,scale,x,y,rotation} và camelCase @1835395 {postItemUid,postUid,postUserUid,reaction,rotation}.",
+      "verified": "static"
+    },
+    {
+      "name": "reportRollcallComment",
+      "group": "rollcall",
+      "request_fields": [
+        "post_uid",
+        "post_user_uid",
+        "post_comment_id"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "reportRollcallPost",
+      "group": "rollcall",
+      "request_fields": [
+        "post_uid",
+        "post_user_uid"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "checkLinkBasedRewardedReferralRedemption",
+      "group": "referral",
+      "request_fields": [
+        "referral_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "fetchRewardedReferrals",
+      "group": "referral",
+      "request_fields": [],
+      "request_fields_unknown": false,
+      "response_notes": "Gọi không có argument.",
+      "verified": "static"
+    },
+    {
+      "name": "getLinkBasedRewardedReferralSenderState",
+      "group": "referral",
+      "request_fields": [
+        "campaign"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "linkBasedRewardedReferralRecipientOp",
+      "group": "referral",
+      "request_fields": [
+        "type",
+        "referral_token",
+        "phone",
+        "verification_code",
+        "is_retry"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "@1236073 {type,referral_token,phone,verification_code}; @1236135 {type,referral_token,phone,is_retry}.",
+      "verified": "static"
+    },
+    {
+      "name": "linkBasedRewardedReferralSenderPhoneOp",
+      "group": "referral",
+      "request_fields": [
+        "type",
+        "phone",
+        "is_retry",
+        "verification_code"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "3 dạng call: @1235813 {type,phone,is_retry}; @1235871 {type}; @1236014 {type,phone,verification_code}.",
+      "verified": "static"
+    },
+    {
+      "name": "fetchUserForInviteToken",
+      "group": "invite",
+      "request_fields": [
+        "invite_token"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Validate response: phải có user data; nếu là celebrity thì phải có celebrity_data.",
+      "verified": "static"
+    },
+    {
+      "name": "generateInviteToken",
+      "group": "invite",
+      "request_fields": [],
+      "request_fields_unknown": false,
+      "response_notes": "Gọi không có argument.",
+      "verified": "static"
+    },
+    {
+      "name": "createDynamicLink",
+      "group": "misc",
+      "request_fields": [
+        "dynamicLinkInfo"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    },
+    {
+      "name": "reportAd",
+      "group": "misc",
+      "request_fields": [
+        "auction_id",
+        "placement_id",
+        "auction_type",
+        "content_type",
+        "markup",
+        "network",
+        "reason"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Thành công iff data.status===200 (số 422 trong file là jump target, không phải status code).",
+      "verified": "static"
+    },
+    {
+      "name": "resolveDynamicLink",
+      "group": "misc",
+      "request_fields": [
+        "link"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "Hit @1673475 là Firebase Dynamic Links SDK resolveDynamicLink(url string, module 3056), KHÔNG phải callable này.",
+      "verified": "static"
+    },
+    {
+      "name": "sendSupportMessage",
+      "group": "misc",
+      "request_fields": [
+        "email",
+        "body",
+        "app_build",
+        "app_version",
+        "beta_tester",
+        "tags",
+        "debug_info"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "debug_info chỉ thêm khi androidSendDebugInfo bật; body = device-info + '\\n\\n' + message; status 200 = ok.",
+      "verified": "static"
+    },
+    {
+      "name": "setClientData",
+      "group": "misc",
+      "request_fields": [
+        "time_zone",
+        "experiments.android_rollcall_notifications_v2"
+      ],
+      "request_fields_unknown": false,
+      "response_notes": "",
+      "verified": "static"
+    }
+  ],
+  "storage": {
+    "buckets": {
+      "image": "gs://locket-img",
+      "video": "gs://locket-video",
+      "rollcall": "gs://locket-rollcall",
+      "default_fallback": "locket-4252a.appspot.com"
+    },
+    "moment_thumbnail": {
+      "path": "users/{uid}/moments/thumbnails/{randomId}{ext}",
+      "random_id": "20 ky tu A-Za-z0-9 qua Math.random (KHONG phai UUID)",
+      "content_type": "image/webp neu duoi .webp, nguoc lai image/jpeg",
+      "cache_control": "RC image_upload_cache_control, default 'public, max-age=604800'",
+      "thumbnail_resize": "RC android_upload_thumbnail_image_quality=0.83, size=1020, use_webp_thumbnail=true"
+    },
+    "moment_video": {
+      "path": "users/{uid}/moments/videos/{randomId}.mp4",
+      "cache_control": "RC video_upload_cache_control, default 'public, max-age=604800'"
+    },
+    "rollcall": {
+      "path": "users/{uid}/rollcall_posts/{a2_unknown_segment}/{fileId}.{jpg|webp}",
+      "custom_metadata": {
+        "creator": "{uid}",
+        "visibility": "private"
+      },
+      "note": "y nghia segment a2 + mapping tham so processAssetSafely chua trace xong -> unknown"
+    },
+    "download_url": "ref(fullPath).getDownloadURL() sau moi upload; URL dung lam thumbnail_url / video_url gui postMomentV2",
+    "md5": "MD5 hex cua chuoi base64 thumbnail (expo-crypto digestStringAsync MD5); anh camera-roll: base64 + '_' + Date.now() truoc khi hash",
+    "note": "Khong co signed-URL, khong co direct-upload HTTP, khong co endpoint upload REST — upload la Firebase Storage SDK thuan"
+  },
+  "firestore": {
+    "databases": {
+      "default": "(default) — users, moments, conversations",
+      "history": "locket — collection history/{uid}/entries"
+    },
+    "collections": {
+      "users/{uid}": "doc user; getUserByUid",
+      "users/{uid}/friends": "listener onSnapshot",
+      "users/{uid}/incoming_friend_requests": "listener onSnapshot",
+      "users/{uid}/outgoing_friend_requests": "listener onSnapshot",
+      "users/{uid}/conversations": "listener onSnapshot",
+      "users/{uid}/deleted_moments": "listener, orderBy('date','desc')",
+      "users/{uid}/blocked_users": "listener onSnapshot",
+      "history/{uid}/entries (db locket)": "listener onSnapshot, query where('user','==',...) + orderBy('date','desc') + startAt/endAt",
+      "moments/{uid}/reactions": "listener onSnapshot",
+      "conversations/{id}/messages": "listener onSnapshot, orderBy"
+    },
+    "auth_metadata": "authorization: Bearer <ID token> (gRPC interceptor o Wan; JS SDK tu gan o goc)"
+  },
+  "websocket": {
+    "url": "wss://api.locketcamera.com/wss_v2/groups (RC groups_websocket_url, default tu app.config)",
+    "headers": {
+      "Authorization": "Bearer <ID token, force refresh getIdToken(true)>",
+      "X-Client-Platform": "android",
+      "X-Client-Version": "<app version>"
+    },
+    "direction": "receive-only: KHONG co ws.send trong code — client chi nhan, khong gui qua WS",
+    "message_types": {
+      "connected": "mo stream khi onopen",
+      "groupUpdates": "{type, groupId (msg.group_id neu string)}",
+      "groupChatUpdate": "{type, payload: toan bo message}"
+    },
+    "reconnect": "manager boc reconnect + AppState (disconnect khi khong active) + NetInfo (disconnect khi offline)",
+    "feature_modes": [
+      "enabled",
+      "sync_only",
+      "sync_enabled_no_creation",
+      "websocket_only",
+      "disabled"
+    ],
+    "feature_modes_note": "computeIsGroupsEnabled voi mode 'sync_only' chua xac minh chac chan",
+    "heartbeat": "RC websocket_groups_heartbeat_interval default 30 — KHONG co usage trong JS, co che heartbeat unknown"
+  },
+  "analytics": {
+    "merged_into": "MOI callable tai callableFunction: payload gui di = merge(userPayload, analyticsParams())",
+    "structure": {
+      "analytics": {
+        "platform": "android",
+        "android_build": "DeviceInfo.getBuildNumber()",
+        "android_version": "DeviceInfo.getVersion()",
+        "experiments": "android_flag_1..android_flag_10 (HELPER_FLAG_COUNT=10, gia tri tu RC getNumber('android_flag_N'))"
+      },
+      "amplitude": {
+        "session_id": "Amplitude.getInstance().getSessionId()",
+        "device_id": "Amplitude.getInstance().getDeviceId()",
+        "note": "chi them khi ca hai truthy"
+      },
+      "google_analytics": {
+        "app_instance_id": "firebase.analytics().getAppInstanceId()",
+        "note": "chi them khi truthy"
+      }
+    },
+    "notes": [
+      "setAnalyticsUserId: chua xac minh la Amplitude hay Firebase Analytics",
+      "isAmplitudeEventRemotelyEnabled(eventName): RC remotely_enabled_amplitude_events (JSON array), ten event bi gate chua trace",
+      "android_readops_amplitude_logging (RC default false): hanh vi gate chua trace",
+      "getHelperPerfFlag (android_perf_flag_N): usage chua trace"
+    ],
+    "live_test_note": "Test live 2026-11-27: postMomentV2 tra 200 khi KHONG co analytics trong body — server hien tai khong bat buoc analytics (xem live_test_evidence)"
+  },
+  "remote_config": {
+    "refresh_interval_seconds": 43200,
+    "api_relevant_defaults": {
+      "functions_domains": "[\"https://api.locketcamera.com\"]",
+      "storage_bucket": "gs://locket-img",
+      "video_storage_bucket": "gs://locket-video",
+      "rollcall_storage_bucket": "gs://locket-rollcall",
+      "image_upload_cache_control": "public, max-age=604800",
+      "video_upload_cache_control": "public, max-age=604800",
+      "android_upload_thumbnail_image_quality": 0.83,
+      "android_upload_thumbnail_image_size": 1020,
+      "android_upload_use_webp_thumbnail": true,
+      "android_signup_recaptcha_enabled": true,
+      "android_usernames_recaptcha_enabled": true,
+      "android_friending_recaptcha_enabled": true,
+      "android_group_membership_recaptcha_enabled": true,
+      "android_data_export_recaptcha_enabled": true,
+      "android_location_caption_recaptcha_enabled": true,
+      "android_abusive_content_handling_enabled": false,
+      "android_readops_amplitude_logging": false,
+      "groups_feature_mode": "enabled",
+      "groups_user_limit": 16,
+      "groups_websocket_url": "wss://api.locketcamera.com/wss_v2/groups",
+      "groups_force_full_refetch_on_cold_start": "",
+      "websocket_groups_heartbeat_interval": 30,
+      "max_friends_count": 20,
+      "android_fetch_users_batch_size": 20,
+      "android_auth_config": {
+        "auth_button_config": "bifurcated",
+        "create_account_auth_type_config": "email",
+        "sign_in_auth_type_config": "email_primary_phone_secondary",
+        "prompt_for_email_after_phone_sign_in": true,
+        "allow_skip_email_after_phone_sign_in": true,
+        "unlink_phone_number_setting": false,
+        "use_password_for_phone_auth": true,
+        "allow_skip_email_existing_user": true,
+        "prompt_username_sign_up": false,
+        "prompt_username_sign_in": false,
+        "allow_skip_username_sign_in": false
+      },
+      "android_rollcall_enabled": true,
+      "android_rollcall_banner_config": {
+        "display_mode": "off",
+        "recurring_schedule": null,
+        "profile_always": true
+      },
+      "streak_config": {
+        "enabled": true,
+        "enable_streak_record": true,
+        "minimum_display_count": 0,
+        "widget_streak_visibility_setting_enabled": true,
+        "calendar_minimum_streak_visualization_count": 1
+      },
+      "android_camera_video_recording": {
+        "default": {
+          "maximum_duration": 2500,
+          "size": 720,
+          "file_type": "mp4"
+        },
+        "gold": {
+          "maximum_duration": 10000,
+          "size": 720,
+          "file_type": "mp4"
+        }
+      },
+      "remotely_enabled_amplitude_events": "khong co default (RC getString, JSON array)"
+    },
+    "note": "Default false o day la fallback khi server khong day RC — gia tri that tren production do server RC quyet. Bang default day du ~90 keys xem flows_extracted.md muc 8."
+  },
+  "live_test_evidence": {
+    "date": "2026-11-27",
+    "method": "Python script (orig/test_naive_api.py): sign-in email/password qua identitytoolkit REST (kem header X-Android-Package/X-Android-Cert) -> upload anh test len bucket locket-img -> POST postMomentV2 -> fetchUserV2 + getLatestMomentV2",
+    "test_image": "anh vuong xanh tron 512x512 tu tao, khong noi dung ca nhan; caption 'test naive api 2024'",
+    "results": {
+      "signin_identitytoolkit": "200 OK",
+      "storage_upload_locket_img": "200 OK",
+      "postMomentV2_shape_2024": "200, tao moment that (thumbnail_url/caption/md5 that/recipients/overlays, KHONG analytics trong body)",
+      "fetchUserV2": "200 OK",
+      "getLatestMomentV2": "200 OK"
+    },
+    "unauthenticated_probes_same_day": "postMomentV2/fetchUserV2/getLatestMomentV2 khong token -> 200 {result:{errors:['Please sign in'],status:401}}; Bearer gia -> {error:{message:'Unauthenticated',status:'UNAUTHENTICATED'}}",
+    "conclusion": "API shape 2024 van duoc backend hien tai chap nhan, ke ca khong co analytics merge",
+    "note": "Moment test da dang len acc test cua user, user tu xoa. Email/password acc test KHONG luu trong bat ky file nao."
+  },
+  "unverified_needs_runtime_traffic": [
+    "Request nao thuc su chay luc runtime; postMomentV2 co bi chan khi thieu/khac analytics khong",
+    "Gia tri literal cua enum SendVerificationErrorCode",
+    "sendVerificationCode operation ngoai 'sign_in'/'change_number'; validateEmailAddress operation tai call site truyen bang bien",
+    "grant_type/expiresIn cua refresh token (native SDK)",
+    "Y nghia segment a2 trong path rollcall + mapping tham so processAssetSafely",
+    "computeIsGroupsEnabled voi mode 'sync_only'; heartbeat Groups WS",
+    "setAnalyticsUserId dung Amplitude hay Firebase Analytics; ten event bi isAmplitudeEventRemotelyEnabled gate",
+    "Noi dung day du cac default JSON.stringify(getDefault...()) (paywall, upsell, quick reactions, camera config...)",
+    "Gia tri return cua finalizeTemporaryUser khi status != 200",
+    "Tong so callable chinh xac (mot so slot r-number trong)"
+  ]
+}
