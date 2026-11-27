@@ -82,6 +82,13 @@ jobs:
           fi
           # Compare against the latest existing version and the first known
           # signed update (23). Never publish a breaking signing-key migration.
+          # Exception (one-time rotation approved by the owner 2026-11-27):
+          # v1.0.23 and v1.0.24 were published before the persistent keystore
+          # existed, so they were signed with ephemeral runner-generated
+          # debug keys that are lost forever. Their certificates can never
+          # match the configured keystore. From the next release on, the
+          # keystore key is the single source of truth (checked above), so
+          # the comparison below passes again for every newer release.
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
             latest="$(printf '%s\n' "$releases" | grep -E '^v1\.0\.[0-9]+$' | sort -V | tail -n1 || true)"
@@ -92,6 +99,10 @@ jobs:
             for tag in "$latest" v1.0.23; do
               [[ -n "$tag" ]] || continue
               if ! printf '%s\n' "$releases" | grep -Fxq "$tag"; then continue; fi
+              if [[ "$tag" == "v1.0.23" || "$tag" == "v1.0.24" ]]; then
+                echo "::warning::Skipping certificate comparison for $tag (pre-keystore release, one-time rotation approved 2026-11-27)."
+                continue
+              fi
               previous="$RUNNER_TEMP/previous-$tag.apk"
               gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "Locket-${tag#v}.apk" --output "$previous" --clobber
               prior="$(certificate "$previous")"
