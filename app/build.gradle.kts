@@ -78,6 +78,9 @@ dependencies {
     implementation("androidx.camera:camera-view:$cameraxVersion")
     implementation("androidx.camera:camera-video:$cameraxVersion")
     implementation("androidx.camera:camera-extensions:$cameraxVersion")
+    // CameraX exposes ListenableFuture in its public APIs. Provide the actual
+    // class on both compile and runtime classpaths (not the empty conflict marker).
+    implementation("com.google.guava:guava:33.4.8-android")
 
     // Coil for Compose image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
