@@ -77,14 +77,14 @@ fun HomeMomentScreen(
                 onAvatarClick = onOpenProfile
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.weight(0.8f))
 
             // Main Moment Squircle Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.0f)
-                    .clip(RoundedCornerShape(36.dp))
+                    .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
                     .clickable {
                         // Bam 1 lan vao moment = tra loi bang anh: mo camera, nguoi nhan
@@ -161,9 +161,9 @@ fun HomeMomentScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // User Info under photo: avatar + "Hiếu 💛 8m" + caption
+            // User info; caption is shown only once inside the image.
             if (currentMoment != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -171,7 +171,7 @@ fun HomeMomentScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(27.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF2C2C2E)),
                         contentAlignment = Alignment.Center
@@ -194,33 +194,27 @@ fun HomeMomentScreen(
                     }
 
                     Text(
-                        text = currentMoment.userName,
+                        text = currentMoment.userName.trim().substringBefore(' ').ifBlank { currentMoment.userUid },
                         color = Color.White,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
 
-                    Text(
-                        text = "💛",
-                        fontSize = 14.sp
+                    Icon(
+                        Icons.Default.Favorite,
+                        contentDescription = null,
+                        tint = LocketYellow,
+                        modifier = Modifier.size(18.dp)
                     )
 
                     Text(
-                        text = currentMoment.timeAgo,
+                        text = momentAge(currentMoment.timestampSeconds),
                         color = LocketTextDim,
                         fontSize = 16.sp
                     )
                 }
 
-                if (currentMoment.caption.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = currentMoment.caption,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -230,8 +224,9 @@ fun HomeMomentScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .liquidGlassEffect(RoundedCornerShape(28.dp), backgroundColor = Color(0xD9222224))
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(Color(0xFF202022))
+                    .padding(horizontal = 10.dp, vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Text input
@@ -272,7 +267,7 @@ fun HomeMomentScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = emoji, fontSize = 20.sp)
+                        Text(text = emoji, fontSize = 26.sp)
                     }
                 }
 
@@ -325,7 +320,7 @@ fun HomeMomentScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Feed Bottom Navigation Bar (Matches 04-home-moment.jpg)
             FeedBottomBar(
@@ -333,7 +328,8 @@ fun HomeMomentScreen(
                 onHistoryClick = { onNavigate("history") },
                 onShutterClick = { onNavigate("camera") },
                 onChatClick = { onNavigate("chat") },
-                onShareClick = { onNavigate("profile") }
+                onShareClick = { onNavigate("profile") },
+                separated = true
             )
         }
 
@@ -361,4 +357,14 @@ private fun Modifier.animateFloatingReaction(onEnd: () -> Unit): Modifier {
     return this
         .offset(y = (-100 * animVal).dp)
         .scale(1f + 0.4f * (1f - animVal))
+}
+
+private fun momentAge(timestamp: Long): String {
+    val seconds = ((System.currentTimeMillis() / 1000) - timestamp).coerceAtLeast(0)
+    return when {
+        seconds < 60 -> "vừa xong"
+        seconds < 3600 -> "${seconds / 60}m"
+        seconds < 86400 -> "${seconds / 3600}h"
+        else -> "${seconds / 86400}d"
+    }
 }

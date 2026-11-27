@@ -468,9 +468,8 @@ fun CameraScreen(
                     ) {
                         Box(Modifier.size(9.dp).background(Color(0xFFFF453A), CircleShape))
                         Text(
-                            text = java.lang.String.format(java.util.Locale.ROOT, "%02d:%02d.%d",
-                                recordingElapsedMs / 60000,
-                                recordingElapsedMs / 1000 % 60,
+                            text = java.lang.String.format(java.util.Locale.ROOT, "%d.%d s",
+                                recordingElapsedMs / 1000,
                                 recordingElapsedMs / 100 % 10),
                             color = Color.White,
                             fontSize = 18.sp,

@@ -3,7 +3,10 @@ package com.locket.app.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.*
@@ -31,6 +34,9 @@ fun HomePagerScreen(
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
+    val loading by viewModel.historyLoading.collectAsState()
+    val hasMore by viewModel.historyHasMore.collectAsState()
+    val error by viewModel.historyError.collectAsState()
     val moments = remember(allMoments, selectedFriend) {
         allMoments.filter { selectedFriend == null || it.userUid == selectedFriend?.uid }
             .sortedByDescending { it.timestampSeconds }
@@ -38,7 +44,7 @@ fun HomePagerScreen(
     // Keep an honest empty-feed page while the real cache/network is loading.
     val pagerState = rememberPagerState(
         initialPage = if (startOnCamera) 0 else initialMomentIndex.coerceIn(0, (moments.size - 1).coerceAtLeast(0)) + 1,
-        pageCount = { 1 + moments.size.coerceAtLeast(1) }
+        pageCount = { 1 + moments.size + if (hasMore || moments.isEmpty()) 1 else 0 }
     )
     val scope = rememberCoroutineScope()
     var cameraSwipeEnabled by remember { mutableStateOf(true) }
@@ -54,6 +60,15 @@ fun HomePagerScreen(
 
     LaunchedEffect(pagerState.settledPage) {
         if (pagerState.settledPage == 0) viewModel.selectFriend(null)
+    }
+
+    // Prefetch before the last cached image; a dedicated trailing page stays
+    // available if the server is still loading or a filtered page has no match.
+    LaunchedEffect(pagerState.currentPage, moments.size, loading, hasMore, error) {
+        if (pagerState.currentPage > 0 && pagerState.currentPage >= (moments.size - 3).coerceAtLeast(1) &&
+            hasMore && !loading && error == null) {
+            viewModel.loadOlderMoments()
+        }
     }
 
     fun openLatest() {
@@ -116,6 +131,15 @@ fun HomePagerScreen(
                 onOpenProfile = onOpenProfile,
                 onSwipeEnabledChange = { cameraSwipeEnabled = it }
             )
+        } else if (page > moments.size) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (loading) CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
+                    Text(error ?: if (hasMore) "Đang tải ảnh cũ..." else "Chưa có khoảnh khắc nào", color = Color.White)
+                    if (error != null) TextButton(onClick = { viewModel.loadOlderMoments() }) { Text("Thử lại") }
+                    TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) { Text("Về camera") }
+                }
+            }
         } else {
             HomeMomentScreen(
                 viewModel = viewModel,

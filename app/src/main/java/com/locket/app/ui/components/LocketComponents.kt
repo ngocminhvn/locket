@@ -242,8 +242,39 @@ fun FeedBottomBar(
     onHistoryClick: () -> Unit,
     onShutterClick: () -> Unit,
     onChatClick: () -> Unit,
-    onShareClick: () -> Unit
+    onShareClick: () -> Unit,
+    separated: Boolean = false
 ) {
+    if (separated) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onGridClick, modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFF202022))) {
+                Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
+            }
+            Row(
+                Modifier.clip(CircleShape).background(Color(0xFF202022)).padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onHistoryClick, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Apps, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(25.dp))
+                }
+                Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape).clickable(onClick = onShutterClick),
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(28.dp).background(Color.White, CircleShape))
+                }
+                IconButton(onClick = onChatClick, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = LocketTextDim, modifier = Modifier.size(25.dp))
+                }
+            }
+            IconButton(onClick = onShareClick, modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFF202022))) {
+                Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
+            }
+        }
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()

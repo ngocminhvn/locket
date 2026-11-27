@@ -16,6 +16,8 @@ import com.locket.app.widget.LocketWidgetUpdater
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Calendar
@@ -34,6 +36,60 @@ class LocketViewModel(
 
     private val _moments = MutableStateFlow<List<Moment>>(sessionManager.getSavedMoments())
     val moments: StateFlow<List<Moment>> = _moments.asStateFlow()
+
+    private val momentWriteLock = Mutex()
+    private var historyCursor: String? = null
+    private var historyJob: Job? = null
+    private val _historyLoading = MutableStateFlow(false)
+    val historyLoading = _historyLoading.asStateFlow()
+    private val _historyHasMore = MutableStateFlow(true)
+    val historyHasMore = _historyHasMore.asStateFlow()
+    private val _historyError = MutableStateFlow<String?>(null)
+    val historyError = _historyError.asStateFlow()
+
+    private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
+        val merged = (_moments.value + incoming).associateBy { it.id }.values
+            .sortedByDescending { it.timestampSeconds }
+        cache.saveMoments(merged)
+        _moments.value = merged
+    }
+
+    fun loadOlderMoments() {
+        if (!_isLoggedIn.value || _historyLoading.value || !_historyHasMore.value) return
+        _historyLoading.value = true
+        _historyError.value = null
+        val account = sessionManager.currentUser.uid
+        historyJob = viewModelScope.launch {
+            try {
+                val page = apiClient.fetchHistoryPage(historyCursor).getOrThrow()
+                if (!_isLoggedIn.value || account != sessionManager.currentUser.uid) return@launch
+                val friends = _friends.value.associateBy { it.uid }
+                val incoming = page.moments.map { m ->
+                    val friend = friends[m.userUid]
+                    when {
+                        m.userUid == account -> m.copy(userName = _currentUser.value.displayName.ifBlank { "Bạn" },
+                            userAvatarUrl = _currentUser.value.profilePictureUrl)
+                        friend != null -> m.copy(userName = friend.displayName.ifBlank { m.userName }, userAvatarUrl = friend.avatarUrl.ifBlank { m.userAvatarUrl })
+                        else -> m
+                    }
+                }
+                mergeMoments(incoming)
+                val next = page.nextPageToken
+                if (next != null && next == historyCursor) {
+                    _historyError.value = "Máy chủ trả lại cùng con trỏ lịch sử"
+                } else {
+                    historyCursor = next
+                    _historyHasMore.value = next != null
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _historyError.value = e.localizedMessage ?: "Không tải được ảnh cũ"
+            } finally {
+                _historyLoading.value = false
+            }
+        }
+    }
 
     private val _selectedFriend = MutableStateFlow<Friend?>(null)
     val selectedFriend: StateFlow<Friend?> = _selectedFriend.asStateFlow()
@@ -174,12 +230,13 @@ class LocketViewModel(
                             else -> if (m.userName.isBlank()) m.copy(userName = m.userUid) else m
                         }
                     }
-                    _moments.value = resolved
-                    cache.saveMoments(resolved)
+                    mergeMoments(resolved)
                     // Cap nhat Home Screen Widget bang moment moi nhat that
                     LocketWidgetUpdater.updateAll(LocketApplication.instance)
                 }
             }
+
+            if (historyCursor == null && _historyHasMore.value && _historyError.value == null) loadOlderMoments()
 
             // 4. Fetch live conversations
             if (currentUid.isNotBlank()) {
@@ -467,6 +524,11 @@ class LocketViewModel(
     }
 
     fun logout() {
+        historyJob?.cancel()
+        historyCursor = null
+        _historyHasMore.value = true
+        _historyError.value = null
+        _historyLoading.value = false
         sessionManager.logout()
         viewModelScope.launch { cache.clearAll() }
         chatMessagesJob?.cancel()

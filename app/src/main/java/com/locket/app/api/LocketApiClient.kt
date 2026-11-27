@@ -618,11 +618,11 @@ class LocketApiClient(
             }
             val latestResp = callEndpoint("getLatestMomentV2", payload)
             if (latestResp != null && latestResp.get("status")?.asInt == 200) {
-                val dataArr = latestResp.getAsJsonArray("data")
+                val dataArr = momentArray(latestResp)
                 if (dataArr != null && dataArr.size() > 0) {
                     for (elem in dataArr) {
                         val mObj = elem.asJsonObject
-                        momentsList.add(parseMomentJson(mObj))
+                        parseMomentJson(mObj)?.let { momentsList.add(it) }
                     }
                 }
             }
@@ -637,50 +637,13 @@ class LocketApiClient(
             }
             val sampledResp = callEndpoint("getSampledMoments", sampledPayload)
             if (sampledResp != null && sampledResp.get("status")?.asInt == 200) {
-                val dataArr = sampledResp.getAsJsonArray("data")
+                val dataArr = momentArray(sampledResp)
                 if (dataArr != null) {
                     for (elem in dataArr) {
                         val mObj = elem.asJsonObject
-                        val parsed = parseMomentJson(mObj)
+                        val parsed = parseMomentJson(mObj) ?: continue
                         if (momentsList.none { it.id == parsed.id }) {
                             momentsList.add(parsed)
-                        }
-                    }
-                }
-            }
-
-            // 3. Query Firestore history database: history/{uid}/entries
-            if (!uid.isNullOrBlank()) {
-                val historyUrl = "$FIRESTORE_HISTORY_URL/history/$uid/entries"
-                val req = Request.Builder()
-                    .url(historyUrl)
-                    .addHeader("Authorization", "Bearer $token")
-                    .get()
-                    .build()
-                val resp = client.newCall(req).execute()
-                if (resp.isSuccessful) {
-                    val json = gson.fromJson(resp.body?.string(), JsonObject::class.java)
-                    val docs = json.getAsJsonArray("documents")
-                    if (docs != null) {
-                        for (dElem in docs) {
-                            val doc = dElem.asJsonObject
-                            val fields = doc.getAsJsonObject("fields")
-                            val mId = doc.get("name")?.asString?.substringAfterLast("/") ?: ""
-                            val thumb = extractString(fields, "thumbnail_url")
-                            val cap = extractString(fields, "caption")
-                            val userOwner = extractString(fields, "user")
-                            if (thumb.isNotBlank() && momentsList.none { it.id == mId }) {
-                                momentsList.add(
-                                    Moment(
-                                        id = mId,
-                                        userUid = userOwner,
-                                        userName = "",
-                                        thumbnailUrl = thumb,
-                                        caption = cap,
-                                        timeAgo = "kỷ niệm"
-                                    )
-                                )
-                            }
                         }
                     }
                 }
@@ -713,33 +676,91 @@ class LocketApiClient(
         }
     }
 
-    private fun parseMomentJson(mObj: JsonObject): Moment {
-        val id = mObj.get("canonical_uid")?.asString ?: mObj.get("id")?.asString ?: "m_${System.currentTimeMillis()}"
-        val thumb = mObj.get("thumbnail_url")?.asString ?: ""
-        val video = mObj.get("video_url")?.asString
-        val caption = mObj.get("caption")?.asString ?: ""
-        val userUid = mObj.get("user")?.asString ?: ""
-        val dateSeconds = mObj.getAsJsonObject("date")?.get("_seconds")?.asLong ?: (System.currentTimeMillis() / 1000)
+    private fun momentArray(response: JsonObject): JsonArray? {
+        val data = response.get("data") ?: return null
+        return when {
+            data.isJsonArray -> data.asJsonArray
+            data.isJsonObject -> data.asJsonObject.get("data")?.takeIf { it.isJsonArray }?.asJsonArray
+            else -> null
+        }
+    }
 
-        // Calculate time ago
-        val diff = (System.currentTimeMillis() / 1000) - dateSeconds
-        val timeAgo = when {
+    data class HistoryPage(val moments: List<Moment>, val nextPageToken: String?)
+
+    // Firestore listDocuments returns a cursor for the next batch. No fixed
+    // number of pages: follow that cursor until the backend exhausts history.
+    suspend fun fetchHistoryPage(pageToken: String? = null): Result<HistoryPage> = withContext(Dispatchers.IO) {
+        try {
+            ensureFreshToken()
+            val token = getToken()
+            val uid = getUid()
+            if (token.isNullOrBlank() || uid.isNullOrBlank()) {
+                return@withContext Result.failure(IllegalStateException("Chưa đăng nhập"))
+            }
+            val url = okhttp3.HttpUrl.Builder()
+                .scheme("https").host("firestore.googleapis.com")
+                .addPathSegments("v1/projects/locket-4252a/databases/locket/documents/history")
+                .addPathSegment(uid).addPathSegment("entries")
+                .addQueryParameter("pageSize", "40")
+                .addQueryParameter("orderBy", "date desc")
+                .apply { if (!pageToken.isNullOrBlank()) addQueryParameter("pageToken", pageToken) }
+                .build()
+            val request = Request.Builder().url(url).addHeader("Authorization", "Bearer $token").get().build()
+            val root = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) error("Không tải được lịch sử (HTTP ${response.code})")
+                gson.fromJson(response.body?.string().orEmpty(), JsonObject::class.java)
+                    ?: error("Phản hồi lịch sử trống")
+            }
+            val records = root.getAsJsonArray("documents")?.mapNotNull { entry ->
+                val doc = entry.asJsonObject
+                val fields = doc.getAsJsonObject("fields") ?: return@mapNotNull null
+                val id = extractString(fields, "canonical_uid").ifBlank {
+                    optString(doc, "name").substringAfterLast('/')
+                }
+                val thumb = extractString(fields, "thumbnail_url")
+                val owner = extractString(fields, "user")
+                val timestamp = extractTimestampMs(fields, "date")?.div(1000)
+                    ?: return@mapNotNull null
+                if (id.isBlank() || thumb.isBlank() || owner.isBlank()) return@mapNotNull null
+                Moment(id = id, userUid = owner, userName = "",
+                    thumbnailUrl = thumb, videoUrl = extractString(fields, "video_url").ifBlank { null },
+                    caption = extractString(fields, "caption"), timestampSeconds = timestamp,
+                    timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"))
+            }.orEmpty()
+            val names = resolveUserNames(records.map { it.userUid })
+            val resolved = records.map { m ->
+                val name = names[m.userUid]
+                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
+            }
+            Result.success(HistoryPage(resolved, optString(root, "nextPageToken").ifBlank { null }))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun formatMomentAge(timestamp: Long): String {
+        val diff = ((System.currentTimeMillis() / 1000) - timestamp).coerceAtLeast(0)
+        return when {
             diff < 60 -> "vừa xong"
             diff < 3600 -> "${diff / 60}m"
             diff < 86400 -> "${diff / 3600}h"
             else -> "${diff / 86400}d"
         }
+    }
 
-        return Moment(
-            id = id,
-            userUid = userUid,
-            userName = "", // placeholder: getLatestMomentV2 KHONG tra ten, chi co uid (user); ten duoc dien o fetchMomentsFeed() qua fetchUsers
-            thumbnailUrl = thumb,
-            videoUrl = video,
-            caption = caption,
-            timestampSeconds = dateSeconds,
-            timeAgo = timeAgo
-        )
+    private fun parseMomentJson(mObj: JsonObject): Moment? {
+        val id = optString(mObj, "canonical_uid").ifBlank { optString(mObj, "id") }
+        val thumb = optString(mObj, "thumbnail_url")
+        val owner = optString(mObj, "user")
+        val date = mObj.get("date")?.takeIf { it.isJsonObject }?.asJsonObject
+        val timestamp = optString(date, "_seconds").toLongOrNull() ?: return null
+        if (id.isBlank() || thumb.isBlank() || owner.isBlank()) return null
+        return Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
+            videoUrl = optString(mObj, "video_url").ifBlank { null },
+            caption = optString(mObj, "caption"), timestampSeconds = timestamp,
+            timeAgo = formatMomentAge(timestamp), md5 = optString(mObj, "md5"))
     }
 
     suspend fun reactToMoment(momentUid: String, ownerUid: String, reaction: String, intensity: Int = 1): Result<Boolean> = withContext(Dispatchers.IO) {
