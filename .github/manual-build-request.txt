@@ -1,1 +1,3 @@
-Explicit build request: fix minified Firestore/Protobuf startup after build 44; signed Dev APK.
+Build requested: Dev APK with shared adaptive gradients and translucent navigation.
+Source: b2ae975fe8643647c653a6e3c62b0167b6ce1e7f
+Previous marker: 0b2c872fc0592811c26e5536d8a9a4b7ca1364de
