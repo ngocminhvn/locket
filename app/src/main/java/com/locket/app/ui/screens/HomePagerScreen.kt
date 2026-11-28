@@ -189,7 +189,7 @@ fun HomePagerScreen(
     }
 
     Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
-    if (!cameraSelected) MomentBackdrop(activeMoment?.thumbnailUrl.orEmpty())
+    if (!cameraSelected) HomeAmbientBackground(activeMoment?.thumbnailUrl.orEmpty())
     VerticalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
