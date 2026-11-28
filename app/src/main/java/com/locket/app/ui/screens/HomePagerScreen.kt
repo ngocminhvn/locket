@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import com.locket.app.ui.components.LocketTopBar
+import com.locket.app.ui.components.locketHeaderTransition
 import com.locket.app.ui.components.FriendFilterSheet
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
@@ -51,7 +52,8 @@ fun HomePagerScreen(
     shareRequest: Int = 0,
     sharedProfileAvatar: Boolean = false,
     sharedFriendFilterOpen: Boolean? = null,
-    onSharedFriendFilterChange: (Boolean) -> Unit = {}
+    onSharedFriendFilterChange: (Boolean) -> Unit = {},
+    tabTransitionProgress: () -> Float = { 1f }
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -375,6 +377,7 @@ fun HomePagerScreen(
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .padding(bottom = cameraFooterHeight)
+                    .locketHeaderTransition(tabTransitionProgress)
                     .onSizeChanged { measuredFeedControls = with(density) { it.height.toDp() } },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
