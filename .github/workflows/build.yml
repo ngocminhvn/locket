@@ -1,6 +1,10 @@
 name: Build Locket Android APK
 
 on:
+  # Ordinary source pushes never build. This marker is updated only on explicit request.
+  push:
+    branches: [main]
+    paths: ['.github/manual-build-request.txt']
   workflow_dispatch:
     inputs:
       publish_release:
@@ -17,6 +21,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[manual build request]'))
     name: Build signed APK
     runs-on: ubuntu-latest
 
@@ -189,7 +194,7 @@ jobs:
           retention-days: 14
 
       - name: Publish signed update APK
-        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.publish_release
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -202,7 +207,7 @@ jobs:
           fi
 
       - name: Summarize artifact-only build
-        if: success() && (github.event_name != 'workflow_dispatch' || !inputs.publish_release || github.ref != 'refs/heads/main')
+        if: success() && (github.ref != 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && !inputs.publish_release))
         run: echo 'Signed APK and R8 mapping are available in Artifacts. Release publication was not requested.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove private signing material
