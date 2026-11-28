@@ -34,6 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,7 +44,6 @@ import coil.compose.AsyncImage
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.*
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -94,6 +96,15 @@ fun ChatDetailScreen(
     val currentMessages by rememberUpdatedState(messages)
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
+    val headerName = displayName.trim().substringBefore(' ').ifBlank { displayName }
+    val moments by viewModel.moments.collectAsState()
+    val momentsById = remember(moments) { moments.associateBy { it.id } }
+    val density = LocalDensity.current
+    val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    var headerHeight by remember(friend.uid) { mutableStateOf(0.dp) }
+    var composerHeight by remember(friend.uid) { mutableStateOf(0.dp) }
+    val topPadding = headerHeight.takeIf { it > 0.dp } ?: (statusInset + 84.dp)
+    val bottomPadding = composerHeight.takeIf { it > 0.dp } ?: 90.dp
 
     // Conversation detail uses only genuine attached moment thumbnails.
     val conversationUrl = remember(messages, activeConversationId) {
@@ -101,7 +112,8 @@ fun ChatDetailScreen(
     }
     val ambient = key(friend.uid) { rememberAmbientPalette(conversationUrl, AmbientMode.CONVERSATION) }
     val chatColor = LocketBlack
-    val bubbleColor = LocketChatReceived
+    val bubbleColor = lerp(ambient.middle, Color.White, 0.12f)
+    val sentColor = Color(0xFFF2F0EF)
     // One continuous, softly tinted surface; reuse the animated conversation
     // palette rather than a fixed gray or another image extraction/render pass.
     val composerBrush = remember(ambient.middle, ambient.bottom) {
@@ -175,7 +187,9 @@ fun ChatDetailScreen(
 
     fun formatTime(createdAtMs: Long): String {
         if (createdAtMs <= 0L) return ""
-        return SimpleDateFormat("HH:mm d 'thg' M", Locale.getDefault()).format(Date(createdAtMs))
+        val date = java.time.Instant.ofEpochMilli(createdAtMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        return if (date == java.time.LocalDate.now()) "Hôm nay, " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(createdAtMs))
+        else SimpleDateFormat("HH:mm d 'thg' M", Locale.getDefault()).format(Date(createdAtMs))
     }
 
     Box(
@@ -185,16 +199,273 @@ fun ChatDetailScreen(
             // Apply the larger bottom inset exactly once. The window resizes rather than pans.
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Header Bar: Back arrow, Avatar with yellow border, Friend name
+        Box(Modifier.fillMaxSize()) {
+            // Message Stream: tin nhan that tu server (cache Room + sync)
+            if (isChatLoading && messages.isEmpty() && pendingHere.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = LocketYellow)
+                }
+            } else if (messages.isEmpty() && pendingHere.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Chưa có tin nhắn nào",
+                        color = LocketTextDim,
+                        fontSize = 15.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(pendingHere.asReversed(), key = { "pending:" + it.token }) { draft ->
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                            Text(draft.text, color = Color.Black, fontSize = 17.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(28.dp)).background(sentColor)
+                                    .padding(horizontal = 18.dp, vertical = 12.dp))
+                            Text(if (draft.acknowledged) "Đã gửi · Đang đồng bộ" else "Đang gửi…",
+                                color = LocketTextDim, fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 3.dp))
+                        }
+                    }
+                    items(newestFirst, key = { it.id }) { msg ->
+                        val timeStr = formatTime(msg.createdAtMs)
+                        if (msg.thumbnailUrl != null) {
+                            // Shared Moment Card in Chat (tin kem moment that)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (timeStr.isNotBlank()) {
+                                    Text(
+                                        text = timeStr,
+                                        color = Color.White.copy(alpha = 0.42f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1.0f)
+                                        .clip(RoundedCornerShape(42.dp))
+                                        .background(LocketSheetSurface)
+                                        .combinedClickable(
+                                            onClick = {},
+                                            onLongClick = { reactingTo = msg }
+                                        )
+                                ) {
+                                    AsyncImage(
+                                        model = msg.thumbnailUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+
+                                    val linkedMoment = msg.replyMomentUid?.let { momentsById[it] }
+                                    // Prefer real moment metadata when available locally.
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(24.dp)
+                                            .clip(CircleShape).background(Color.Black.copy(alpha = 0.46f))
+                                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                                            .align(Alignment.TopStart),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        val senderAvatar = linkedMoment?.userAvatarUrl?.takeIf { it.isNotBlank() }
+                                            ?: when (linkedMoment?.userUid) {
+                                                myUid -> currentUser.profilePictureUrl
+                                                friend.uid -> friend.avatarUrl
+                                                null -> if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
+                                                else -> ""
+                                            }
+                                        ChatAvatar(senderAvatar, 24)
+                                        Text(
+                                            text = when {
+                                                linkedMoment?.userUid == myUid -> "Bạn"
+                                                linkedMoment != null -> linkedMoment.userName.ifBlank { linkedMoment.userUid }
+                                                msg.isMe -> "Bạn"
+                                                else -> displayName
+                                            },
+                                            color = Color.White,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Text(chatMomentAge(linkedMoment?.timestampSeconds?.times(1000L) ?: msg.createdAtMs), color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    linkedMoment?.caption?.takeIf { it.isNotBlank() }?.let { caption ->
+                                        Text(caption, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                                                .clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.35f))
+                                                .padding(horizontal = 12.dp, vertical = 6.dp))
+                                    }
+                                }
+                                // Text kem theo moment (neu co)
+                                if (msg.text.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, onLongClick = { reactingTo = msg })
+                                }
+                                ReactionRow(reactions = msg.reactions)
+                            }
+                        } else if (msg.isMe) {
+                            // Sent message bubble: White rounded pill on the right
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(28.dp))
+                                        .background(sentColor)
+                                        .combinedClickable(
+                                            onClick = {},
+                                            onLongClick = { reactingTo = msg }
+                                        )
+                                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                                ) {
+                                    Text(
+                                        text = msg.text,
+                                        color = Color.Black,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                ReactionRow(reactions = msg.reactions)
+                            }
+                        } else {
+                            // Received message bubble: Avatar on left + dark gray pill
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    ChatAvatar(friend.avatarUrl, 32)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .background(bubbleColor)
+                                            .border(0.5.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(28.dp))
+                                            .combinedClickable(
+                                                onClick = {},
+                                                onLongClick = { reactingTo = msg }
+                                            )
+                                            .padding(horizontal = 18.dp, vertical = 12.dp)
+                                    ) {
+                                        Text(
+                                            text = msg.text,
+                                            color = Color.White,
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                                ReactionRow(reactions = msg.reactions)
+                            }
+                        }
+                    }
+                    // Dang tai them tin cu: vong loading nho o dau danh sach
+                    // (chi them item nay khi dang tai, khong doi index tin).
+                    if (isLoadingOlderChat) {
+                        item(key = "loading-older") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = LocketYellow,
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Floating composer above the message stream.
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .onSizeChanged { composerHeight = with(density) { it.height.toDp() } }
+                    .background(bottomChrome)
+                    .padding(top = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(composerShape)
+                    .background(composerBrush)
+                    .border(0.5.dp, Color.White.copy(alpha = 0.055f), composerShape)
+                    .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicTextField(
+                    value = inputMessage,
+                    onValueChange = { inputMessage = it },
+                    modifier = Modifier.weight(1f),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        fontFamily = LocketFontFamily
+                    ),
+                    cursorBrush = SolidColor(Color.White),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendText(inputMessage, true) }),
+                    decorationBox = { inner ->
+                        Box {
+                            if (inputMessage.isEmpty()) Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.60f), fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            inner()
+                        }
+                    }
+                )
+                if (inputMessage.isNotBlank()) {
+                    IconButton(onClick = { sendText(inputMessage, true) }, enabled = !sending, modifier = Modifier.size(36.dp)) {
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = if (sending) 0.4f else 0.9f)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ArrowUpward, "Gửi", tint = chatColor, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                } else {
+                    for (emoji in listOf("🔥", "😍", "💛")) {
+                        Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = !sending) { sendText(emoji) }, contentAlignment = Alignment.Center) {
+                            Text(emoji, fontSize = 27.sp)
+                        }
+                    }
+                    IconButton(onClick = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        showQuickEmojis = true
+                    }, enabled = !sending, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Default.AddReaction, "Thêm biểu cảm", tint = Color.White.copy(alpha = 0.55f))
+                    }
+                }
+            }
+            // Floating header above the message stream.
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .align(Alignment.TopCenter).fillMaxWidth()
+                    .onSizeChanged { headerHeight = with(density) { it.height.toDp() } }
                     .background(topChrome)
                     .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                    .padding(horizontal = 4.dp, vertical = 10.dp).padding(bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
@@ -234,253 +505,14 @@ fun ChatDetailScreen(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Text(
-                    text = displayName,
+                    text = headerName,
                     color = Color.White,
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // Message Stream: tin nhan that tu server (cache Room + sync)
-            if (isChatLoading && messages.isEmpty() && pendingHere.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = LocketYellow)
-                }
-            } else if (messages.isEmpty() && pendingHere.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Chưa có tin nhắn nào",
-                        color = LocketTextDim,
-                        fontSize = 15.sp
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 8.dp),
-                    reverseLayout = true,
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(pendingHere.asReversed(), key = { "pending:" + it.token }) { draft ->
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                            Text(draft.text, color = Color.Black, fontSize = 16.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(28.dp)).background(Color.White)
-                                    .padding(horizontal = 18.dp, vertical = 12.dp))
-                            Text(if (draft.acknowledged) "Đã gửi · Đang đồng bộ" else "Đang gửi…",
-                                color = LocketTextDim, fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 3.dp))
-                        }
-                    }
-                    items(newestFirst, key = { it.id }) { msg ->
-                        val timeStr = formatTime(msg.createdAtMs)
-                        if (msg.thumbnailUrl != null) {
-                            // Shared Moment Card in Chat (tin kem moment that)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                if (timeStr.isNotBlank()) {
-                                    Text(
-                                        text = timeStr,
-                                        color = LocketTextDim,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(1.0f)
-                                        .clip(RoundedCornerShape(42.dp))
-                                        .background(LocketSheetSurface)
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = { reactingTo = msg }
-                                        )
-                                ) {
-                                    AsyncImage(
-                                        model = msg.thumbnailUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-
-                                    // Overlay tag: ten that + thoi gian that cua moment
-                                    Row(
-                                        modifier = Modifier
-                                            .padding(14.dp)
-                                            .liquidGlassEffect(RoundedCornerShape(16.dp), backgroundColor = Color(0x99000000))
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                                            .align(Alignment.TopStart),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        val senderAvatar = if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
-                                        ChatAvatar(senderAvatar, 24)
-                                        Text(
-                                            text = if (msg.isMe) "Bạn" else displayName,
-                                            color = Color.White,
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.weight(1f, fill = false),
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                        Text(chatMomentAge(msg.createdAtMs), color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                // Text kem theo moment (neu co)
-                                if (msg.text.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, onLongClick = { reactingTo = msg })
-                                }
-                                ReactionRow(reactions = msg.reactions)
-                            }
-                        } else if (msg.isMe) {
-                            // Sent message bubble: White rounded pill on the right
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.End
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(28.dp))
-                                        .background(Color.White)
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = { reactingTo = msg }
-                                        )
-                                        .padding(horizontal = 18.dp, vertical = 12.dp)
-                                ) {
-                                    Text(
-                                        text = msg.text,
-                                        color = Color.Black,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                ReactionRow(reactions = msg.reactions)
-                            }
-                        } else {
-                            // Received message bubble: Avatar on left + dark gray pill
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    ChatAvatar(friend.avatarUrl, 32)
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(28.dp))
-                                            .background(bubbleColor)
-                                            .combinedClickable(
-                                                onClick = {},
-                                                onLongClick = { reactingTo = msg }
-                                            )
-                                            .padding(horizontal = 18.dp, vertical = 12.dp)
-                                    ) {
-                                        Text(
-                                            text = msg.text,
-                                            color = Color.White,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                                ReactionRow(reactions = msg.reactions)
-                            }
-                        }
-                    }
-                    // Dang tai them tin cu: vong loading nho o dau danh sach
-                    // (chi them item nay khi dang tai, khong doi index tin).
-                    if (isLoadingOlderChat) {
-                        item(key = "loading-older") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = LocketYellow,
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Composer: a compact pill with real quick emoji sending.
-            Row(
-                modifier = Modifier.fillMaxWidth()
-                    .background(bottomChrome)
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                    .clip(composerShape)
-                    .background(composerBrush)
-                    .border(0.5.dp, Color.White.copy(alpha = 0.055f), composerShape)
-                    .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BasicTextField(
-                    value = inputMessage,
-                    onValueChange = { inputMessage = it },
-                    modifier = Modifier.weight(1f),
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        fontFamily = LocketFontFamily
-                    ),
-                    cursorBrush = SolidColor(Color.White),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { sendText(inputMessage, true) }),
-                    decorationBox = { inner ->
-                        Box {
-                            if (inputMessage.isEmpty()) Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.60f), fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            inner()
-                        }
-                    }
-                )
-                if (inputMessage.isNotBlank()) {
-                    IconButton(onClick = { sendText(inputMessage, true) }, enabled = !sending, modifier = Modifier.size(36.dp)) {
-                        Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = if (sending) 0.4f else 0.9f)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ArrowUpward, "Gửi", tint = chatColor, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                } else {
-                    for (emoji in listOf("🔥", "😍", "💛")) {
-                        Box(Modifier.size(34.dp).clip(CircleShape).clickable(enabled = !sending) { sendText(emoji) }, contentAlignment = Alignment.Center) {
-                            Text(emoji, fontSize = 25.sp)
-                        }
-                    }
-                    IconButton(onClick = {
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                        showQuickEmojis = true
-                    }, enabled = !sending, modifier = Modifier.size(34.dp)) {
-                        Icon(Icons.Default.AddReaction, "Thêm biểu cảm", tint = Color.White.copy(alpha = 0.55f))
-                    }
-                }
-            }
         }
 
     }
