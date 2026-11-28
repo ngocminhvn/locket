@@ -980,7 +980,7 @@ class LocketViewModel(
     // Real pending work, independent from camera/review composables. Never
     // inject a synthetic posted moment into the feed.
     data class MomentUploadFailure(val id: Long, val message: String, val mayHavePosted: Boolean)
-    private val uploadStore by lazy { MomentUploadStore(LocketApplication.instance.filesDir) }
+    private val uploadStore by lazy { MomentUploadStore(LocketApplication.instance.noBackupFilesDir) }
     private val uploadRestoreLock = Mutex()
     private var restoredUploadOwner: String? = null
     private val pendingUploads = ArrayDeque<StoredMomentUpload>()
@@ -1042,16 +1042,22 @@ class LocketViewModel(
         }
         if (!activeAccount(owner)) return@withLock false
         uploadSequence = maxOf(uploadSequence + 1, System.currentTimeMillis())
-        val item = withContext(Dispatchers.IO) {
-            uploadStore.create(uploadSequence, owner, bytes, videoFile, caption, recipients.toList())
+        val id = uploadSequence
+        // Once disk commit starts, finish the handoff even if the review
+        // composable is disposed. An accepted job must not get stranded.
+        withContext(kotlinx.coroutines.NonCancellable) {
+            val item = withContext(Dispatchers.IO) {
+                uploadStore.create(id, owner, bytes, videoFile, caption, recipients.toList())
+            }
+            if (!activeAccount(owner)) {
+                withContext(Dispatchers.IO) { uploadStore.remove(item) }
+                false
+            } else {
+                pendingUploads.addLast(item)
+                drainMomentUploads()
+                true
+            }
         }
-        if (!activeAccount(owner)) {
-            withContext(Dispatchers.IO) { uploadStore.remove(item) }
-            return@withLock false
-        }
-        pendingUploads.addLast(item)
-        drainMomentUploads()
-        true
     }
 
     fun retryMomentUpload(id: Long) {
@@ -1124,7 +1130,7 @@ class LocketViewModel(
                             }
                         } else refreshFeed()
                     }
-                } finally { activeUpload = null }
+                } finally { if (activeUpload === item) activeUpload = null }
             }
         }
     }
@@ -1169,6 +1175,8 @@ class LocketViewModel(
 
     private fun clearMomentUploads() {
         uploadJob?.cancel()
+        uploadJob = null
+        activeUpload = null
         pendingUploads.clear()
         failedUploads.clear()
         restoredUploadOwner = null
