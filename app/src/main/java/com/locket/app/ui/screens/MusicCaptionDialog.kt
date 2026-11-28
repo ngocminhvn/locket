@@ -54,7 +54,7 @@ internal data class CaptionMusic(
 }
 
 internal object SpotifyCaptionSource {
-    private val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS).build()
     private val trackId = Regex("^[A-Za-z0-9]{22}$")
 
     fun canonicalTrack(raw: String): String? {
