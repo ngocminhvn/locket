@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -110,13 +112,9 @@ fun HistoryScreen(
     val visibleOldest = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
     val oldestVisibleMonth = visibleOldest?.let { key -> calendarMonths.firstOrNull { "${it.year}-${it.month}" == key } }
         ?: calendarMonths.last()
-    // Select a real thumbnail belonging to the visible calendar month, never the feed.
-    val historyUrl = remember(oldestVisibleMonth, index) {
-        (oldestVisibleMonth.daysCount downTo 1).firstNotNullOfOrNull { day ->
-            index.moment(oldestVisibleMonth.year, oldestVisibleMonth.month, day)?.thumbnailUrl?.takeIf { it.isNotBlank() }
-        }
-    }
-    val ambient = rememberAmbientPalette(historyUrl, AmbientMode.HISTORY)
+    // The Memories reference uses a consistent warm journal palette, even for empty months.
+    // Keep it local to History; the feed and full-screen photo viewer retain their ambient tint.
+    val ambient = AmbientPalette(Color(0xFF251E16), Color(0xFF2D251A), Color(0xFF251D14))
     val topRampColor = ambient.top
     val bottomRampColor = ambient.bottom
     val cellPx = (context.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)
@@ -176,24 +174,23 @@ fun HistoryScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
-                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = LocketPillBg)
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF372D23))
+                        .padding(horizontal = 14.dp, vertical = 15.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFFFDE83), modifier = Modifier.size(21.dp))
                     Text(
-                        text = if (historyHasMore) "💛 $totalCount đã tải" else "💛 $totalCount Locket",
+                        text = if (historyHasMore) "$totalCount đã tải" else "$totalCount Locket",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    Box(Modifier.width(1.dp).height(18.dp).background(Color.White.copy(alpha = 0.15f)))
+                    Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = Color(0xFFFFDE83), modifier = Modifier.size(21.dp))
                     Text(
-                        text = "|",
-                        color = Color(0xFF555555),
-                        fontSize = 15.sp
-                    )
-                    Text(
-                        text = if (historyHasMore && (coveredThrough == null || coveredThrough!! >= today.minusDays(streak.toLong() + 1).atStartOfDay(zone).toEpochSecond())) "🔥 Đang tải" else "🔥 $streak ngày chuỗi",
+                        text = if (historyHasMore && (coveredThrough == null || coveredThrough!! >= today.minusDays(streak.toLong() + 1).atStartOfDay(zone).toEpochSecond())) "Đang tải" else "$streak ngày chuỗi",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -263,15 +260,17 @@ private fun MonthCardDynamic(
     onMomentClick: (Moment) -> Unit,
     onTodayAddClick: () -> Unit
 ) {
-    val cardColor = LocketSheetBg
-    val headerColor = LocketSheetBg
-    val dayColor = LocketJournalDayBg
-    val dotColor = LocketSheetSurface
+    val cardColor = Color(0xFF372E27)
+    val headerColor = Color(0xFF473E35)
+    val dayColor = Color(0xFF4B423B)
+    val dotColor = Color(0xFF4B423B)
+    val todayColor = Color(0xFFFFDE83)
     val isCurrentMonth = today.year == monthData.year && today.monthValue == monthData.month
     val todayDay = today.dayOfMonth
 
     val firstDate = java.time.LocalDate.of(monthData.year, monthData.month, 1)
-    val offset = firstDate.dayOfWeek.value - 1
+    // Sunday-first calendar, as in the reference (Sunday = 0, Saturday = 6).
+    val offset = firstDate.dayOfWeek.value % 7
     val rows = (offset + monthData.daysCount + 6) / 7
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 24.dp)
@@ -279,7 +278,7 @@ private fun MonthCardDynamic(
     ) {
         Text(monthData.monthTitle, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.fillMaxWidth().background(headerColor).padding(horizontal = 16.dp, vertical = 12.dp))
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(rows) { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     repeat(7) { col ->
@@ -302,20 +301,20 @@ private fun MonthCardDynamic(
                                     Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(dayColor)
                                         .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop,
                                     placeholder = androidx.compose.ui.graphics.painter.ColorPainter(dotColor))
+                                isToday -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF5A4A30)).border(3.dp, todayColor, RoundedCornerShape(10.dp))
+                                    .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = todayColor, modifier = Modifier.size(24.dp))
+                                }
                                 isLoading && !future -> {
                                     val phase = (shimmer * 2f - (row * 7 + col) / 35f).coerceIn(0f, 1f)
                                     val intensity = (1f - kotlin.math.abs(phase * 2f - 1f)) * 0.55f
                                     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
-                                        .background(androidx.compose.ui.graphics.lerp(dayColor, dotColor, intensity)))
-                                }
-                                isToday -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
-                                    .background(LocketGoldBanner).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
-                                    .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = LocketYellow, modifier = Modifier.size(24.dp))
+                                        .background(androidx.compose.ui.graphics.lerp(cardColor, dayColor, intensity)))
                                 }
                                 future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(dayColor))
                                 holiday != null -> Text(holiday, fontSize = 20.sp)
-                                else -> Box(Modifier.size(11.dp).background(dotColor, CircleShape))
+                                else -> Box(Modifier.size(12.dp).background(dotColor, CircleShape))
                             }
                         }
                     }
@@ -357,7 +356,7 @@ private fun rememberHistoryDate(): Pair<java.time.LocalDate, java.time.ZoneId> {
 
 @Composable
 private fun MemoryConnector() {
-    val connectorColor = Color(0xFF3A3A3A)
+    val connectorColor = Color(0xFF595046)
     Canvas(Modifier.padding(vertical = 8.dp).size(width = 46.dp, height = 16.dp)) {
         val line = Path().apply {
             moveTo(0f, size.height * 0.15f)
