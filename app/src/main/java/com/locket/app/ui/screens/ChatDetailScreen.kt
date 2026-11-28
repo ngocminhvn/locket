@@ -153,7 +153,9 @@ fun ChatDetailScreen(
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
     val headerName = displayName.trim().substringBefore(' ').ifBlank { displayName }
     val moments by viewModel.moments.collectAsState()
-    val momentsById = remember(moments) { moments.associateBy { it.id } }
+    val attachmentIndex = remember(moments) { ChatMomentIndex(moments) }
+    val friends by viewModel.friends.collectAsState()
+    val friendsByUid = remember(friends, friend) { (friends + friend).associateBy { it.uid } }
     val density = LocalDensity.current
     val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     var headerHeight by remember(friend.uid) { mutableStateOf(0.dp) }
@@ -340,8 +342,26 @@ fun ChatDetailScreen(
                                             contentScale = ContentScale.Crop
                                         )
 
-                                        val linkedMoment = msg.replyMomentUid?.let { momentsById[it] }
-                                        // Prefer real moment metadata when available locally.
+                                        val attachment = remember(attachmentIndex, msg.replyMomentUid, msg.thumbnailUrl) {
+                                            attachmentIndex.resolve(msg.replyMomentUid, msg.thumbnailUrl)
+                                        }
+                                        val linkedMoment = attachment.moment
+                                        val ownerUid = attachment.ownerUid
+                                        val ownerFriend = ownerUid?.let { friendsByUid[it] }
+                                        val ownerName = when {
+                                            ownerUid != null && ownerUid == myUid -> "Bạn"
+                                            ownerFriend != null -> ownerFriend.displayName.ifBlank { ownerFriend.username }
+                                                .ifBlank { linkedMoment?.userName.orEmpty() }
+                                                .ifBlank { "Không rõ tên" }
+                                            else -> linkedMoment?.userName.orEmpty().ifBlank { "Không rõ người đăng" }
+                                        }
+                                        val ownerAvatar = when {
+                                            ownerUid != null && ownerUid == myUid -> currentUser.profilePictureUrl
+                                                .ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
+                                            ownerFriend != null -> ownerFriend.avatarUrl.ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
+                                            else -> linkedMoment?.userAvatarUrl.orEmpty()
+                                        }
+                                        // The sender of a reply and the author of its attached photo are different roles.
                                         Row(
                                             modifier = Modifier
                                                 .padding(24.dp)
@@ -351,21 +371,9 @@ fun ChatDetailScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            val senderAvatar = linkedMoment?.userAvatarUrl?.takeIf { it.isNotBlank() }
-                                                ?: when (linkedMoment?.userUid) {
-                                                    myUid -> currentUser.profilePictureUrl
-                                                    friend.uid -> friend.avatarUrl
-                                                    null -> if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
-                                                    else -> ""
-                                                }
-                                            ChatAvatar(senderAvatar, 24)
+                                            ChatAvatar(ownerAvatar, 24)
                                             Text(
-                                                text = when {
-                                                    linkedMoment?.userUid == myUid -> "Bạn"
-                                                    linkedMoment != null -> linkedMoment.userName.ifBlank { linkedMoment.userUid }
-                                                    msg.isMe -> "Bạn"
-                                                    else -> displayName
-                                                },
+                                                text = ownerName,
                                                 color = Color.White,
                                                 fontSize = 18.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -373,7 +381,11 @@ fun ChatDetailScreen(
                                                 maxLines = 1,
                                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                             )
-                                            Text(chatMomentAge(linkedMoment?.timestampSeconds?.times(1000L) ?: msg.createdAtMs), color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            // Do not pass the reply timestamp off as the photo's creation date.
+                                            val dateLabel = linkedMoment?.timestampSeconds?.let(::chatMomentDate).orEmpty()
+                                            if (dateLabel.isNotBlank()) {
+                                                Text(dateLabel, color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                         linkedMoment?.let {
                                             MomentCaption(it, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
@@ -799,14 +811,7 @@ private fun ChatAvatar(url: String, sizeDp: Int) {
     }
 }
 
-private fun chatMomentAge(timestamp: Long): String {
-    if (timestamp <= 0L) return ""
-    val minutes = ((System.currentTimeMillis() - timestamp) / 60_000L).coerceAtLeast(0L)
-    return when {
-        minutes < 1 -> "Vừa xong"
-        minutes < 60 -> "${minutes}m"
-        minutes < 1440 -> "${minutes / 60}h"
-        minutes < 10080 -> "${minutes / 1440}d"
-        else -> "${minutes / 10080}w"
-    }
+private fun chatMomentDate(timestampSeconds: Long): String {
+    if (timestampSeconds <= 0L) return ""
+    return SimpleDateFormat("d 'thg' M", Locale.getDefault()).format(Date(timestampSeconds * 1000L))
 }
