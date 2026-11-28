@@ -147,7 +147,7 @@ When modifying this repository:
 1. **Never commit APK or build binaries** into git (`.gitignore` enforces this).
 2. **Always test Kotlin compilation** with `./gradlew compileDebugKotlin` before declaring work done.
 3. **Verify API responses** against the specifications in `docs/Locket-API-Spec-1.247.3.md` and `docs/locket-api-1.247.3.json`.
-4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` for ordinary cards. The central three-tab bottom navigation capsule uses upstream `dev.shayxo.liquidglass:liquidglass:1.0.0` Calm GlassTabBar as in TKB SV, including its native held-lens drag and release-to-select gesture. Preserve the existing nav layout, horizontal pager, and side buttons; side buttons share the color response without lens deformation. Suppress nav haptics and avoid additional bounce or drag animations.
+4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` for ordinary cards. The central three-tab bottom navigation capsule uses upstream `dev.shayxo.liquidglass:liquidglass:1.0.0` Calm GlassTabBar as in TKB SV, including its native held-lens drag and release-to-select gesture. Preserve the existing nav layout, horizontal pager, and side buttons; side buttons share the color response without lens deformation. Suppress nav haptics and avoid additional bounce or drag animations. The shared adapter in `ui/glass/LocketNavigationGlass.kt` uses TKB's default full-resolution glass recording and complete Calm optical/motion preset. Only height (54 dp), content padding (4 dp), pill inset (4 dp), Locket icon colors and the existing surrounding layout are retained. The selector follows the committed navigation route, not transient pager indices.
 5. **Keep Signup disabled** in `WelcomeScreen.kt`.
 
 ### Rust core rules
