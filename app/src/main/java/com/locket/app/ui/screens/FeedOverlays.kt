@@ -116,6 +116,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
         }
     }
     val headerHeight = dimensionResource(EmojiPickerR.dimen.emoji_picker_header_height)
+    val emojiColumns = 8
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -190,7 +191,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             val picker = EmojiPickerView(ctx).apply {
-                                emojiGridColumns = 5
+                                emojiGridColumns = emojiColumns
                                 setRecentEmojiProvider(recent)
                                 setOnEmojiPickedListener { item -> pick(item.emoji) }
                             }
@@ -209,7 +210,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                                 found.isEmpty() -> Text("Không tìm thấy emoji",
                                     modifier = Modifier.align(Alignment.Center), color = Color.LightGray, fontSize = 13.sp)
                                 else -> LazyVerticalGrid(
-                                    columns = GridCells.Fixed(5),
+                                    columns = GridCells.Fixed(emojiColumns),
                                     modifier = Modifier.fillMaxSize()
                                 ) {
                                     items(found, key = { it }) { emoji ->
@@ -217,7 +218,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                                             recent.recordSelection(emoji)
                                             pick(emoji)
                                         }, contentAlignment = Alignment.Center) {
-                                            Text(emoji, fontSize = 36.sp, maxLines = 1)
+                                            Text(emoji, fontSize = 24.sp, maxLines = 1)
                                         }
                                     }
                                 }
