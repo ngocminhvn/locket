@@ -39,14 +39,20 @@ fun ConversationsScreen(
     onNavigate: (String) -> Unit,
     onOpenChatDetail: (Friend) -> Unit,
     onOpenProfile: () -> Unit,
-    sharedProfileAvatar: Boolean = false
+    sharedProfileAvatar: Boolean = false,
+    sharedNewChatOpen: Boolean? = null,
+    onSharedNewChatChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val liveConversations by viewModel.conversations.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
-    var showNewChatDialog by remember { mutableStateOf(false) }
+    var localNewChatOpen by remember { mutableStateOf(false) }
+    val showNewChatDialog = sharedNewChatOpen ?: localNewChatOpen
+    fun setNewChatOpen(open: Boolean) {
+        if (sharedNewChatOpen != null) onSharedNewChatChange(open) else localNewChatOpen = open
+    }
 
     // Quay lai man danh sach: tai lai conversations that (REST, tuong duong
     // polling cua onSnapshot goc) de preview/so chua doc khong bi cu.
@@ -181,8 +187,8 @@ fun ConversationsScreen(
         }
 
         // Floating Yellow Pen Button (Matches 03-tro-chuyen.jpg)
-        FloatingActionButton(
-            onClick = { showNewChatDialog = true },
+        if (sharedNewChatOpen == null) FloatingActionButton(
+            onClick = { setNewChatOpen(true) },
             containerColor = LocketYellow,
             contentColor = LocketOnYellow,
             shape = CircleShape,
@@ -211,14 +217,14 @@ fun ConversationsScreen(
                         message = msg,
                         onSuccess = {
                             Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
-                            showNewChatDialog = false
+                            setNewChatOpen(false)
                         },
                         onError = { err ->
                             Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
                         }
                     )
                 },
-                onDismiss = { showNewChatDialog = false }
+                onDismiss = { setNewChatOpen(false) }
             )
         }
     }
