@@ -64,6 +64,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        SpotifyNowPlaying.start(this)
+    }
+
+    override fun onStop() {
+        SpotifyNowPlaying.stop(this)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
