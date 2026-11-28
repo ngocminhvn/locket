@@ -47,7 +47,8 @@ fun HomePagerScreen(
     onNavigationState: (Boolean, Boolean) -> Unit = { _, _ -> },
     cameraRequest: Int = 0,
     shareRequest: Int = 0,
-    onMomentColorSource: (String) -> Unit = {}
+    onMomentColorSource: (String) -> Unit = {},
+    sharedProfileAvatar: Boolean = false
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -312,7 +313,8 @@ fun HomePagerScreen(
                 onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = !showFriendFilter },
                 dropdownExpanded = showFriendFilter,
                 adaptiveBackground = !cameraSelected,
-                onAvatarClick = onOpenProfile
+                onAvatarClick = onOpenProfile,
+                showAvatar = !sharedProfileAvatar
             )
         }
 
