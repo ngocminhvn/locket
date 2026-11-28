@@ -3,6 +3,7 @@ package com.locket.app.ui.screens
 import com.locket.app.ui.theme.*
 
 import android.graphics.BitmapFactory
+import android.Manifest
 import android.graphics.Bitmap
 import android.widget.Toast
 import android.widget.VideoView
@@ -109,6 +110,8 @@ internal fun rememberMomentReviewSlots(
     var text by remember(bitmap) { mutableStateOf("") }
     var location by remember(bitmap) { mutableStateOf("") }
     var weather by remember(bitmap) { mutableStateOf("") }
+    var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
+    var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableIntStateOf(0) }
     var sheet by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<CaptionKind?>(null) }
@@ -142,19 +145,58 @@ internal fun rememberMomentReviewSlots(
         CaptionKind.MISS -> "🥰 Miss you"
     }
 
+    fun refreshCaption(k: CaptionKind) {
+        if (fetchingCaption != null) return
+        fetchingCaption = k
+        scope.launch {
+            try {
+                val fix = CaptionLocationData.currentLocation(context)
+                when (k) {
+                    CaptionKind.LOCATION -> location = CaptionLocationData.placeName(context, fix)
+                    CaptionKind.WEATHER -> weather = CaptionLocationData.weather(fix)
+                    else -> Unit
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Không lấy được dữ liệu. Hãy bấm lại.", Toast.LENGTH_LONG).show()
+            } finally {
+                fetchingCaption = null
+            }
+        }
+    }
+
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val target = permissionTarget
+        permissionTarget = null
+        if (target != null) {
+            if (CaptionLocationData.hasPermission(context)) refreshCaption(target)
+            else Toast.makeText(context, "Cần quyền vị trí để lấy địa danh hoặc thời tiết. Có thể cấp trong Cài đặt.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun requestCaption(k: CaptionKind) {
+        if (fetchingCaption != null || permissionTarget != null) return
+        if (CaptionLocationData.hasPermission(context)) refreshCaption(k)
+        else {
+            permissionTarget = k
+            locationPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
+        }
+    }
+
     fun choose(k: CaptionKind) {
         sheet = false
         if (k in general) {
             special = null
             scope.launch { pager.scrollToPage(general.indexOf(k)) }
         } else special = k
-        if (k == CaptionKind.TEXT || k == CaptionKind.LOCATION || k == CaptionKind.WEATHER) {
-            draft = when (k) {
-                CaptionKind.LOCATION -> location
-                CaptionKind.WEATHER -> weather
-                else -> text
+        when (k) {
+            CaptionKind.TEXT -> {
+                draft = text
+                editor = k
             }
-            editor = k
+            CaptionKind.LOCATION, CaptionKind.WEATHER -> requestCaption(k)
+            else -> Unit
         }
     }
 
@@ -283,10 +325,10 @@ internal fun rememberMomentReviewSlots(
                 ) { page ->
                     val item = special ?: general[page]
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                        val label = value(item).ifBlank {
+                        val label = if (fetchingCaption == item) "Đang cập nhật…" else value(item).ifBlank {
                             when (item) {
-                                CaptionKind.LOCATION -> "Thêm vị trí"
-                                CaptionKind.WEATHER -> "Thêm thời tiết"
+                                CaptionKind.LOCATION -> "Lấy vị trí"
+                                CaptionKind.WEATHER -> "Lấy thời tiết"
                                 CaptionKind.REVIEW -> "Chọn đánh giá"
                                 else -> "Thêm một tin nhắn"
                             }
@@ -355,7 +397,7 @@ internal fun rememberMomentReviewSlots(
                 IconButton(onClick = onCancel, enabled = !isPosting && !saving, modifier = Modifier.size(56.dp)) {
                     ReviewActionIcon(ReviewIcon.CLOSE, "Hủy", Color.White, Modifier.size(34.dp))
                 }
-                val canSend = !isPosting && !saving && (sendAll || selected.isNotEmpty())
+                val canSend = !isPosting && !saving && fetchingCaption != kind && permissionTarget != kind && (sendAll || selected.isNotEmpty())
                 Box(Modifier.size(98.dp).clip(CircleShape)
                     .background(Color.White.copy(alpha = if (canSend || isPosting) 0.29f else 0.16f))
                     .clickable(enabled = canSend) { onSend(value(kind), if (sendAll) emptyList() else selected.toList()) },
@@ -450,32 +492,24 @@ internal fun rememberMomentReviewSlots(
                 Spacer(Modifier.height(8.dp))
                 CaptionChip("🥰 Miss you", gradient = Brush.verticalGradient(
                     listOf(Color(0xFFFF1308), Color(0xFFFF4848)))) { choose(CaptionKind.MISS) }
-                Spacer(Modifier.height(30.dp))
+                Spacer(Modifier.height(14.dp))
+                Text("Thời tiết: Open-Meteo · dùng vị trí khi bạn chọn Location hoặc Weather.",
+                    color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
+                Spacer(Modifier.height(20.dp))
             }
         }
     }
 
-    editor?.let { edit ->
+    editor?.let {
         AlertDialog(
             onDismissRequest = { editor = null },
-            title = { Text(when (edit) {
-                CaptionKind.LOCATION -> "Nhập vị trí"
-                CaptionKind.WEATHER -> "Nhập thời tiết"
-                else -> "Thêm một tin nhắn"
-            }) },
+            title = { Text("Thêm một tin nhắn") },
             text = {
-                Column {
-                    if (edit != CaptionKind.TEXT) Text("Nhập thủ công; chưa có nguồn dữ liệu tự động đã xác minh.", fontSize = 12.sp)
-                    OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth())
-                }
+                OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
             },
             confirmButton = { TextButton(onClick = {
-                when (edit) {
-                    CaptionKind.LOCATION -> location = draft
-                    CaptionKind.WEATHER -> weather = draft
-                    else -> text = draft
-                }
+                text = draft
                 editor = null
             }) { Text("Xong") } },
             dismissButton = { TextButton(onClick = { editor = null }) { Text("Hủy") } }
