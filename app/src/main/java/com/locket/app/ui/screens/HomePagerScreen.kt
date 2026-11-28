@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import com.locket.app.ui.components.LocketTopBar
@@ -250,7 +251,16 @@ fun HomePagerScreen(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (loading) {
-                        CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
+                        if (moments.isEmpty()) {
+                            // Keep the familiar square moment geometry on a cold start.
+                            // No fabricated thumbnail; replace the placeholder with real Room/network data.
+                            Box(Modifier.fillMaxWidth().aspectRatio(1f)
+                                .background(Color(0xFF202022), RoundedCornerShape(44.dp)),
+                                contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow,
+                                    modifier = Modifier.size(30.dp), strokeWidth = 2.dp)
+                            }
+                        } else CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
                         Text(if (moments.isEmpty()) "Đang tải khoảnh khắc..." else "Đang tải ảnh cũ...", color = Color.White)
                     } else Text(error ?: if (hasMore) "Vuốt để tải ảnh cũ" else "Chưa có khoảnh khắc nào", color = Color.White)
                     if (error != null) TextButton(onClick = { if (moments.isEmpty() && !ownSelected) viewModel.refreshFeed() else loadFilteredHistory() }) { Text("Thử lại") }
