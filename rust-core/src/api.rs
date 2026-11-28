@@ -135,10 +135,30 @@ fn parse_moment(value: &Value) -> Result<Moment, CoreError> {
             .filter(|s| !s.is_empty())
             .map(str::to_owned),
         caption: text("caption"),
+        overlays_json: value.get("overlays").filter(|v| v.is_array()).map(Value::to_string).unwrap_or_else(|| "[]".to_owned()),
         timestamp_seconds: seconds,
         timestamp_nanoseconds,
         md5: text("md5"),
     })
+}
+
+// Unwrap nested Firestore values without dropping unknown overlay data.
+fn unwrap_firestore_value(value: &Value) -> Value {
+    if let Some(map) = value.get("mapValue") {
+        let fields = map.get("fields").and_then(Value::as_object);
+        return Value::Object(fields.into_iter().flatten().map(|(k, v)| (k.clone(), unwrap_firestore_value(v))).collect());
+    }
+    if let Some(array) = value.get("arrayValue") {
+        return Value::Array(array.get("values").and_then(Value::as_array)
+            .into_iter().flatten().map(unwrap_firestore_value).collect());
+    }
+    if let Some(n) = value.get("integerValue") {
+        return n.as_i64().or_else(|| n.as_str()?.parse().ok()).map(Value::from).unwrap_or_else(|| n.clone());
+    }
+    for key in ["stringValue", "doubleValue", "booleanValue", "timestampValue", "nullValue"] {
+        if let Some(v) = value.get(key) { return if key == "nullValue" { Value::Null } else { v.clone() }; }
+    }
+    value.clone()
 }
 
 pub fn parse_history_response(
@@ -184,6 +204,7 @@ pub fn parse_history_response(
             thumbnail_url,
             video_url: nonempty(firestore_string(fields, "video_url")),
             caption: firestore_string(fields, "caption"),
+            overlays_json: fields.get("overlays").map(unwrap_firestore_value).filter(Value::is_array).map(|v| v.to_string()).unwrap_or_else(|| "[]".to_owned()),
             timestamp_seconds: timestamp.0,
             timestamp_nanoseconds: timestamp.1,
             md5: firestore_string(fields, "md5"),
