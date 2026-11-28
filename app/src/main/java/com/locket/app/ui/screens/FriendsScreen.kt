@@ -50,10 +50,12 @@ fun FriendsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var searchedUser by remember { mutableStateOf<User?>(null) }
     var isSearching by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf<String?>(null) }
     val searchCache = remember(currentUser.uid) { linkedMapOf<String, Pair<Long, User?>>() }
     LaunchedEffect(searchQuery, currentUser.uid) {
         val query = searchQuery.trim()
         searchedUser = null
+        searchError = null
         isSearching = false
         if (query.length < 3) return@LaunchedEffect
         val cached = searchCache[query]
@@ -69,7 +71,7 @@ fun FriendsScreen(
                 searchedUser = user
                 searchCache[query] = android.os.SystemClock.elapsedRealtime() to user
                 while (searchCache.size > 50) searchCache.remove(searchCache.keys.first())
-            }
+            }.onFailure { searchError = it.message ?: "Không tìm được người dùng" }
         } finally { if (searchQuery.trim() == query) isSearching = false }
     }
 
@@ -142,6 +144,7 @@ fun FriendsScreen(
                 singleLine = true
             )
 
+            searchError?.let { Text(it, color = LocketRed, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
             // Searched User Result Card
             searchedUser?.let { sUser ->
                 Spacer(modifier = Modifier.height(10.dp))
@@ -160,6 +163,7 @@ fun FriendsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Person, null, tint = Color.White)
+                        if (sUser.profilePictureUrl.isNotBlank()) AsyncImage(sUser.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {

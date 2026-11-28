@@ -237,7 +237,7 @@ fun HistoryScreen(
                 loadingOlder = historyLoading,
                 historyError = historyError,
                 onLoadOlder = { viewModel.loadOwnHistory() },
-                onPrefetch = { items, index -> viewModel.prefetchUpcomingMoments(items, index) },
+                onPrefetch = { items, index, size -> viewModel.prefetchMemoryMoments(items, index, size) },
                 onDelete = { target, globally, done ->
                     viewModel.deleteMoment(target, globally, onSuccess = {
                         done()
@@ -353,7 +353,7 @@ fun MemoryDetailDialog(
     loadingOlder: Boolean = false,
     historyError: String? = null,
     onLoadOlder: () -> Unit = {},
-    onPrefetch: (List<Moment>, Int) -> Unit = { _, _ -> },
+    onPrefetch: (List<Moment>, Int, Int) -> Unit = { _, _, _ -> },
     onDelete: ((Moment, Boolean, () -> Unit) -> Unit)? = null
 ) {
     val photos = remember(moment.id, historyMoments) {
@@ -375,7 +375,6 @@ fun MemoryDetailDialog(
     var pan by remember(active.id) { mutableStateOf(Offset.Zero) }
     var thumbDragging by remember { mutableStateOf(false) }
     val moving = pager.isScrollInProgress || thumbDragging || kotlin.math.abs(pager.currentPageOffsetFraction) > 0.001f
-    LaunchedEffect(active.id, photos.size) { onPrefetch(photos, pager.settledPage) }
     LaunchedEffect(active.id) {
         zoom = 1f
         pan = Offset.Zero
@@ -393,6 +392,10 @@ fun MemoryDetailDialog(
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 val viewportWidth = maxWidth
                 val photoSize = minOf(viewportWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
+                val imagePx = with(androidx.compose.ui.platform.LocalDensity.current) { photoSize.roundToPx().coerceAtLeast(1) }
+                val thumbnailPx = with(androidx.compose.ui.platform.LocalDensity.current) { 60.dp.roundToPx() }
+                val imageContext = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(active.id, photos.size, imagePx) { onPrefetch(photos, pager.settledPage, imagePx) }
                 Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 22.dp).height(58.dp)) {
                     IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
                         Icon(Icons.Default.Close, "Đóng", tint = Color.White, modifier = Modifier.size(32.dp))
@@ -426,7 +429,7 @@ fun MemoryDetailDialog(
                             }.clip(RoundedCornerShape(46.dp))
                                 .background(Color(0xFF1E1E20))) {
                                 val selected = page == pager.settledPage
-                                AsyncImage(photo.thumbnailUrl, photo.caption,
+                                AsyncImage(remember(photo.thumbnailUrl, imagePx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(imagePx).build() }, photo.caption,
                                     Modifier.fillMaxSize()
                                         .then(if (selected && photo.videoUrl.isNullOrBlank()) Modifier.pointerInput(photo.id) {
                                             awaitEachGesture {
@@ -451,7 +454,8 @@ fun MemoryDetailDialog(
                                             scaleX = zoom; scaleY = zoom
                                             translationX = pan.x; translationY = pan.y
                                         } else Modifier),
-                                    contentScale = ContentScale.Crop)
+                                    contentScale = ContentScale.Crop,
+                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303032)))
                                 if (selected && !moving && !photo.videoUrl.isNullOrBlank()) {
                                     MomentVideo(photo.videoUrl, Modifier.fillMaxSize())
                                 }
@@ -528,7 +532,7 @@ fun MemoryDetailDialog(
                             }
                             Box(Modifier.offset(x = slotWidth * position).size(60.dp),
                                 contentAlignment = Alignment.Center) {
-                                AsyncImage(photo.thumbnailUrl, "Ảnh kỷ niệm",
+                                AsyncImage(remember(photo.thumbnailUrl, thumbnailPx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(thumbnailPx).build() }, "Ảnh kỷ niệm",
                                     Modifier.size(thumbSize).clip(RoundedCornerShape(if (distance < 0.5f) 12.dp else 9.dp))
                                         .clickable(enabled = !share && !delete) {
                                             zoom = 1f; pan = Offset.Zero

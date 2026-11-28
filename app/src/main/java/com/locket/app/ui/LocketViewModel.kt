@@ -84,6 +84,7 @@ class LocketViewModel(
     private val momentWriteLock = Mutex()
     private var historyCursor: LocketApiClient.HistoryCursor? = null
     private val feedSyncLock = Mutex()
+    private var lastFeedRefreshAt = 0L
     private val conversationSyncLock = Mutex()
     private val chatSyncLock = Mutex()
     private var syncJob: Job? = null
@@ -313,6 +314,15 @@ class LocketViewModel(
                 }
             }
         }
+    }
+
+    fun prefetchMemoryMoments(moments: List<Moment>, currentIndex: Int, sizePx: Int) {
+        val nearby = (-3..3).mapNotNull { moments.getOrNull(currentIndex + it) }
+        val urls = nearby.map { it.thumbnailUrl }
+        prefetchThumbnails(urls, sizePx)
+        prefetchThumbnails(urls, 12)
+        // Existing adjacent video cache, bounded to the same neighborhood.
+        prefetchUpcomingMoments(moments, currentIndex, count = 3)
     }
 
     private fun knownMomentNames(incoming: List<Moment>): List<Moment> {
@@ -578,8 +588,9 @@ class LocketViewModel(
         if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
     }
 
-    private suspend fun refreshFeedNow(account: String) = feedSyncLock.withLock {
+    private suspend fun refreshFeedNow(account: String, force: Boolean = false) = feedSyncLock.withLock {
         if (!activeAccount(account)) return@withLock
+        if (!force && lastFeedRefreshAt > 0 && now() - lastFeedRefreshAt < 10_000L) return@withLock
         _feedLoading.value = true
         _feedError.value = null
         try {
@@ -587,6 +598,7 @@ class LocketViewModel(
             val page = apiClient.fetchHistoryPage().getOrThrow()
             if (activeAccount(account)) {
                 applyFeed(account, page.moments)
+                lastFeedRefreshAt = now()
                 // Initialize pagination once from the same query; don't fetch page 1 twice.
                 if (historyCursor == null && _historyHasMore.value && historyJob?.isActive != true) {
                     historyCursor = page.nextPageToken
@@ -601,7 +613,7 @@ class LocketViewModel(
 
     fun refreshFeed() {
         val account = sessionManager.currentUser.uid
-        if (account.isNotBlank() && activeAccount(account)) viewModelScope.launch { refreshFeedNow(account) }
+        if (account.isNotBlank() && activeAccount(account)) viewModelScope.launch { refreshFeedNow(account, force = true) }
     }
 
     private fun startFeedListener() {
@@ -1661,8 +1673,11 @@ class LocketViewModel(
                 return@launch
             }
             apiClient.fetchUserProfile(uid).onSuccess { user ->
-                _currentUser.value = user
-                sessionManager.currentUser = user
+                if (activeAccount(uid)) {
+                    _currentUser.value = user
+                    sessionManager.currentUser = user
+                    prefetchThumbnails(listOf(user.profilePictureUrl), 128)
+                }
             }
             onDone()
         }
@@ -1851,6 +1866,7 @@ class LocketViewModel(
         _feedRealtime.value = false
         _feedLoading.value = false
         _feedError.value = null
+        lastFeedRefreshAt = 0L
         closeChat()
         apiClient.clearUserNameCache()
         prefetchedThumbnails.clear()

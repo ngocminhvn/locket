@@ -1020,8 +1020,10 @@ class LocketApiClient(
                     profilePictureUrl = data.get("profile_picture_url")?.asString ?: ""
                 )
                 Result.success(user)
-            } else {
+            } else if (resp?.get("status")?.asInt == 404) {
                 Result.success(null)
+            } else {
+                Result.failure(Exception("Không tìm được người dùng: máy chủ chưa trả kết quả hợp lệ"))
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
