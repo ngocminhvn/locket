@@ -84,14 +84,14 @@ internal object MusicCaptionCatalog {
             onResults(it.second)
             return
         }
-        val escaped = escaped(query)
+        val phrase = escaped(query)
         // Prefer exact phrases but allow title/artist combinations.
         val tokens = query.split(Regex("\\s+")).filter { it.isNotBlank() }.take(10)
         val terms = tokens.joinToString(" AND ") { token ->
             val term = escaped(token)
             "(recording:\"$term\" OR artist:\"$term\")"
         }
-        val result = request("recording", mapOf("query" to "(recording:\"$escaped\" OR artist:\"$escaped\" OR ($terms))", "limit" to "12"))
+        val result = request("recording", mapOf("query" to "(recording:\"$phrase\" OR artist:\"$phrase\" OR ($terms))", "limit" to "12"))
         val rows = result.optJSONArray("recordings") ?: error("Phản hồi MusicBrainz không hợp lệ")
         val matches = mutableListOf<MusicSearchHit>()
         val seen = mutableSetOf<String>()
