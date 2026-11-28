@@ -76,9 +76,10 @@ object LocketWidgetUpdater {
         // Ten that; chua resolve duoc ten thi hien uid (dung quy uoc app goc)
         views.setTextViewText(R.id.widget_name, latest.userName.ifBlank { latest.userUid })
         views.setTextViewText(R.id.widget_time, latest.timeAgo)
-        if (latest.caption.isNotBlank()) {
+        val caption = com.locket.app.model.CaptionOverlays.label(latest)
+        if (caption.isNotBlank()) {
             views.setViewVisibility(R.id.widget_caption, View.VISIBLE)
-            views.setTextViewText(R.id.widget_caption, latest.caption)
+            views.setTextViewText(R.id.widget_caption, caption)
         } else {
             views.setViewVisibility(R.id.widget_caption, View.GONE)
         }
