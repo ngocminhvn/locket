@@ -307,8 +307,7 @@ class MainActivity : ComponentActivity() {
                                         separated = true,
                                         currentScreen = tabRoutes[mainTab],
                                         showSideActions = homeSettled && homeNavFeed,
-                                        unreadConversations = unreadConversations,
-                                        feedMode = homeSettled && homeNavFeed
+                                        unreadConversations = unreadConversations
                                     )
                                 }
                             }
