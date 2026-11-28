@@ -8,12 +8,22 @@
 -keep class com.locket.app.storage.db.** { *; }
 -keep class com.locket.app.widget.** { *; }
 
-# Full protobuf extensions resolve this overload reflectively at runtime.
-# R8 cannot see that call and otherwise removes it from generated enums,
-# which crashes Firestore Listen during startup in minified Release builds.
--keepclassmembers enum com.google.** {
-    public static ** valueOf(com.google.protobuf.Descriptors$EnumValueDescriptor);
-    public com.google.protobuf.Descriptors$EnumValueDescriptor getValueDescriptor();
-}
+# Full Protobuf generated accessors, enum descriptors and builders are
+# looked up by name at runtime. Keep all members of reachable generated
+# messages/builders/enums, rather than chasing individual missing methods.
+# Unused message classes can still be removed; R8 remains active elsewhere.
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessage { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageV3 { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessage$Builder { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageV3$Builder { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite { *; }
+-keepclassmembers enum * implements com.google.protobuf.ProtocolMessageEnum { *; }
+-keepclassmembers enum * implements com.google.protobuf.Internal$EnumLite { *; }
+# Protect reachable runtime descriptor/schema helpers and their reflected fields.
+-keepclassmembers class com.google.protobuf.** { *; }
+# Providers may be discovered by ServiceLoader or reflective construction.
+-keep class * extends io.grpc.ManagedChannelProvider { public <init>(); }
+-keep class * extends io.grpc.NameResolverProvider { public <init>(); }
+-keep class * extends io.grpc.LoadBalancerProvider { public <init>(); }
 
 -dontwarn com.google.errorprone.annotations.**

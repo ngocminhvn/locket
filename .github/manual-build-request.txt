@@ -1,1 +1,1 @@
-Explicit build request: 2026-11-28, signed release and R8 verification.
+Explicit build request: fix minified Firestore/Protobuf startup after build 44; signed Dev APK.

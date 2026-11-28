@@ -83,31 +83,48 @@ internal class FirestoreListen {
                         else -> Unit
                     }
                 } catch (e: Exception) { close(e) }
+                catch (e: LinkageError) { close(e) }
+                catch (e: AssertionError) { close(IllegalStateException("Firestore response processing failed", e)) }
             }
             override fun onError(t: Throwable) { close(t) }
             override fun onCompleted() { close() }
         }
-        val query = StructuredQuery.newBuilder()
-            .addFrom(StructuredQuery.CollectionSelector.newBuilder().setCollectionId(collection))
-            .addOrderBy(StructuredQuery.Order.newBuilder().setField(StructuredQuery.FieldReference.newBuilder().setFieldPath(orderField))
-                .setDirection(StructuredQuery.Direction.DESCENDING))
-            .apply {
-                if (orderField != "__name__") addOrderBy(StructuredQuery.Order.newBuilder()
-                    .setField(StructuredQuery.FieldReference.newBuilder().setFieldPath("__name__"))
-                    .setDirection(StructuredQuery.Direction.DESCENDING))
-                if (limit != null) setLimit(com.google.protobuf.Int32Value.of(limit))
-            }.build()
         try {
+            val query = StructuredQuery.newBuilder()
+                .addFrom(StructuredQuery.CollectionSelector.newBuilder().setCollectionId(collection))
+                .addOrderBy(StructuredQuery.Order.newBuilder().setField(StructuredQuery.FieldReference.newBuilder().setFieldPath(orderField))
+                    .setDirection(StructuredQuery.Direction.DESCENDING))
+                .apply {
+                    if (orderField != "__name__") addOrderBy(StructuredQuery.Order.newBuilder()
+                        .setField(StructuredQuery.FieldReference.newBuilder().setFieldPath("__name__"))
+                        .setDirection(StructuredQuery.Direction.DESCENDING))
+                    if (limit != null) setLimit(com.google.protobuf.Int32Value.of(limit))
+                }.build()
+            val request = ListenRequest.newBuilder().setDatabase(database)
+                .setAddTarget(Target.newBuilder().setTargetId(1)
+                    .setQuery(Target.QueryTarget.newBuilder().setParent(parent).setStructuredQuery(query))).build()
+            // Initialize descriptor accessors on the caller before entering gRPC's
+            // asynchronous executor. The request is real, not fabricated data.
+            request.allFields
+            Target.getDefaultInstance().allFields
+            StructuredQuery.getDefaultInstance().allFields
+            ListenResponse.getDefaultInstance().allFields
+            Document.getDefaultInstance().allFields
+            Value.getDefaultInstance().allFields
+            TargetChange.getDefaultInstance().allFields
+            FirestoreGrpc.getListenMethod()
             rpcContext.run {
                 val stream = FirestoreGrpc.newStub(channel)
                     .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
                     .withDeadlineAfter(50, java.util.concurrent.TimeUnit.MINUTES).listen(observer)
-                stream.onNext(ListenRequest.newBuilder().setDatabase(database)
-                    .setAddTarget(Target.newBuilder().setTargetId(1)
-                        .setQuery(Target.QueryTarget.newBuilder().setParent(parent).setStructuredQuery(query))).build())
+                stream.onNext(request)
             }
-        } catch (e: Exception) { close(e) }
-        awaitClose { rpcContext.cancel(null); channel.shutdownNow() }
+            awaitClose()
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { close(e) }
+        catch (e: LinkageError) { close(e) }
+        catch (e: AssertionError) { close(IllegalStateException("Firestore transport initialization failed", e)) }
+        finally { rpcContext.cancel(null); channel.shutdownNow() }
     }.buffer(256)
 
     private fun documentJson(doc: Document): JsonObject = JsonObject().apply {
