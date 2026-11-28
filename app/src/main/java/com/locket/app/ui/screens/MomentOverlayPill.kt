@@ -2,6 +2,7 @@ package com.locket.app.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,7 +63,14 @@ private fun overlayColor(raw: String, fallback: Color): Color = runCatching {
 @Composable
 internal fun MomentCaption(moment: Moment, modifier: Modifier = Modifier, fallback: String = moment.caption) {
     val data = CaptionOverlays.data(moment)
-    if (data != null || fallback.isNotBlank()) MomentOverlayPill(data, fallback, modifier)
+    val spotifyUrl = if (CaptionOverlays.string(data, "type") == "music")
+        SpotifyCaptionSource.canonicalTrack(CaptionOverlays.string(CaptionOverlays.obj(data, "payload"), "spotify_url")) else null
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val action = if (spotifyUrl != null) Modifier.clickable {
+        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(spotifyUrl))) }
+            .onFailure { android.widget.Toast.makeText(context, "Không mở được Spotify", android.widget.Toast.LENGTH_SHORT).show() }
+    } else Modifier
+    if (data != null || fallback.isNotBlank()) MomentOverlayPill(data, fallback, modifier.then(action))
 }
 
 @Composable
@@ -119,7 +127,10 @@ internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Mo
                 }
                 Icon(vector, null, modifier = Modifier.size(22.dp), tint = if (name.startsWith("sun.max")) Color(0xFFFFC107) else iconColor)
             }
-            else -> if (type == "location") Icon(Icons.Default.LocationOn, null, tint = iconColor, modifier = Modifier.size(20.dp))
+            else -> when (type) {
+                "location" -> Icon(Icons.Default.LocationOn, null, tint = iconColor, modifier = Modifier.size(20.dp))
+                "music" -> Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(20.dp))
+            }
         }
         Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold,
             maxLines = runCatching { data?.get("max_lines")?.asInt ?: 4 }.getOrDefault(4).coerceIn(1, 4),
