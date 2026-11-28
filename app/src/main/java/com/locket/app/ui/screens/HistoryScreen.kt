@@ -491,13 +491,16 @@ fun MemoryDetailDialog(
                                     val photoTime = remember(photo.timestampSeconds) {
                                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(photo.timestampSeconds * 1000))
                                     }
-                                    val timeChip = photo.caption.isBlank() || photo.caption.trim() == photoTime
-                                    Row(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)
-                                        .background(Color.Black.copy(alpha = 0.44f), CircleShape)
-                                        .padding(horizontal = 13.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        if (timeChip) Icon(Icons.Default.AccessTime, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp))
-                                        Text(if (timeChip) photoTime else photo.caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    if (com.locket.app.model.CaptionOverlays.data(photo) != null || photo.caption.isNotBlank()) {
+                                        MomentCaption(photo, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
+                                    } else {
+                                        Row(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)
+                                            .background(Color.Black.copy(alpha = 0.44f), CircleShape)
+                                            .padding(horizontal = 13.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Default.AccessTime, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp))
+                                            Text(photoTime, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                                 if (selected && zoom > 1f) {
