@@ -3,6 +3,7 @@
     android:minWidth="180dp"
     android:minHeight="180dp"
     android:updatePeriodMillis="0"
+    android:configure="com.locket.app.widget.WidgetConfigActivity"
     android:previewLayout="@layout/widget_locket"
     android:initialLayout="@layout/widget_locket"
     android:resizeMode="horizontal|vertical"

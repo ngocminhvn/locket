@@ -31,6 +31,8 @@ class LocketCache(
             withContext(Dispatchers.Default) { list.map { it.toModel().also { moment -> moment.overlay } } }
         }
 
+    suspend fun latestMomentByFriend(uid: String): Moment? = dao.latestMomentByFriend(uid)?.toModel()
+
     fun observeFriends(): Flow<List<Friend>> =
         dao.observeFriends().map { list -> list.map { it.toModel() } }
 

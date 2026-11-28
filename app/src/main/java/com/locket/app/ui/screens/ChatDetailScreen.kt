@@ -421,6 +421,11 @@ fun ChatDetailScreen(
                                     modifier = Modifier.weight(1f), onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                             }
                         }
+                        if (msg.isMe && msg.id == newestFirst.firstOrNull()?.id && pendingHere.isEmpty()) {
+                            Text("Đã gửi", color = LocketTextDim, fontSize = 11.sp,
+                                modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
                     }
                     // Dang tai them tin cu: vong loading nho o dau danh sach
                     // (chi them item nay khi dang tai, khong doi index tin).

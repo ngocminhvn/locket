@@ -18,6 +18,7 @@ import com.locket.app.storage.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Renders the persisted latest moment and supports the legacy cache on upgrade.
@@ -25,23 +26,69 @@ import kotlinx.coroutines.launch
  */
 object LocketWidgetUpdater {
 
-    fun updateAll(context: Context) {
-        val appContext = context.applicationContext
-        CoroutineScope(Dispatchers.IO).launch {
-            val session = SessionManager(appContext)
-            val owner = session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty()
-            val latest = session.getWidgetMoment(owner)
-            val views = buildViews(appContext, latest)
-            if (session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty() != owner ||
-                session.getWidgetMoment(owner) != latest) return@launch
-            val manager = AppWidgetManager.getInstance(appContext)
-            val ids = manager.getAppWidgetIds(
-                ComponentName(appContext, LocketWidgetProvider::class.java)
-            )
-            for (id in ids) {
-                manager.updateAppWidget(id, views)
+    private val renderLock = kotlinx.coroutines.sync.Mutex()
+
+    fun updateAll(context: Context): kotlinx.coroutines.Job =
+        CoroutineScope(Dispatchers.IO).launch { renderAll(context.applicationContext, false) }
+
+    internal suspend fun refreshAll(context: Context): Boolean = renderAll(context.applicationContext, true)
+
+    private suspend fun renderAll(context: Context, network: Boolean): Boolean = renderLock.withLock {
+        val app = context.applicationContext as com.locket.app.LocketApplication
+        val session = app.sessionManager
+        val manager = AppWidgetManager.getInstance(context)
+        val ids = manager.getAppWidgetIds(ComponentName(context, LocketWidgetProvider::class.java))
+        if (ids.isEmpty()) return@withLock true
+        val owner = session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty()
+        fun active() = owner.isNotBlank() && session.isLoggedIn && session.currentUser.uid == owner && !session.roomCacheClearPending
+        val api = if (network && active()) com.locket.app.api.LocketApiClient(
+            getToken = { session.idToken.takeIf { active() } },
+            getUid = { owner.takeIf { active() } },
+            getRefreshToken = { session.refreshToken.takeIf { active() } },
+            isTokenStale = { session.isTokenStale },
+            onTokensRefreshed = { token, refresh -> if (active()) {
+                session.idToken = token
+                session.refreshToken = refresh
+            } }
+        ) else null
+        val friends = if (active()) session.getFriends().associateBy { it.uid } else emptyMap()
+        val fetched = mutableMapOf<String, Result<Moment?>>()
+        var success = true
+        for (id in ids) {
+            val selection = session.readAux(owner, "widget_friend:$id").orEmpty()
+            val friend = friends[selection]
+            val local = when {
+                !active() -> null
+                selection.isEmpty() -> session.getWidgetMoment(owner)
+                friend != null -> app.cache.latestMomentByFriend(selection)
+                else -> null
             }
+            val latest = if (api != null && (selection.isEmpty() || friend != null)) {
+                val result = fetched[selection] ?: (if (selection.isEmpty()) {
+                    api.fetchMomentsFeed(null).map { page -> page.moments.maxByOrNull { it.timestampSeconds } }
+                } else {
+                    api.fetchHistoryPage(friendUid = selection).map { page ->
+                        page.moments.filter { it.userUid == selection }.maxByOrNull { it.timestampSeconds }
+                    }
+                }).also { fetched[selection] = it }
+                if (result.isFailure) {
+                    success = false
+                    continue // retain the existing widget on network errors
+                }
+                result.getOrNull() ?: if (selection.isEmpty()) local else null
+            } else local
+            val named = latest?.let { moment ->
+                friends[moment.userUid]?.let { f ->
+                    moment.copy(userName = f.displayName.ifBlank { f.username }.ifBlank { moment.userName })
+                } ?: moment
+            }
+            val views = buildViews(context, named)
+            if (session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty() != owner ||
+                session.readAux(owner, "widget_friend:$id").orEmpty() != selection ||
+                id !in manager.getAppWidgetIds(ComponentName(context, LocketWidgetProvider::class.java))) continue
+            manager.updateAppWidget(id, views)
         }
+        success
     }
 
     private suspend fun buildViews(context: Context, latest: Moment?): RemoteViews {

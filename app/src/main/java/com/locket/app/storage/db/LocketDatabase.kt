@@ -243,6 +243,9 @@ interface LocketDao {
     @Query("SELECT * FROM moments ORDER BY timestampSeconds DESC")
     fun observeMoments(): Flow<List<MomentEntity>>
 
+    @Query("SELECT * FROM moments WHERE userUid = :uid ORDER BY timestampSeconds DESC, id DESC LIMIT 1")
+    suspend fun latestMomentByFriend(uid: String): MomentEntity?
+
     @Query("SELECT * FROM friends ORDER BY displayName COLLATE NOCASE ASC")
     fun observeFriends(): Flow<List<FriendEntity>>
 

@@ -406,7 +406,7 @@ class LocketViewModel(
         cache.saveMomentChanges(account, before, updated, tombstones)
         if (!activeAccount(account)) return
         if (changed) _moments.value = updated
-        if (widgetChanged) LocketWidgetUpdater.updateAll(LocketApplication.instance)
+        if (widgetChanged || changed) LocketWidgetUpdater.updateAll(LocketApplication.instance)
     }
 
     private suspend fun mergeMoments(account: String, incoming: List<Moment>, tombstones: Set<String> = emptySet()) {

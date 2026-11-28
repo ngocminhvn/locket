@@ -3,19 +3,22 @@ package com.locket.app.widget
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
+import com.locket.app.storage.SessionManager
 
-/**
- * Home Screen Widget: hien moment moi nhat (thumbnail that + ten nguoi gui + thoi gian).
- * Du lieu that tu cache SessionManager (moments da sync tu server), khong dung anh mau/mock.
- * Bam vao widget mo app dung man Home (extra "open_home").
- * Widget duoc cap nhat moi khi LocketViewModel.syncAllData luu moments moi.
- */
 class LocketWidgetProvider : AppWidgetProvider() {
-    override fun onUpdate(
-        context: Context,
-        appWidgetManager: AppWidgetManager,
-        appWidgetIds: IntArray
-    ) {
-        LocketWidgetUpdater.updateAll(context)
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val pending = goAsync()
+        LocketWidgetUpdater.updateAll(context).invokeOnCompletion { pending.finish() }
+        WidgetRefreshJob.schedule(context, immediate = true)
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        val session = SessionManager(context)
+        val owner = session.currentUser.uid
+        appWidgetIds.forEach { session.writeAux(owner, "widget_friend:$it", null) }
+    }
+
+    override fun onDisabled(context: Context) {
+        WidgetRefreshJob.cancel(context)
     }
 }
