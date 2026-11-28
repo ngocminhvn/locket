@@ -142,17 +142,17 @@ fun ProfileScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(LocketBlack)
+            .statusBarsPadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding()
                 .verticalScroll(scrollState)
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // The navigation controls share the same vertical space as the avatar.
+            // The fixed navigation controls overlay the avatar's top edge.
             Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 Box(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).size(116.dp),
@@ -186,23 +186,7 @@ fun ProfileScreen(
                     }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = LocketTextDim)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isSyncing) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = LocketYellow, strokeWidth = 2.dp)
-                        }
-                        IconButton(onClick = { showQrModal = true }) {
-                            Icon(Icons.Default.QrCode, "Mã QR", tint = LocketYellow)
-                        }
-                    }
-                }
+
             }
 
             Spacer(modifier = Modifier.height(5.dp))
@@ -406,6 +390,28 @@ fun ProfileScreen(
                     Toast.makeText(context, "Đã đăng xuất", Toast.LENGTH_SHORT).show()
                 }
             )
+        }
+
+        // Keep back and QR controls anchored to the viewport, not the scroll content.
+        // When content scrolls underneath, an opaque header keeps controls legible.
+        Row(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .background(if (scrollState.value > 0) LocketBlack else Color.Transparent)
+                .padding(top = 8.dp, start = 4.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Quay lại", tint = LocketTextDim)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSyncing) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = LocketYellow, strokeWidth = 2.dp)
+                }
+                IconButton(onClick = { showQrModal = true }) {
+                    Icon(Icons.Default.QrCode, "Mã QR", tint = LocketYellow)
+                }
+            }
         }
 
         appearanceSheet?.let { page ->

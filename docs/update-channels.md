@@ -6,4 +6,4 @@
 - Preserve only the latest APK and XZ for each channel using prior successful Pages snapshot or verified live files. Remove only the superseded files of the channel being updated. No extra tag, release, branch, or duplicated payload in the published site. Snapshot artifacts are retained for recovery.
 - APK and XZ payload checks include length, SHA-256, strict file names, channel/version, APK package and signature (Android installer final verification).
 - The earlier two-directory scheme was never deployed (Pages disabled when changed). Existing GitHub Releases untouched; old APKs need a one-time manual install of a Pages-capable build.
-- CI not triggered by ordinary source commits. Pages must be enabled before deployment. No build/device check was run in this change.
+- CI not triggered by ordinary source commits. Pages must be enabled before deployment. If Pages is disabled, the workflow produces signed Artifacts and explicitly skips publication with a warning; actual publication failures after enabling Pages remain failures. No build/device check was run in this change.

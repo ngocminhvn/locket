@@ -27,6 +27,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[manual build request]'))
     name: Build signed APK
     runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.pages_status.outputs.enabled }}
 
     env:
       LOCKET_CHANNEL: ${{ ((github.event_name == 'workflow_dispatch' && inputs.release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[release build]'))) && 'release' || 'dev' }}
@@ -186,12 +188,29 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Configure GitHub Pages
+      - name: Check whether GitHub Pages is enabled
+        id: pages_status
         if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          enabled="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_pages')"
+          case "$enabled" in
+            true|false) echo "enabled=$enabled" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Could not determine Pages status"; exit 1 ;;
+          esac
+          if [[ "$enabled" == false ]]; then
+            echo "::warning::GitHub Pages is disabled. Signed APK and XZ are available in Artifacts."
+            echo 'GitHub Pages is disabled. Enable Settings > Pages > GitHub Actions to publish updates. Signed APK and XZ are available in Artifacts.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
 
       - name: Stage both update channels
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -200,7 +219,7 @@ jobs:
           du -sh pages
 
       - name: Save Pages snapshot
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: locket-pages-snapshot
@@ -210,7 +229,7 @@ jobs:
           retention-days: 90
 
       - name: Upload GitHub Pages artifact
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages
@@ -220,7 +239,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/locket-signing.keystore"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.pages_enabled == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -268,7 +268,6 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     ProfileSettingsRow(
         icon = { Icon(Icons.Default.Visibility, null, tint = Color(0xFFCCCCCC)) },
         title = "Hiện lượt xem",
-        subtitle = "Hiện số lượt xem trên khoảnh khắc của bạn",
         trailing = {
             Switch(checked = showViewCount, onCheckedChange = { viewModel.setShowViewCount(it) },
                 colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = LocketYellow))
