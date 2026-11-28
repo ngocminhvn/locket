@@ -30,7 +30,6 @@ import java.time.temporal.ChronoUnit
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.components.LocketBottomBar
 import com.locket.app.ui.theme.*
 
 @Composable
@@ -130,7 +129,7 @@ fun ConversationsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 84.dp)
+                contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
             ) {
                 items(conversations, key = { it.id }) { conv ->
                     Row(
@@ -224,16 +223,6 @@ fun ConversationsScreen(
                 contentDescription = "Tin nhắn mới",
                 tint = Color.Black,
                 modifier = Modifier.size(24.dp)
-            )
-        }
-
-        // Bottom Navigation Bar
-        Box(
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            LocketBottomBar(
-                currentScreen = "chat",
-                onNavigate = onNavigate
             )
         }
 

@@ -221,7 +221,9 @@ fun FeedBottomBar(
     onShutterClick: () -> Unit,
     onChatClick: () -> Unit,
     onShareClick: () -> Unit,
-    separated: Boolean = false
+    separated: Boolean = false,
+    currentScreen: String = "camera",
+    showSideActions: Boolean = true
 ) {
     if (separated) {
         val surface = Color.White.copy(alpha = 0.10f)
@@ -231,33 +233,41 @@ fun FeedBottomBar(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
-                Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
-            }
+            if (showSideActions) {
+                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
+                    Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            } else Spacer(Modifier.size(54.dp))
             Row(
                 Modifier.weight(1f).height(54.dp).clip(CircleShape).background(surface).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    IconButton(onClick = onHistoryClick, modifier = Modifier.size(38.dp)) {
-                        Icon(Icons.Default.Apps, "Kỷ niệm", tint = inactive, modifier = Modifier.size(25.dp))
+                    IconButton(onClick = onHistoryClick, modifier = Modifier.size(38.dp)
+                        .clip(CircleShape).background(if (currentScreen == "history") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
+                        Icon(Icons.Default.Apps, "Kỷ niệm", tint = if (currentScreen == "history") Color.White else inactive, modifier = Modifier.size(25.dp))
                     }
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape).clickable(onClick = onShutterClick),
-                        contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(29.dp).background(Color.White, CircleShape))
+                    Box(Modifier.size(38.dp).clip(CircleShape)
+                        .then(if (currentScreen == "camera") Modifier.border(3.dp, LocketYellow, CircleShape) else Modifier)
+                        .clickable(onClick = onShutterClick), contentAlignment = Alignment.Center) {
+                        if (currentScreen == "camera") Box(Modifier.size(29.dp).background(Color.White, CircleShape))
+                        else Icon(Icons.Default.PhotoCamera, "Camera", tint = inactive, modifier = Modifier.size(25.dp))
                     }
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    IconButton(onClick = onChatClick, modifier = Modifier.size(38.dp)) {
-                        Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = inactive, modifier = Modifier.size(24.dp))
+                    IconButton(onClick = onChatClick, modifier = Modifier.size(38.dp)
+                        .clip(CircleShape).background(if (currentScreen == "chat") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
+                        Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = if (currentScreen == "chat") Color.White else inactive, modifier = Modifier.size(24.dp))
                     }
                 }
             }
-            IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
-                Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
-            }
+            if (showSideActions) {
+                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
+                    Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
+                }
+            } else Spacer(Modifier.size(54.dp))
         }
         return
     }

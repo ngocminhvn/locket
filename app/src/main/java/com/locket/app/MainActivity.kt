@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import com.locket.app.api.LocketApiClient
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
+import com.locket.app.ui.components.FeedBottomBar
 import com.locket.app.ui.screens.*
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
@@ -134,6 +135,10 @@ class MainActivity : ComponentActivity() {
                         currentScreen in listOf("history", "camera", "feed", "chat") -> {
                             val pager = rememberPagerState(initialPage = mainTab.coerceIn(0, 2)) { 3 }
                             val activeRoute by rememberUpdatedState(currentScreen)
+                            var homeNavVisible by remember { mutableStateOf(true) }
+                            var homeNavFeed by remember { mutableStateOf(false) }
+                            var homeCameraRequest by remember { mutableIntStateOf(0) }
+                            var homeShareRequest by remember { mutableIntStateOf(0) }
                             // Programmatic taps and Android Back use the same pager motion.
                             LaunchedEffect(mainTab) {
                                 if (pager.currentPage != mainTab || pager.currentPageOffsetFraction != 0f) {
@@ -196,7 +201,13 @@ class MainActivity : ComponentActivity() {
                                                 onTabSwipeEnabledChange = { enabled ->
                                                     if (pager.settledPage == 1 || pager.currentPage == 1) homeTabSwipeEnabled = enabled
                                                 },
-                                                tabActive = pager.settledPage == 1
+                                                tabActive = pager.settledPage == 1,
+                                                onNavigationState = { visible, feed ->
+                                                    homeNavVisible = visible
+                                                    homeNavFeed = feed
+                                                },
+                                                cameraRequest = homeCameraRequest,
+                                                shareRequest = homeShareRequest
                                             )
                                         }
                                     }
@@ -209,6 +220,31 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onOpenProfile = { showProfileScreen = true })
                                     }
+                                }
+                            }
+                            // Render one navigation bar outside the horizontal pager.
+                            // Its bounds never move with a page, even while the user drags.
+                            val homeSettled = pager.settledPage == 1
+                            if (!homeSettled || homeNavVisible) {
+                                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                                    FeedBottomBar(
+                                        onGridClick = { if (!pager.isScrollInProgress) currentScreen = "grid" },
+                                        onHistoryClick = { currentScreen = "history" },
+                                        onShutterClick = {
+                                            if (homeSettled && mainTab == 1 && !pager.isScrollInProgress) {
+                                                homeCameraRequest++
+                                            } else {
+                                                viewModel.setReplyToFriend(null)
+                                                viewModel.selectFriend(null)
+                                                currentScreen = "camera"
+                                            }
+                                        },
+                                        onChatClick = { currentScreen = "chat" },
+                                        onShareClick = { if (homeSettled && !pager.isScrollInProgress) homeShareRequest++ },
+                                        separated = true,
+                                        currentScreen = tabRoutes[pager.settledPage],
+                                        showSideActions = homeSettled && homeNavFeed
+                                    )
                                 }
                             }
                         }

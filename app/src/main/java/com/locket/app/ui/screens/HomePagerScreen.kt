@@ -9,8 +9,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import com.locket.app.ui.components.LocketTopBar
-import com.locket.app.ui.components.LocketBottomBar
-import com.locket.app.ui.components.FeedBottomBar
 import com.locket.app.ui.components.FriendFilterSheet
 import com.locket.app.ui.theme.LocketBlack
 import androidx.compose.material3.*
@@ -43,7 +41,10 @@ fun HomePagerScreen(
     onOpenFriends: () -> Unit,
     onOpenProfile: () -> Unit,
     onTabSwipeEnabledChange: (Boolean) -> Unit = {},
-    tabActive: Boolean = true
+    tabActive: Boolean = true,
+    onNavigationState: (Boolean, Boolean) -> Unit = { _, _ -> },
+    cameraRequest: Int = 0,
+    shareRequest: Int = 0
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -90,19 +91,37 @@ fun HomePagerScreen(
     val statusPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var measuredHeader by remember { mutableStateOf(0.dp) }
-    var measuredCameraFooter by remember { mutableStateOf(0.dp) }
-    var measuredFeedFooter by remember { mutableStateOf(0.dp) }
+    var measuredFeedControls by remember { mutableStateOf(0.dp) }
     val headerHeight = measuredHeader.takeIf { it > 0.dp } ?: (statusPadding + 66.dp)
-    val cameraFooterHeight = measuredCameraFooter.takeIf { it > 0.dp } ?: (navPadding + 70.dp)
-    val feedFooterHeight = measuredFeedFooter.takeIf { it > 0.dp } ?: (navPadding + 150.dp)
+    // Shared root nav: 54 dp bar + 11 dp padding on each edge + system inset.
+    val cameraFooterHeight = navPadding + 76.dp
+    val feedFooterHeight = cameraFooterHeight + (measuredFeedControls.takeIf { it > 0.dp } ?: 84.dp)
     // Keep shared controls stationary until a page settles. During a drag
     // only the photo, caption and author scroll with the finger.
     val cameraSelected = pagerState.settledPage == 0
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
     val showChrome = !(cameraSelected && cameraReviewVisible) && !zoomLocked
+    var handledCameraRequest by remember { mutableIntStateOf(cameraRequest) }
+    var handledShareRequest by remember { mutableIntStateOf(shareRequest) }
+    LaunchedEffect(cameraRequest) {
+        if (cameraRequest != handledCameraRequest) {
+            handledCameraRequest = cameraRequest
+            if (showChrome && !cameraReviewVisible) {
+                viewModel.setReplyToFriend(null)
+                if (pagerState.currentPage != 0) pagerState.animateScrollToPage(0)
+            }
+        }
+    }
+    LaunchedEffect(shareRequest) {
+        if (shareRequest != handledShareRequest) {
+            handledShareRequest = shareRequest
+            if (showChrome && activeMoment != null && !pagerState.isScrollInProgress) showShare = true
+        }
+    }
     LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
     BackHandler(enabled = showFriendFilter) { showFriendFilter = false }
     SideEffect {
+        if (tabActive) onNavigationState(showChrome && !showFriendFilter, !cameraSelected)
         onTabSwipeEnabledChange(!showFriendFilter && !showShare && !zoomLocked && !pagerState.isScrollInProgress &&
             (!cameraSelected || (cameraSwipeEnabled && !cameraReviewVisible)))
     }
@@ -271,17 +290,11 @@ fun HomePagerScreen(
             )
         }
 
-        if (cameraSelected) {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .onSizeChanged { measuredCameraFooter = with(density) { it.height.toDp() } }) {
-                LocketBottomBar("camera") { destination ->
-                    if (destination != "camera") onNavigate(destination)
-                }
-            }
-        } else {
+        if (!cameraSelected) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .onSizeChanged { measuredFeedFooter = with(density) { it.height.toDp() } },
+                    .padding(bottom = cameraFooterHeight)
+                    .onSizeChanged { measuredFeedControls = with(density) { it.height.toDp() } },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (activeMoment != null && activeMoment.userUid == currentUser.uid) {
@@ -295,17 +308,6 @@ fun HomePagerScreen(
                     }
                 }
                 Spacer(Modifier.height(28.dp))
-                FeedBottomBar(
-                    onGridClick = { onNavigate("grid") },
-                    onHistoryClick = { onNavigate("history") },
-                    onShutterClick = {
-                        viewModel.setReplyToFriend(null)
-                        scope.launch { pagerState.animateScrollToPage(0) }
-                    },
-                    onChatClick = { onNavigate("chat") },
-                    onShareClick = { if (activeMoment != null && !pagerState.isScrollInProgress) showShare = true },
-                    separated = true
-                )
             }
         }
     }

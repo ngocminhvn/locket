@@ -58,7 +58,6 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.components.LocketBottomBar
 import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.*
 import java.text.SimpleDateFormat
@@ -145,7 +144,7 @@ fun HistoryScreen(
             modifier = Modifier.fillMaxSize(),
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 96.dp, bottom = 92.dp)
+            contentPadding = PaddingValues(top = 96.dp, bottom = 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
         ) {
             // Month Cards
             items(calendarMonths, key = { "${it.year}-${it.month}" }) { monthData ->
@@ -215,16 +214,6 @@ fun HistoryScreen(
                     AsyncImage(currentUser.profilePictureUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 } else Icon(Icons.Default.Person, "Hồ sơ", tint = Color.White)
             }
-        }
-
-        // Bottom Navigation Bar
-        Box(
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            LocketBottomBar(
-                currentScreen = "history",
-                onNavigate = onNavigate
-            )
         }
 
         // Memory Full-Screen Viewer Dialog
