@@ -72,10 +72,11 @@ fun ConversationsScreen(
         }
     }
 
+    val ambient = rememberAmbientPalette(null, AmbientMode.CONVERSATION)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(backdropColor(BackdropFallbackTint, CONVERSATION_SCRIM))
+            .background(ambient.brush())
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
