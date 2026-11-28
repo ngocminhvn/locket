@@ -73,7 +73,7 @@ fun ConversationsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LocketBlack)
+            .background(momentGradient(LocalMomentColor.current))
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
