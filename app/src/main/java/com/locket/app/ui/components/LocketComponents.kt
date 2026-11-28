@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +71,14 @@ fun ShutterButton(
     }
 }
 
+// Fade-through at the fixed header anchors; no translation or spring.
+internal fun Modifier.locketHeaderTransition(progress: () -> Float): Modifier = graphicsLayer {
+    val visible = progress().coerceIn(0f, 1f)
+    alpha = visible
+    scaleX = 0.85f + 0.15f * visible
+    scaleY = scaleX
+}
+
 @Composable
 fun LocketTopBar(
     title: String = "Bạn bè",
@@ -80,7 +89,8 @@ fun LocketTopBar(
     onAvatarClick: () -> Unit = {},
     dropdownExpanded: Boolean = false,
     adaptiveBackground: Boolean = false,
-    showAvatar: Boolean = true
+    showAvatar: Boolean = true,
+    transitionProgress: () -> Float = { 1f }
 ) {
     Row(
         modifier = Modifier
@@ -94,6 +104,7 @@ fun LocketTopBar(
         Box(
             modifier = Modifier
                 .size(46.dp)
+                .locketHeaderTransition(transitionProgress)
                 .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
                     else Modifier.liquidGlassEffect(CircleShape))
                 .clickable(onClick = onSpeakerClick),
@@ -111,6 +122,7 @@ fun LocketTopBar(
         Box(Modifier.weight(1f).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
+                .locketHeaderTransition(transitionProgress)
                 .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
                     else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
                 .clickable(onClick = onTitleClick)
