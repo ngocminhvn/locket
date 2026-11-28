@@ -22,7 +22,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.roundToInt
 
-/** Foreground-only, on-demand location. Never store coordinates or send them to Locket. */
+/** Foreground-only, on-demand location. No background tracking. */
 internal object CaptionLocationData {
     fun hasPermission(context: Context): Boolean =
         granted(context, Manifest.permission.ACCESS_COARSE_LOCATION) ||
@@ -75,29 +75,73 @@ internal object CaptionLocationData {
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS).build()
 
-    /** Open-Meteo free non-commercial endpoint; no API key. Approximate coordinates only. */
-    suspend fun weather(location: Location): String = withContext(Dispatchers.IO) {
+    private var cachedWeather: Pair<Long, CaptionWeather>? = null
+
+    fun recentWeather(): CaptionWeather? = cachedWeather?.takeIf {
+        android.os.SystemClock.elapsedRealtime() - it.first < 300_000L
+    }?.second
+
+    /** Open-Meteo fallback. Coordinates are rounded before requesting weather. */
+    suspend fun weather(location: Location): CaptionWeather = withContext(Dispatchers.IO) {
         val lat = String.format(Locale.US, "%.2f", location.latitude)
         val lon = String.format(Locale.US, "%.2f", location.longitude)
-        val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day&temperature_unit=celsius"
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day,cloud_cover&temperature_unit=celsius"
         client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             check(response.isSuccessful) { "Không lấy được thời tiết (HTTP ${response.code})" }
             val current = JSONObject(response.body?.string() ?: error("Thiếu dữ liệu thời tiết")).getJSONObject("current")
             val temperature = current.getDouble("temperature_2m")
-            check(temperature.isFinite()) { "Nhiệt độ không hợp lệ" }
-            val code = current.getInt("weather_code")
-            val day = current.optInt("is_day", 1) == 1
-            val symbol = when (code) {
-                0 -> if (day) "☀️" else "🌙"
-                1, 2 -> if (day) "⛅" else "☁️"
-                3 -> "☁️"
-                45, 48 -> "🌫️"
-                51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> "🌧️"
-                71, 73, 75, 77, 85, 86 -> "❄️"
-                95, 96, 99 -> "⛈️"
-                else -> ""
+            val cloudCover = current.getDouble("cloud_cover") / 100.0
+            check(temperature.isFinite() && cloudCover.isFinite())
+            val condition = when (current.getInt("weather_code")) {
+                0 -> "clear"
+                1 -> "mostlyClear"
+                2 -> "partlyCloudy"
+                3 -> "cloudy"
+                45, 48 -> "foggy"
+                51, 53, 55 -> "drizzle"
+                56, 57 -> "freezingDrizzle"
+                61, 63, 80, 81 -> "rain"
+                65, 82 -> "heavyRain"
+                66, 67 -> "freezingRain"
+                71, 73, 77, 85 -> "snow"
+                75, 86 -> "heavySnow"
+                95, 96, 99 -> "thunderstorms"
+                else -> error("Mã thời tiết không hỗ trợ")
             }
-            listOf(symbol, "${temperature.roundToInt()}°C").filter { it.isNotBlank() }.joinToString(" ")
+            CaptionWeather(temperature, condition, current.getInt("is_day") == 1, cloudCover.coerceIn(0.0, 1.0))
+                .also { rememberWeather(it) }
         }
     }
+    fun rememberWeather(weather: CaptionWeather) {
+        cachedWeather = android.os.SystemClock.elapsedRealtime() to weather
+    }
+}
+
+internal data class CaptionWeather(
+    val celsius: Double, val condition: String, val daylight: Boolean, val cloudCover: Double
+) {
+    private val fahrenheit = celsius * 9 / 5 + 32
+    private val useFahrenheit get() = Locale.getDefault().country in setOf("US", "BS", "KY", "LR", "PW", "FM", "MH")
+    val label get() = if (useFahrenheit) "${fahrenheit.roundToInt()}°F" else "${celsius.roundToInt()}°C"
+    val symbol: String get() = when (condition) {
+        "clear", "mostlyClear", "hot" -> if (daylight) "sun.max.fill" else "moon.stars.fill"
+        "partlyCloudy" -> if (daylight) "cloud.sun.fill" else "cloud.moon.fill"
+        "foggy", "haze" -> "cloud.fog.fill"
+        "drizzle", "rain", "heavyRain", "freezingRain", "freezingDrizzle", "sunShowers" -> "cloud.rain.fill"
+        "snow", "heavySnow", "flurries", "blizzard" -> "snowflake"
+        "thunderstorms", "strongStorms", "isolatedThunderstorms", "scatteredThunderstorms" -> "cloud.bolt.rain.fill"
+        else -> "cloud.fill"
+    }
+    val colors: List<String> get() = when (condition) {
+        "clear", "mostlyClear", "partlyCloudy", "hot" -> if (daylight) listOf("#2D9AFF", "#6BDCFF") else listOf("#370C6F", "#575CD4")
+        else -> listOf("#7790A6", "#AAAAAA")
+    }
+    fun overlay() = com.locket.app.model.CaptionOverlays.make("weather", label, colors = colors,
+        icon = com.locket.app.model.CaptionOverlays.icon("sf_symbol", symbol),
+        payload = com.google.gson.JsonObject().apply {
+            addProperty("cloud_cover", cloudCover)
+            addProperty("is_daylight", daylight)
+            addProperty("temperature", fahrenheit)
+            addProperty("wk_condition", condition)
+        })
 }
