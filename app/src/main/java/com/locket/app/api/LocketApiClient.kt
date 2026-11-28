@@ -2109,7 +2109,7 @@ class LocketApiClient(
         }
     }
 
-    suspend fun sendChatMessage(receiverUid: String, message: String, momentUid: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun sendChatMessage(receiverUid: String, message: String, momentUid: String? = null, clientToken: String = UUID.randomUUID().toString()): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             if (receiverUid.isBlank() || message.isBlank()) error("Thiếu người nhận hoặc nội dung")
             if (!ensureFreshToken()) error("Phiên đăng nhập hết hạn hoặc không thể làm mới")
@@ -2117,7 +2117,7 @@ class LocketApiClient(
                 add("data", JsonObject().apply {
                     addProperty("msg", message)
                     addProperty("receiver_uid", receiverUid)
-                    addProperty("client_token", UUID.randomUUID().toString())
+                    addProperty("client_token", clientToken)
                     if (!momentUid.isNullOrBlank()) addProperty("moment_uid", momentUid)
                 })
             }

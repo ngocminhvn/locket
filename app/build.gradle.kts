@@ -95,6 +95,11 @@ dependencies {
     // Authenticated Firestore Listen (existing REST session; no second sign-in).
     implementation("com.google.api.grpc:grpc-google-cloud-firestore-v1:3.44.0")
     implementation("io.grpc:grpc-okhttp:1.81.0")
+    val media3Version = "1.11.1"
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-datasource:$media3Version")
+    implementation("androidx.media3:media3-database:$media3Version")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
 
     // QR that cho link moi (ZXing core — chi core, khong them lib thua)
     implementation("com.google.zxing:core:3.5.4")

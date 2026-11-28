@@ -58,6 +58,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
+import com.locket.app.ui.MomentVideo
 import com.locket.app.ui.components.liquidGlassEffect
 import com.locket.app.ui.theme.*
 import java.text.SimpleDateFormat
@@ -229,6 +230,7 @@ fun HistoryScreen(
                 loadingOlder = historyLoading,
                 historyError = historyError,
                 onLoadOlder = { viewModel.loadOwnHistory() },
+                onPrefetch = { items, index -> viewModel.prefetchUpcomingMoments(items, index) },
                 onDelete = { target, globally, done ->
                     viewModel.deleteMoment(target, globally, onSuccess = {
                         done()
@@ -342,6 +344,7 @@ fun MemoryDetailDialog(
     loadingOlder: Boolean = false,
     historyError: String? = null,
     onLoadOlder: () -> Unit = {},
+    onPrefetch: (List<Moment>, Int) -> Unit = { _, _ -> },
     onDelete: ((Moment, Boolean, () -> Unit) -> Unit)? = null
 ) {
     val photos = remember(moment.id, historyMoments) {
@@ -363,6 +366,7 @@ fun MemoryDetailDialog(
     var pan by remember(active.id) { mutableStateOf(Offset.Zero) }
     var thumbDragging by remember { mutableStateOf(false) }
     val moving = pager.isScrollInProgress || thumbDragging || kotlin.math.abs(pager.currentPageOffsetFraction) > 0.001f
+    LaunchedEffect(active.id, photos.size) { onPrefetch(photos, pager.settledPage) }
     LaunchedEffect(active.id) {
         zoom = 1f
         pan = Offset.Zero
@@ -415,7 +419,7 @@ fun MemoryDetailDialog(
                                 val selected = page == pager.settledPage
                                 AsyncImage(photo.thumbnailUrl, photo.caption,
                                     Modifier.fillMaxSize()
-                                        .then(if (selected) Modifier.pointerInput(photo.id) {
+                                        .then(if (selected && photo.videoUrl.isNullOrBlank()) Modifier.pointerInput(photo.id) {
                                             awaitEachGesture {
                                                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                                 var ownsGesture = false
@@ -439,6 +443,9 @@ fun MemoryDetailDialog(
                                             translationX = pan.x; translationY = pan.y
                                         } else Modifier),
                                     contentScale = ContentScale.Crop)
+                                if (selected && !moving && !photo.videoUrl.isNullOrBlank()) {
+                                    MomentVideo(photo.videoUrl, Modifier.fillMaxSize())
+                                }
                                 if (!moving && (zoom <= 1f || !selected)) {
                                     val photoTime = remember(photo.timestampSeconds) {
                                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(photo.timestampSeconds * 1000))

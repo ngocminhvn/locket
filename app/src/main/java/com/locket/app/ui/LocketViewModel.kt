@@ -158,6 +158,8 @@ class LocketViewModel(
     // Chi truy cap tu main thread (LaunchedEffect + viewModelScope mac dinh
     // chay tren Main) nen khong can dong bo them.
     private val prefetchedThumbnails = mutableSetOf<String>()
+    private val videoPrefetchJobs = mutableMapOf<String, Job>()
+    private val videoPrefetched = linkedSetOf<String>()
 
     // UID moment da goi markMomentAsViewed trong phien (dedupe + cap 100,
     // giong goc: viewedMomentUids, bundle ~1247103 — includes thi bo qua,
@@ -285,6 +287,18 @@ class LocketViewModel(
         val opposite = if (forward) listOf(currentIndex - 1, currentIndex - 2)
             else listOf(currentIndex + 1, currentIndex + 2)
         prefetchThumbnails((next + opposite).mapNotNull { moments.getOrNull(it)?.thumbnailUrl })
+        val nearbyVideos = (-3..3).filter { it != 0 }.mapNotNull { moments.getOrNull(currentIndex + it)?.videoUrl?.takeIf(String::isNotBlank) }.toSet()
+        videoPrefetchJobs.keys.filter { it !in nearbyVideos }.forEach { videoPrefetchJobs.remove(it)?.cancel() }
+        for (url in nearbyVideos) {
+            if (url in videoPrefetched || videoPrefetchJobs[url]?.isActive == true) continue
+            videoPrefetchJobs[url] = viewModelScope.launch {
+                try {
+                    MomentVideoCache.prefetch(LocketApplication.instance, url)
+                    videoPrefetched.add(url)
+                    while (videoPrefetched.size > 48) videoPrefetched.remove(videoPrefetched.first())
+                } finally { videoPrefetchJobs.remove(url) }
+            }
+        }
     }
 
     private fun knownMomentNames(incoming: List<Moment>): List<Moment> {
@@ -413,6 +427,13 @@ class LocketViewModel(
     // Tin nhan that cua cuoc tro chuyen dang mo (Room cache-first + sync tu Firestore).
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+    data class PendingChat(val token: String, val receiver: String, val text: String, val createdAt: Long, val acknowledged: Boolean = false)
+    private val _pendingChat = MutableStateFlow<List<PendingChat>>(emptyList())
+    val pendingChat = _pendingChat.asStateFlow()
+    private fun reconcilePending(messages: List<ChatMessage>) {
+        val tokens = messages.mapNotNull { it.clientToken }.toSet()
+        if (tokens.isNotEmpty()) _pendingChat.update { rows -> rows.filterNot { it.token in tokens } }
+    }
 
     private val _activeConversationId = MutableStateFlow<String?>(null)
     val activeConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
@@ -519,6 +540,8 @@ class LocketViewModel(
             chatListenJob?.cancel(); chatListenJob = null
             _feedRealtime.value = false
             _chatRealtime.value = false
+            videoPrefetchJobs.values.toList().forEach { it.cancel() }
+            videoPrefetchJobs.clear()
         }
     }
 
@@ -785,7 +808,7 @@ class LocketViewModel(
                 if (!activeAccount(account) || activeFriendUid != friendUid) return@launch
                 _chatMessages.value = saved
                 chatMessagesJob = viewModelScope.launch {
-                    cache.observeChatMessages(id).collect { if (_activeConversationId.value == id) _chatMessages.value = it }
+                    cache.observeChatMessages(id).collect { if (_activeConversationId.value == id) { _chatMessages.value = it; reconcilePending(it) } }
                 }
                 // Cache is displayed before any network response.
                 if (_chatMessages.value.isNotEmpty()) _isChatLoading.value = false
@@ -1022,18 +1045,25 @@ class LocketViewModel(
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        val account = sessionManager.currentUser.uid
+        val token = java.util.UUID.randomUUID().toString()
+        val pending = PendingChat(token, receiverUid, message, System.currentTimeMillis())
+        if (activeFriendUid == receiverUid && momentUid == null && activeAccount(account)) _pendingChat.update { it + pending }
         viewModelScope.launch {
-            val res = apiClient.sendChatMessage(receiverUid, message, momentUid)
+            val res = apiClient.sendChatMessage(receiverUid, message, momentUid, token)
+            if (!activeAccount(account)) return@launch
             if (res.isSuccess) {
+                _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(acknowledged = true) else it } }
                 onSuccess()
                 val current = _activeConversationId.value
                 if (activeFriendUid == receiverUid && current != null) {
-                    launch { fetchChatMessagesAndMarkRead(current) }
-                    launch { refreshConversations() }
+                    if (!_chatRealtime.value) launch { fetchChatMessagesAndMarkRead(current, incremental = true) }
+                    launch { refreshConversations(force = false) }
                 } else if (activeFriendUid == receiverUid) {
                     openChat(receiverUid)
                 } else refreshConversations()
             } else {
+                _pendingChat.update { rows -> rows.filterNot { it.token == token } }
                 onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
             }
         }
@@ -1558,6 +1588,8 @@ class LocketViewModel(
         closeChat()
         apiClient.clearUserNameCache()
         prefetchedThumbnails.clear()
+        videoPrefetchJobs.values.toList().forEach { it.cancel() }
+        videoPrefetchJobs.clear(); videoPrefetched.clear()
         viewedMomentUids.clear()
         _momentViewCounts.value = emptyMap()
         _momentViewers.value = emptyMap()
@@ -1586,6 +1618,7 @@ class LocketViewModel(
         _chatHasMoreOlder.value = true
         _isLoadingOlderChat.value = false
         _chatMessages.value = emptyList()
+        _pendingChat.value = emptyList()
         _activeConversationId.value = null
         _isChatLoading.value = false
         _currentUser.value = sessionManager.currentUser

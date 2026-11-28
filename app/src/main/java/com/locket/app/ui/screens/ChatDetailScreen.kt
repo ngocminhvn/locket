@@ -87,6 +87,8 @@ fun ChatDetailScreen(
     var chatSettled by remember(friend.uid) { mutableStateOf(false) }
 
     val messages by viewModel.chatMessages.collectAsState()
+    val pending by viewModel.pendingChat.collectAsState()
+    val pendingHere = pending.filter { it.receiver == friend.uid && messages.none { message -> message.clientToken == it.token } }
     val isChatLoading by viewModel.isChatLoading.collectAsState()
     val isLoadingOlderChat by viewModel.isLoadingOlderChat.collectAsState()
     val activeConversationId by viewModel.activeConversationId.collectAsState()
@@ -128,14 +130,14 @@ fun ChatDetailScreen(
     fun sendText(text: String, clearInput: Boolean = false) {
         if (text.isBlank() || sending) return
         sending = true
+        if (clearInput && inputMessage == text) inputMessage = ""
         viewModel.sendChatMessage(friend.uid, text,
             onSuccess = {
                 sending = false
-                if (clearInput && inputMessage == text) inputMessage = ""
             },
             onError = { err ->
                 sending = false
-                if (!clearInput && inputMessage.isBlank()) inputMessage = text
+                if (inputMessage.isBlank()) inputMessage = text
                 Toast.makeText(context, "Không gửi được: $err", Toast.LENGTH_LONG).show()
             })
     }
@@ -148,20 +150,14 @@ fun ChatDetailScreen(
 
     // Reverse layout anchors the newest message at the composer even when IME
     // changes the viewport or the last item is a large square photo.
-    LaunchedEffect(messages.lastOrNull()?.id) {
-        if (messages.isNotEmpty()) {
+    LaunchedEffect(messages.lastOrNull()?.id, pendingHere.lastOrNull()?.token) {
+        if (messages.isNotEmpty() || pendingHere.isNotEmpty()) {
             listState.scrollToItem(0)
             chatSettled = true
         }
     }
 
-    LaunchedEffect(activeConversationId) {
-        val convId = activeConversationId ?: return@LaunchedEffect
-        while (true) {
-            delay(12000)
-            viewModel.refreshChat(convId)
-        }
-    }
+    // Live deltas are primary. The ViewModel reconnects and fetches missed messages on failure.
 
     // Older messages append at the far end of the reversed list. Stable
     // message keys preserve the current scroll position without index math.
@@ -249,7 +245,7 @@ fun ChatDetailScreen(
             }
 
             // Message Stream: tin nhan that tu server (cache Room + sync)
-            if (isChatLoading && messages.isEmpty()) {
+            if (isChatLoading && messages.isEmpty() && pendingHere.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -258,7 +254,7 @@ fun ChatDetailScreen(
                 ) {
                     CircularProgressIndicator(color = LocketYellow)
                 }
-            } else if (messages.isEmpty()) {
+            } else if (messages.isEmpty() && pendingHere.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -282,6 +278,15 @@ fun ChatDetailScreen(
                     contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    items(pendingHere.asReversed(), key = { "pending:" + it.token }) { draft ->
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                            Text(draft.text, color = Color.Black, fontSize = 16.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(28.dp)).background(Color.White)
+                                    .padding(horizontal = 18.dp, vertical = 12.dp))
+                            Text(if (draft.acknowledged) "Đã gửi · Đang đồng bộ" else "Đang gửi…",
+                                color = LocketTextDim, fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 3.dp))
+                        }
+                    }
                     items(newestFirst, key = { it.id }) { msg ->
                         val timeStr = formatTime(msg.createdAtMs)
                         if (msg.thumbnailUrl != null) {

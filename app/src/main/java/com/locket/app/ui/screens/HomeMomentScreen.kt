@@ -18,8 +18,6 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clipToBounds
 import coil.request.ImageRequest
-import android.widget.VideoView
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -50,6 +48,7 @@ import coil.compose.AsyncImage
 import com.locket.app.model.Friend
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
+import com.locket.app.ui.MomentVideo
 import com.locket.app.ui.components.*
 import com.locket.app.ui.theme.*
 
@@ -210,16 +209,7 @@ fun HomeMomentScreen(
                         onError = { imageLoading = false }
                     )
                     if (!videoUrl.isNullOrBlank() && isActive) {
-                        key(videoUrl) {
-                            AndroidView(
-                                modifier = Modifier.fillMaxSize(),
-                                factory = { ctx -> VideoView(ctx).apply {
-                                    setVideoURI(android.net.Uri.parse(videoUrl))
-                                    setOnPreparedListener { player -> player.isLooping = true; start() }
-                                } },
-                                onRelease = { it.stopPlayback() }
-                            )
-                        }
+                        MomentVideo(videoUrl, Modifier.fillMaxSize())
                     }
 
                     // Caption overlay inside photo (Matches frame_010.jpg)
