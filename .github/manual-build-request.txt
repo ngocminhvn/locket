@@ -1,3 +1,3 @@
-Build requested: Dev with reference-style soft top and bottom Home navigation overlays.
-Source: a229f68fefb780532a02214d7ce0cc9f6fac07fb
-Previous marker: 152d5d83098fca1892d73f7636463c77deafaf46
+Build requested: Dev APK with synchronized fade-through animations for changing navigation controls and yellow compose button.
+Source: 0f50d3bae59bffd22043b5973f698f77ad37ea76
+Previous marker: 74063a06a25cbf3e35116784e0b54ddf300d63c5
