@@ -15,6 +15,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.material.icons.filled.Share
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +62,7 @@ fun HistoryScreen(
     onNavigate: (String) -> Unit,
     onOpenProfile: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val allMoments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val moments = remember(allMoments, currentUser.uid) {
@@ -212,6 +226,16 @@ fun HistoryScreen(
                 onDismiss = { viewingMoment = null },
                 onReact = { emoji ->
                     viewModel.reactToMoment(moment.id, moment.userUid, emoji)
+                },
+                dayMoments = momentsByDate.values.firstOrNull { day -> day.any { it.id == moment.id } }.orEmpty(),
+                onDelete = { target, globally, done ->
+                    viewModel.deleteMoment(target, globally, onSuccess = {
+                        done()
+                        viewingMoment = null
+                    }, onError = { error ->
+                        done()
+                        android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_LONG).show()
+                    })
                 }
             )
         }
@@ -311,136 +335,149 @@ private fun MemoryConnector() {
 fun MemoryDetailDialog(
     moment: Moment,
     onDismiss: () -> Unit,
-    onReact: (String) -> Unit
+    onReact: (String) -> Unit,
+    dayMoments: List<Moment> = emptyList(),
+    onDelete: ((Moment, Boolean, () -> Unit) -> Unit)? = null
 ) {
-    val dateStr = remember(moment.timestampSeconds) {
-        val sdf = SimpleDateFormat("HH:mm • dd/MM/yyyy", Locale.getDefault())
-        sdf.format(Date(moment.timestampSeconds * 1000))
+    val photos = remember(moment.id, dayMoments) {
+        (dayMoments + moment).distinctBy { it.id }.sortedBy { it.timestampSeconds }
+    }
+    val pager = rememberPagerState(initialPage = photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0)) { photos.size }
+    val scope = rememberCoroutineScope()
+    val active = photos[pager.currentPage.coerceIn(0, photos.lastIndex)]
+    val date = remember(active.timestampSeconds) {
+        Calendar.getInstance().apply { timeInMillis = active.timestampSeconds * 1000 }
+    }
+    val time = remember(active.timestampSeconds) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(active.timestampSeconds * 1000))
+    }
+    var share by remember(active.id) { mutableStateOf(false) }
+    var delete by remember(active.id) { mutableStateOf(false) }
+    var deleting by remember(active.id) { mutableStateOf(false) }
+    var zoom by remember(active.id) { mutableFloatStateOf(1f) }
+    var pan by remember(active.id) { mutableStateOf(Offset.Zero) }
+    val thumbs = rememberLazyListState()
+    LaunchedEffect(pager.currentPage) {
+        zoom = 1f
+        pan = Offset.Zero
+        if (photos.size > 1) thumbs.animateScrollToItem(pager.currentPage)
     }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.95f))
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Top Action Bar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .liquidGlassEffect(CircleShape)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color.White)
+        Box(Modifier.fillMaxSize().background(Color.Black).clipToBounds()) {
+            if (active.thumbnailUrl.isNotBlank()) MomentBackdrop(active.thumbnailUrl)
+            BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                val photoSize = minOf(maxWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 30.dp).height(58.dp)) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
+                        Icon(Icons.Default.Close, "Đóng", tint = Color.White, modifier = Modifier.size(30.dp))
                     }
+                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(date.get(Calendar.YEAR).toString(), color = Color.White.copy(alpha = 0.60f),
+                            fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Text("${date.get(Calendar.DAY_OF_MONTH)} tháng ${date.get(Calendar.MONTH) + 1}",
+                            color = Color.White.copy(alpha = 0.90f), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                    IconButton(onClick = { share = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
+                        Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White.copy(alpha = 0.90f), modifier = Modifier.size(26.dp))
+                    }
+                }
 
-                    // User Info
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2C2C2E)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (moment.userAvatarUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = moment.userAvatarUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Column(Modifier.align(Alignment.Center).offset(y = (-18).dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(photoSize),
+                        userScrollEnabled = zoom <= 1f) { page ->
+                        val photo = photos[page]
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(photoSize).clip(RoundedCornerShape(46.dp))
+                                .background(Color(0xFF1E1E20))) {
+                                val selected = page == pager.currentPage
+                                AsyncImage(photo.thumbnailUrl, photo.caption,
+                                    Modifier.fillMaxSize()
+                                        .then(if (selected) Modifier.pointerInput(photo.id) {
+                                            awaitEachGesture {
+                                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                                var ownsGesture = false
+                                                do {
+                                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                    val fingers = event.changes.count { it.pressed }
+                                                    if (fingers >= 2 || zoom > 1f) ownsGesture = true
+                                                    if (ownsGesture && fingers > 0) {
+                                                        val next = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
+                                                        val limitX = size.width * (next - 1f) / 2f
+                                                        val limitY = size.height * (next - 1f) / 2f
+                                                        val moved = pan + event.calculatePan()
+                                                        pan = Offset(moved.x.coerceIn(-limitX, limitX), moved.y.coerceIn(-limitY, limitY))
+                                                        zoom = next
+                                                        event.changes.forEach { it.consume() }
+                                                    }
+                                                } while (event.changes.any { it.pressed })
+                                            }
+                                        }.graphicsLayer {
+                                            scaleX = zoom; scaleY = zoom
+                                            translationX = pan.x; translationY = pan.y
+                                        } else Modifier),
+                                    contentScale = ContentScale.Crop)
+                                if (photo.caption.isNotBlank()) {
+                                    Text(photo.caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)
+                                            .background(Color.Black.copy(alpha = 0.40f), RoundedCornerShape(24.dp))
+                                            .padding(horizontal = 12.dp, vertical = 7.dp))
+                                }
+                                if (selected && zoom > 1f) {
+                                    Text("1×", color = Color.White, modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                                        .clip(CircleShape).background(Color.Black.copy(alpha = 0.5f))
+                                        .clickable { zoom = 1f; pan = Offset.Zero }.padding(8.dp))
+                                }
                             }
                         }
-                        Column {
-                            Text(moment.userName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text(dateStr, color = LocketTextDim, fontSize = 12.sp)
-                        }
                     }
-
-                    Spacer(modifier = Modifier.size(42.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text(time, color = Color.White.copy(alpha = 0.38f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Photo Card
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1.0f)
-                        .clip(RoundedCornerShape(36.dp))
-                        .background(Color(0xFF1E1E20))
-                ) {
-                    AsyncImage(
-                        model = moment.thumbnailUrl,
-                        contentDescription = moment.caption,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-
-                    // Caption inside photo
-                    if (moment.caption.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 16.dp)
-                                .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = Color(0xB31E1E20))
-                                .padding(horizontal = 16.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                text = moment.caption,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Quick Reactions Row
-                Row(
-                    modifier = Modifier
-                        .liquidGlassEffect(RoundedCornerShape(28.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                LazyRow(
+                    state = thumbs,
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf("🔥", "😍", "💛", "😂", "🥺").forEach { emoji ->
-                        Text(
-                            text = emoji,
-                            fontSize = 28.sp,
-                            modifier = Modifier
-                                .clickable {
-                                    onReact(emoji)
-                                }
-                                .padding(4.dp)
-                        )
+                    items(photos, key = { it.id }) { photo ->
+                        val selected = photo.id == active.id
+                        Box(Modifier.size(60.dp).clip(RoundedCornerShape(18.dp))
+                            .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(18.dp))
+                            .clickable { scope.launch { pager.animateScrollToPage(photos.indexOf(photo)) } }
+                            .padding(if (selected) 5.dp else 3.dp)) {
+                            AsyncImage(photo.thumbnailUrl, "Ảnh trong ngày", Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop)
+                        }
                     }
                 }
             }
+        }
+
+        if (share) {
+            MomentActionsSheet(active, own = true, onDismiss = { share = false },
+                onAction = { action -> share = false; if (action == "delete") delete = true },
+                shareOnly = onDelete == null)
+        }
+        if (delete && onDelete != null) {
+            AlertDialog(onDismissRequest = { if (!deleting) delete = false },
+                title = { Text("Xóa khoảnh khắc?") },
+                text = { Text("Chỉ xóa khỏi lịch sử của bạn hoặc xóa cho mọi người.") },
+                confirmButton = { TextButton(enabled = !deleting, onClick = {
+                    deleting = true
+                    onDelete(active, true) { deleting = false; delete = false }
+                }) { Text("Xóa cho mọi người", color = Color(0xFFFF6B6B)) } },
+                dismissButton = { TextButton(enabled = !deleting, onClick = {
+                    deleting = true
+                    onDelete(active, false) { deleting = false; delete = false }
+                }) { Text("Chỉ xóa của mình") } })
         }
     }
 }

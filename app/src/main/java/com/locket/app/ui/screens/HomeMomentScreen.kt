@@ -641,7 +641,7 @@ private fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
 
 /** Actual moment pixels, not a sampled dominant color. No per-frame CPU work. */
 @Composable
-private fun MomentBackdrop(url: String) {
+internal fun MomentBackdrop(url: String) {
     val context = LocalContext.current
     val nativeBlur = android.os.Build.VERSION.SDK_INT >= 31
     val request = remember(url, context, nativeBlur) {
