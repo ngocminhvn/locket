@@ -220,7 +220,7 @@ fun HomeMomentScreen(
                             Text(
                                 text = currentMoment.caption,
                                 color = Color.White,
-                                style = profileTextStyle(16.sp, 20.sp, FontWeight.Bold)
+                                style = profileTextStyle(18.sp, 22.sp, FontWeight.Bold)
                             )
                         }
                     }
@@ -283,14 +283,14 @@ fun HomeMomentScreen(
                     Text(
                         text = if (currentMoment.userUid == currentUser.uid) "Bạn" else currentMoment.userName.trim().substringBefore(' ').ifBlank { currentMoment.userUid },
                         color = Color.White,
-                        fontSize = 19.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
 
                     Text(
                         text = if (currentMoment.userUid == currentUser.uid) java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(currentMoment.timestampSeconds * 1000)) else momentAge(currentMoment.timestampSeconds),
                         color = Color.White.copy(alpha = 0.44f),
-                        fontSize = 18.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.SemiBold
                     )
 
@@ -509,7 +509,8 @@ internal fun MomentReactionBar(
                 TextField(
                     value = messageText,
                     onValueChange = { messageText = it },
-                    placeholder = { Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.44f), fontSize = 16.sp) },
+                    placeholder = { Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.44f), fontSize = 18.sp, maxLines = 1) },
+                    textStyle = LocalTextStyle.current.copy(fontSize = 18.sp),
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
