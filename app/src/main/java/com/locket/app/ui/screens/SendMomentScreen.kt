@@ -356,11 +356,12 @@ internal fun rememberMomentReviewSlots(
                     ReviewActionIcon(ReviewIcon.CLOSE, "Hủy", Color.White, Modifier.size(34.dp))
                 }
                 val canSend = !isPosting && !saving && (sendAll || selected.isNotEmpty())
-                Box(Modifier.size(98.dp).clip(CircleShape).background(Color(0xFF505050))
+                Box(Modifier.size(98.dp).clip(CircleShape)
+                    .background(Color.White.copy(alpha = if (canSend || isPosting) 0.29f else 0.16f))
                     .clickable(enabled = canSend) { onSend(value(kind), if (sendAll) emptyList() else selected.toList()) },
                     contentAlignment = Alignment.Center) {
                     if (isPosting) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
-                    else ReviewActionIcon(ReviewIcon.SEND, "Gửi", if (canSend) Color.White else Color.Gray, Modifier.size(44.dp))
+                    else ReviewActionIcon(ReviewIcon.SEND, "Gửi", if (canSend) Color.White else Color.White.copy(alpha = 0.42f), Modifier.size(44.dp))
                 }
                 IconButton(onClick = { sheet = true }, enabled = !isPosting, modifier = Modifier.size(56.dp)) {
                     Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
@@ -472,21 +473,23 @@ private fun RecipientAvatar(
     itemWidth: androidx.compose.ui.unit.Dp, onClick: () -> Unit
 ) {
     val shortName = if (all) name else name.trim().substringBefore(' ')
+    // Warm, pale selection highlight and neutral translucent surfaces like the reference.
+    val selectionColor = Color(0xFFFFDF8B)
     Column(Modifier.width(itemWidth).semantics { contentDescription = name }.clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
             Box(Modifier.size(if (selected) 44.dp else 35.dp)
                 .border(if (selected) 2.5.dp else 1.5.dp,
-                    if (selected) LocketYellow else Color(0xFF484848), CircleShape)
+                    if (selected) selectionColor else Color.White.copy(alpha = 0.20f), CircleShape)
                 .padding(if (selected) 4.dp else 3.dp)
-                .clip(CircleShape).background(Color(0xFF444444)), contentAlignment = Alignment.Center) {
+                .clip(CircleShape).background(Color.White.copy(alpha = if (selected) 0.25f else 0.12f)), contentAlignment = Alignment.Center) {
                 if (avatar.isNotBlank() && !all) AsyncImage(avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Icon(if (all) Icons.Default.People else Icons.Default.Person, null, tint = Color.White,
-                    modifier = Modifier.size(if (selected) 20.dp else 16.dp))
+                    modifier = Modifier.size(if (selected) 18.dp else 16.dp))
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text(shortName, color = if (selected) LocketYellow else Color(0xFF747474), fontSize = 16.sp,
+        Text(shortName, color = if (selected) selectionColor else Color.White.copy(alpha = 0.44f), fontSize = 16.sp,
             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp))
     }
