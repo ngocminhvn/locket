@@ -20,7 +20,7 @@ import com.locket.app.LocketApplication
  * A cheap, static skeleton rather than an animated shimmer per row. No extra
  * network request and no synthetic photo. The existing parent clips its shape.
  */
-private object ImageSkeletonPainter : Painter() {
+private class ImageSkeletonPainter : Painter() {
     override val intrinsicSize: Size = Size.Unspecified
     override fun DrawScope.onDraw() {
         if (size.width <= 0f || size.height <= 0f) return
@@ -51,25 +51,19 @@ internal fun SkeletonAsyncImage(
         current
     } else null
     val actualModel = remember(model, snapshot, app) {
-        if (app != null && model is String && app.sessionManager.isLoggedIn &&
-            app.sessionManager.currentUser.profilePictureUrl == model) {
-            val own = snapshot?.takeIf {
-                it.owner == app.sessionManager.currentUser.uid && it.requestedUrl == model
-            }
-            when {
-                own?.file?.isFile == true -> own.file
-                own == null || own.loading -> null // own-avatar store is already responsible for fetching
-                else -> model // normal Coil fallback after a failed refresh with no saved file
-            }
+        if (app != null && model is String && snapshot?.requestedUrl == model &&
+            app.sessionManager.isLoggedIn && snapshot.owner == app.sessionManager.currentUser.uid) {
+            snapshot.file ?: if (snapshot.loading) null else model
         } else model
     }
+    val skeleton = remember { ImageSkeletonPainter() }
     AsyncImage(
         model = actualModel,
         contentDescription = contentDescription,
         modifier = modifier,
-        placeholder = placeholder ?: ImageSkeletonPainter,
-        error = error ?: ImageSkeletonPainter,
-        fallback = placeholder ?: ImageSkeletonPainter,
+        placeholder = placeholder ?: skeleton,
+        error = error ?: skeleton,
+        fallback = placeholder ?: skeleton,
         contentScale = contentScale,
         onLoading = onLoading,
         onSuccess = onSuccess,

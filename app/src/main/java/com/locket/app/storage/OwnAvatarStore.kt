@@ -22,7 +22,10 @@ import java.util.concurrent.TimeUnit
  */
 internal class OwnAvatarStore(private val context: Context, private val session: SessionManager) {
     data class Snapshot(val owner: String, val requestedUrl: String, val file: File?, val loading: Boolean)
-    private val _snapshot = MutableStateFlow<Snapshot?>(null)
+    private val _snapshot = MutableStateFlow<Snapshot?>(
+        session.currentUser.takeIf { session.isLoggedIn && it.uid.isNotBlank() && it.profilePictureUrl.isNotBlank() }
+            ?.let { Snapshot(it.uid, it.profilePictureUrl, null, true) }
+    )
     val snapshot = _snapshot.asStateFlow()
     private val lock = Mutex()
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)

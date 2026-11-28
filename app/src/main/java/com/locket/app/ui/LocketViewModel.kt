@@ -326,15 +326,9 @@ class LocketViewModel(
         if (moments.isEmpty()) return
         val app = LocketApplication.instance
         val size = sizePx.coerceAtLeast(1)
-        val next = if (forward) ((currentIndex + 1)..(currentIndex + count)).toList()
-            else ((currentIndex - 1) downTo (currentIndex - count)).toList()
-        val opposite = if (forward) (1..3).map { currentIndex - it } else (1..3).map { currentIndex + it }
-        val target = if (targetIndex != currentIndex) {
-            if (forward) ((targetIndex + 1)..(targetIndex + 5)).toList()
-            else ((targetIndex - 1) downTo (targetIndex - 5)).toList()
-        } else emptyList()
-        val urgent = listOf(currentIndex, targetIndex).mapNotNull { moments.getOrNull(it)?.thumbnailUrl }.distinct()
-        val nearby = (next + opposite + target).mapNotNull { moments.getOrNull(it)?.thumbnailUrl }
+        val plan = momentPrefetchPlan(moments.size, currentIndex, targetIndex, count, forward)
+        val urgent = plan.urgent.map { moments[it].thumbnailUrl }.distinct()
+        val nearby = plan.nearby.map { moments[it].thumbnailUrl }
             .filter { it.isNotBlank() && it !in urgent }.distinct()
         momentPrefetchJob = viewModelScope.launch {
             val ready = urgent.map { preloadImage(it, size, urgent = true) }.all { it }
