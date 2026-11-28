@@ -375,11 +375,8 @@ fun ChatDetailScreen(
                                             )
                                             Text(chatMomentAge(linkedMoment?.timestampSeconds?.times(1000L) ?: msg.createdAtMs), color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                         }
-                                        linkedMoment?.caption?.takeIf { it.isNotBlank() }?.let { caption ->
-                                            Text(caption, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
-                                                    .clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.35f))
-                                                    .padding(horizontal = 12.dp, vertical = 6.dp))
+                                        linkedMoment?.let {
+                                            MomentCaption(it, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
                                         }
                                     }
                                 }
