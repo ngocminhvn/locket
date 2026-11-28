@@ -225,7 +225,7 @@ internal fun LocationCaptionDialog(
             HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "© OpenStreetMap contributors · Photon",
+                    "Tọa độ gửi tới Photon để tìm gần bạn · © OpenStreetMap",
                     color = Color.White.copy(alpha = 0.42f),
                     fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.CenterVertically)
