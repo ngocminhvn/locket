@@ -30,7 +30,7 @@ The client communicates directly with Locket's production backend:
 | **Android SDK** | compileSdk 37.1, targetSdk 34, minSdk 26 |
 | **Android Gradle Plugin (AGP)** | 9.2.1 |
 | **UI Framework** | Jetpack Compose (BOM 2026.11.01), Compose Compiler 2.4.21 |
-| **Design System** | Material 3 Expressive 1.5.0, Liquid Glass gradients on ordinary surfaces; upstream Liquid Glass 1.0.0 shader only on the central three-tab bottom navigation capsule |
+| **Design System** | Material 3 Expressive 1.5.0, Liquid Glass gradients on ordinary surfaces; upstream Liquid Glass 1.0.0 shader scoped to bottom navigation (Calm tab selector and color-matched side buttons) |
 | **Camera** | CameraX 1.6.2 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
 | **Networking** | OkHttp 5.5.1, Gson 2.15.0 |
 | **Image Loading** | Coil Compose 2.7.0 |
@@ -147,7 +147,7 @@ When modifying this repository:
 1. **Never commit APK or build binaries** into git (`.gitignore` enforces this).
 2. **Always test Kotlin compilation** with `./gradlew compileDebugKotlin` before declaring work done.
 3. **Verify API responses** against the specifications in `docs/Locket-API-Spec-1.247.3.md` and `docs/locket-api-1.247.3.json`.
-4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` for ordinary cards. Only the central three-tab bottom navigation capsule uses the same upstream `dev.shayxo.liquidglass:liquidglass:1.0.0` optical renderer as TKB SV; preserve the existing nav layout and pager-driven selector. Keep the glass recording scoped to the main tabs, with no extra drag, bounce, or haptic feedback.
+4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` for ordinary cards. The central three-tab bottom navigation capsule uses upstream `dev.shayxo.liquidglass:liquidglass:1.0.0` Calm GlassTabBar as in TKB SV, including its native held-lens drag and release-to-select gesture. Preserve the existing nav layout, horizontal pager, and side buttons; side buttons share the color response without lens deformation. Suppress nav haptics and avoid additional bounce or drag animations.
 5. **Keep Signup disabled** in `WelcomeScreen.kt`.
 
 ### Rust core rules
