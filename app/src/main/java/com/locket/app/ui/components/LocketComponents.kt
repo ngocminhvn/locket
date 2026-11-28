@@ -74,7 +74,8 @@ fun LocketTopBar(
     onSpeakerClick: () -> Unit = {},
     onTitleClick: () -> Unit = {},
     onAvatarClick: () -> Unit = {},
-    dropdownExpanded: Boolean = false
+    dropdownExpanded: Boolean = false,
+    adaptiveBackground: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -88,12 +89,13 @@ fun LocketTopBar(
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .liquidGlassEffect(CircleShape)
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                    else Modifier.liquidGlassEffect(CircleShape))
                 .clickable(onClick = onSpeakerClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Outlined.Campaign,
+                imageVector = if (adaptiveBackground) Icons.Filled.Campaign else Icons.Outlined.Campaign,
                 contentDescription = "Thông báo",
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
@@ -103,9 +105,10 @@ fun LocketTopBar(
         // Center Pill (Friends count or filter)
         Row(
             modifier = Modifier
-                .liquidGlassEffect(RoundedCornerShape(24.dp))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                    else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
                 .clickable(onClick = onTitleClick)
-                .padding(horizontal = 18.dp, vertical = 10.dp),
+                .padding(horizontal = if (adaptiveBackground) 20.dp else 18.dp, vertical = if (adaptiveBackground) 12.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -221,30 +224,38 @@ fun FeedBottomBar(
     separated: Boolean = false
 ) {
     if (separated) {
+        val surface = Color.White.copy(alpha = 0.10f)
+        val inactive = Color.White.copy(alpha = 0.52f)
         Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onGridClick, modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFF202022))) {
+            IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
                 Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
             }
             Row(
-                Modifier.clip(CircleShape).background(Color(0xFF202022)).padding(horizontal = 12.dp, vertical = 7.dp),
-                horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically
+                Modifier.weight(1f).height(54.dp).clip(CircleShape).background(surface).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onHistoryClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.CalendarMonth, "Kỷ niệm", tint = LocketTextDim, modifier = Modifier.size(25.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    IconButton(onClick = onHistoryClick, modifier = Modifier.size(38.dp)) {
+                        Icon(Icons.Default.Apps, "Kỷ niệm", tint = inactive, modifier = Modifier.size(25.dp))
+                    }
                 }
-                Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape).clickable(onClick = onShutterClick),
-                    contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(28.dp).background(Color.White, CircleShape))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape).clickable(onClick = onShutterClick),
+                        contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(29.dp).background(Color.White, CircleShape))
+                    }
                 }
-                IconButton(onClick = onChatClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = LocketTextDim, modifier = Modifier.size(25.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    IconButton(onClick = onChatClick, modifier = Modifier.size(38.dp)) {
+                        Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = inactive, modifier = Modifier.size(24.dp))
+                    }
                 }
             }
-            IconButton(onClick = onShareClick, modifier = Modifier.size(52.dp).clip(CircleShape).background(Color(0xFF202022))) {
+            IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
                 Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
             }
         }

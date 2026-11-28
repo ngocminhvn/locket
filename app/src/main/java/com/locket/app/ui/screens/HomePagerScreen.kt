@@ -6,7 +6,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import com.locket.app.ui.components.LocketTopBar
@@ -237,7 +236,6 @@ fun HomePagerScreen(
     if (showChrome) {
         Box(
             Modifier.align(Alignment.TopCenter).fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(LocketBlack.copy(alpha = 0.92f), LocketBlack.copy(alpha = 0.65f), Color.Transparent)))
                 .onSizeChanged { measuredHeader = with(density) { it.height.toDp() } }
         ) {
             LocketTopBar(
@@ -248,6 +246,7 @@ fun HomePagerScreen(
                 onSpeakerClick = { viewModel.syncAllData() },
                 onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = !showFriendFilter },
                 dropdownExpanded = showFriendFilter,
+                adaptiveBackground = !cameraSelected,
                 onAvatarClick = onOpenProfile
             )
         }
@@ -262,7 +261,6 @@ fun HomePagerScreen(
         } else {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, LocketBlack.copy(alpha = 0.82f), LocketBlack)))
                     .onSizeChanged { measuredFeedFooter = with(density) { it.height.toDp() } },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -272,7 +270,7 @@ fun HomePagerScreen(
                         reactionSerial++
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
                 FeedBottomBar(
                     onGridClick = { onNavigate("grid") },
                     onHistoryClick = { onNavigate("history") },

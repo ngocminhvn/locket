@@ -12,6 +12,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurEdgeTreatment
+import androidx.compose.ui.draw.clipToBounds
+import coil.request.ImageRequest
 import android.widget.VideoView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.*
@@ -20,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.AddReaction
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +50,7 @@ import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.*
 import com.locket.app.ui.theme.*
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeMomentScreen(
     viewModel: LocketViewModel,
@@ -97,14 +105,16 @@ fun HomeMomentScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(LocketBlack)
+            .clipToBounds()
     ) {
+        currentMoment?.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { MomentBackdrop(it) }
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(headerHeight))
 
-            Spacer(modifier = Modifier.weight(0.8f))
+            Spacer(modifier = Modifier.weight(0.86f))
 
             // Main Moment Squircle Card
             Box(
@@ -113,12 +123,14 @@ fun HomeMomentScreen(
                     .aspectRatio(1.0f)
                     .clip(RoundedCornerShape(48.dp))
                     .background(Color(0xFF1E1E1E))
-                    .clickable {
+                    .combinedClickable(
+                        onLongClick = { if (currentMoment != null && !pinching && zoom <= 1f) menuAction = "menu" },
+                        onClick = {
                         if (zoom > 1f) {
                             zoom = 1f
                             pan = Offset.Zero
                             zoomCallback(false)
-                            return@clickable
+                            return@combinedClickable
                         }
                         // Bam 1 lan vao moment = tra loi bang anh: mo camera, nguoi nhan
                         // mac dinh la chu cua moment nay. Khong doi moment bang bam nua
@@ -134,7 +146,7 @@ fun HomeMomentScreen(
                             viewModel.setReplyToFriend(target)
                             onNavigate("camera")
                         }
-                    }
+                    })
             ) {
                 if (currentMoment != null) {
                     val videoUrl = currentMoment.videoUrl
@@ -236,31 +248,10 @@ fun HomeMomentScreen(
                     }
                 }
 
-                // Nut "..." mo menu tuy chon cua moment (goc co menu tuy
-                // chon tren moment). Nut tron mo nhu top-bar hien tai,
-                // nen mo giong overlay caption trong anh.
-                if (currentMoment != null && !pinching) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xB31E1E20))
-                            .clickable { menuAction = "menu" },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Tùy chọn",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
+
             }
 
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // User info; caption is shown only once inside the image.
             if (currentMoment != null) {
@@ -296,14 +287,15 @@ fun HomeMomentScreen(
                     Text(
                         text = currentMoment.userName.trim().substringBefore(' ').ifBlank { currentMoment.userUid },
                         color = Color.White,
-                        fontSize = 17.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold
                     )
 
                     Text(
                         text = momentAge(currentMoment.timestampSeconds),
-                        color = LocketTextDim,
-                        fontSize = 16.sp
+                        color = Color.White.copy(alpha = 0.44f),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
 
                     // Luot xem (Batch 7a): chi moment CUA MINH, chi hien
@@ -528,15 +520,15 @@ internal fun MomentReactionBar(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xFF202022))
-                    .padding(horizontal = 10.dp, vertical = 0.dp),
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .padding(horizontal = 8.dp, vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Text input
                 TextField(
                     value = messageText,
                     onValueChange = { messageText = it },
-                    placeholder = { Text("Gửi tin nhắn...", color = Color(0xFF8E8E93), fontSize = 15.sp) },
+                    placeholder = { Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.44f), fontSize = 16.sp) },
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -569,7 +561,7 @@ internal fun MomentReactionBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = emoji, fontSize = 27.sp)
+                        Text(text = emoji, fontSize = 28.sp)
                     }
                 }
 
@@ -613,10 +605,10 @@ internal fun MomentReactionBar(
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.AddReaction,
+                            imageVector = Icons.Outlined.AddReaction,
                             contentDescription = "Emoji",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                            tint = Color.White.copy(alpha = 0.60f),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
@@ -636,4 +628,30 @@ private fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
     Box(modifier.background(Brush.linearGradient(listOf(
         Color(0xFF202022), Color(0xFF48484A).copy(alpha = alpha), Color(0xFF202022)
     ))))
+}
+
+
+/** Actual moment pixels, not a sampled dominant color. No per-frame CPU work. */
+@Composable
+private fun MomentBackdrop(url: String) {
+    val context = LocalContext.current
+    val nativeBlur = android.os.Build.VERSION.SDK_INT >= 31
+    val request = remember(url, context, nativeBlur) {
+        ImageRequest.Builder(context).data(url)
+            .size(if (nativeBlur) 160 else 12)
+            .allowHardware(nativeBlur)
+            .crossfade(false)
+            .build()
+    }
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize()
+                .scale(1.12f)
+                .blur(25.dp, edgeTreatment = BlurEdgeTreatment.Unbounded),
+            contentScale = ContentScale.Crop
+        )
+        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
+    }
 }
