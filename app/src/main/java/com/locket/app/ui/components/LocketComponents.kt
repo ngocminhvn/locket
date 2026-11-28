@@ -223,7 +223,8 @@ fun FeedBottomBar(
     onShareClick: () -> Unit,
     separated: Boolean = false,
     currentScreen: String = "camera",
-    showSideActions: Boolean = true
+    showSideActions: Boolean = true,
+    unreadConversations: Int = 0
 ) {
     if (separated) {
         val surface = LocketPillBg
@@ -257,9 +258,14 @@ fun FeedBottomBar(
                     }
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    IconButton(onClick = onChatClick, modifier = Modifier.size(38.dp)
-                        .clip(CircleShape).background(if (currentScreen == "chat") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
-                        Icon(Icons.Default.ChatBubble, "Trò chuyện", tint = if (currentScreen == "chat") Color.White else inactive, modifier = Modifier.size(24.dp))
+                    Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                        IconButton(onClick = onChatClick, modifier = Modifier.fillMaxSize()
+                            .clip(CircleShape).background(if (currentScreen == "chat") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
+                            Icon(Icons.Default.ChatBubble,
+                                if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
+                                tint = if (currentScreen == "chat") Color.White else inactive, modifier = Modifier.size(24.dp))
+                        }
+                        UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
                     }
                 }
             }
@@ -318,13 +324,16 @@ fun FeedBottomBar(
                 )
             }
             // Chat bubble
-            IconButton(onClick = onChatClick, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    imageVector = Icons.Default.ChatBubble,
-                    contentDescription = "Trò chuyện",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
+            Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                IconButton(onClick = onChatClick, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.ChatBubble,
+                        contentDescription = if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
             }
             // Share icon
             IconButton(onClick = onShareClick, modifier = Modifier.size(34.dp)) {
@@ -500,5 +509,18 @@ fun FriendFilterSheet(
                 }
             }
         }
+    }
+}
+
+/** Display-only badge. The count is derived from the cached conversation list. */
+@Composable
+private fun UnreadConversationBadge(count: Int, modifier: Modifier = Modifier) {
+    if (count <= 0) return
+    Box(modifier.height(17.dp).widthIn(min = 17.dp)
+        .clip(CircleShape).background(LocketYellow).padding(horizontal = 3.dp),
+        contentAlignment = Alignment.Center) {
+        Text(if (count > 99) "99+" else count.toString(), color = LocketOnYellow,
+            fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+            style = androidx.compose.ui.text.TextStyle(lineHeight = 12.sp))
     }
 }

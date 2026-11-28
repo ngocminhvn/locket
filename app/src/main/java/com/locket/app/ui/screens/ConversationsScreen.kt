@@ -132,10 +132,10 @@ fun ConversationsScreen(
                 contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
             ) {
                 items(conversations, key = { it.id }) { conv ->
+                    val unread = conv.unreadCount > 0
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(if (conv.unreadCount > 0) Color(0xFF101010) else Color.Transparent)
                             .clickable { onOpenChatDetail(conv.friend) }
                             .heightIn(min = 84.dp)
                             .padding(horizontal = 13.dp, vertical = 11.dp),
@@ -144,7 +144,7 @@ fun ConversationsScreen(
                         Box(
                             modifier = Modifier
                                 .size(59.dp)
-                                .border(2.5.dp, LocketSheetSurface, CircleShape)
+                                .border(2.5.dp, if (unread) LocketYellow else LocketSheetSurface, CircleShape)
                                 .padding(5.dp)
                                 .clip(CircleShape)
                                 .background(LocketAvatarBg),
@@ -187,17 +187,24 @@ fun ConversationsScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(conversationDate(conv), color = LocketTextDim, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(conversationDate(conv), color = if (unread) Color.White.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.50f), fontSize = 15.sp, fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium)
                             }
                             Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = conv.lastMessage,
-                                color = LocketTextDim,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = conv.lastMessage,
+                                    color = Color.White.copy(alpha = if (unread) 0.90f else 0.50f),
+                                    fontSize = 16.sp,
+                                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (unread) {
+                                    Spacer(Modifier.width(10.dp))
+                                    Box(Modifier.size(14.dp).background(LocketYellow, CircleShape))
+                                }
+                            }
                         }
 
 

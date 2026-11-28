@@ -233,6 +233,11 @@ class MainActivity : ComponentActivity() {
                             // Its bounds never move with a page, even while the user drags.
                             val homeSettled = pager.settledPage == 1
                             if (!homeSettled || homeNavVisible) {
+                                val conversations by viewModel.conversations.collectAsState()
+                                // Original Locket counts unread conversations, not messages.
+                                val unreadConversations = remember(conversations) {
+                                    conversations.count { it.unreadCount > 0 }
+                                }
                                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                                     FeedBottomBar(
                                         onGridClick = { if (!pager.isScrollInProgress) currentScreen = "grid" },
@@ -250,7 +255,8 @@ class MainActivity : ComponentActivity() {
                                         onShareClick = { if (homeSettled && !pager.isScrollInProgress) homeShareRequest++ },
                                         separated = true,
                                         currentScreen = tabRoutes[pager.settledPage],
-                                        showSideActions = homeSettled && homeNavFeed
+                                        showSideActions = homeSettled && homeNavFeed,
+                                        unreadConversations = unreadConversations
                                     )
                                 }
                             }
