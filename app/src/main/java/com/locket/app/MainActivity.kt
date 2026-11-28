@@ -42,7 +42,7 @@ import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.FeedBottomBar
 import com.locket.app.ui.components.LocketProfileAvatar
 import com.locket.app.ui.screens.*
-import com.wexpa.liquidglass.LiquidGlassTheme
+import com.locket.app.ui.glass.LocketNavigationGlassTheme
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
 
@@ -191,7 +191,7 @@ class MainActivity : ComponentActivity() {
                             }
                             // One shared backdrop recording for the main navigation only.
                             // Keep the existing pager, chrome bounds and touch handling.
-                            LiquidGlassTheme(dark = true, background = LocketBlack, renderScale = 0.75f) {
+                            LocketNavigationGlassTheme(background = LocketBlack) {
                             HorizontalPager(
                                 state = pager,
                                 modifier = Modifier.fillMaxSize(),
@@ -305,7 +305,7 @@ class MainActivity : ComponentActivity() {
                                         onChatClick = { currentScreen = "chat" },
                                         onShareClick = { if (homeSettled && !pager.isScrollInProgress) homeShareRequest++ },
                                         separated = true,
-                                        currentScreen = tabRoutes[pager.currentPage],
+                                        currentScreen = tabRoutes[mainTab],
                                         showSideActions = homeSettled && homeNavFeed,
                                         unreadConversations = unreadConversations,
                                         feedMode = homeSettled && homeNavFeed
@@ -328,7 +328,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
-                            } // LiquidGlassTheme
+                            } // LocketNavigationGlassTheme
                         }
                         else -> {
                             when (currentScreen) {
