@@ -7,6 +7,9 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.onSizeChanged
@@ -110,7 +113,15 @@ fun HomePagerScreen(
     // Keep shared controls stationary until a page settles. During a drag
     // only the photo, caption and author scroll with the finger.
     val cameraSelected = pagerState.settledPage == 0
+    val cameraChrome = pagerState.currentPage == 0
+    val feedProgress = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+    val crossingCamera = pagerState.isScrollInProgress &&
+        (pagerState.currentPage == 0 || pagerState.settledPage == 0 || pagerState.targetPage == 0)
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
+    val palette = rememberAmbientPalette(activeMoment?.thumbnailUrl ?: moments.firstOrNull()?.thumbnailUrl, AmbientMode.HOME)
+    val feedBrush = palette.brush()
+    val context = LocalContext.current
+    val cameraBrush = AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context))
     val showChrome = !(cameraSelected && cameraReviewVisible) && !zoomLocked
     var handledCameraRequest by remember { mutableIntStateOf(cameraRequest) }
     var handledShareRequest by remember { mutableIntStateOf(shareRequest) }
@@ -132,7 +143,7 @@ fun HomePagerScreen(
     LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
     BackHandler(enabled = showFriendFilter) { setFriendFilter(false) }
     SideEffect {
-        if (tabActive) onNavigationState(showChrome && !showFriendFilter, !cameraSelected)
+        if (tabActive) onNavigationState(showChrome && !showFriendFilter, !cameraChrome)
         onTabSwipeEnabledChange(!showFriendFilter && !showShare && !zoomLocked && !pagerState.isScrollInProgress &&
             (!cameraSelected || (cameraSwipeEnabled && !cameraReviewVisible)))
     }
@@ -194,8 +205,10 @@ fun HomePagerScreen(
         scope.launch { pagerState.animateScrollToPage(0) }
     }
 
-    Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
-    if (!cameraSelected) AmbientBackground(activeMoment?.thumbnailUrl, AmbientMode.HOME)
+    // One stationary background for both pages. Blend only at the camera boundary;
+    // the camera's own theme and the feed palette stay unchanged at rest.
+    Box(Modifier.fillMaxSize().background(LocketBlack).background(cameraBrush)
+        .background(feedBrush, alpha = feedProgress).clipToBounds()) {
     VerticalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
@@ -299,6 +312,24 @@ fun HomePagerScreen(
         }
     }
 
+    // Restore the stationary background under the fixed chrome when an image
+    // slides through its bounds. Draw using the full viewport coordinates so
+    // the gradient never restarts at a header/footer boundary.
+    if (showChrome && pagerState.isScrollInProgress) {
+        Canvas(Modifier.matchParentSize()) {
+            val top = headerHeight.toPx().coerceAtMost(size.height)
+            val footer = (if (crossingCamera || cameraChrome) cameraFooterHeight else feedFooterHeight)
+                .toPx().coerceAtMost(size.height)
+            fun androidx.compose.ui.graphics.drawscope.DrawScope.paintChrome() {
+                drawRect(LocketBlack)
+                drawRect(cameraBrush)
+                drawRect(feedBrush, alpha = feedProgress)
+            }
+            clipRect(bottom = top) { paintChrome() }
+            clipRect(top = size.height - footer) { paintChrome() }
+        }
+    }
+
     // One header and one footer for the entire pager, never duplicated.
     if (showChrome) {
         if (!sharedProfileAvatar) Box(
@@ -306,21 +337,21 @@ fun HomePagerScreen(
                 .onSizeChanged { measuredHeader = with(density) { it.height.toDp() } }
         ) {
             LocketTopBar(
-                title = if (cameraSelected) "${friends.size} Bạn bè"
+                title = if (cameraChrome) "${friends.size} Bạn bè"
                     else if (selectedFriend?.uid == currentUser.uid) "Bạn"
                     else selectedFriend?.displayName?.trim()?.substringAfterLast(' ')?.ifBlank { "Tất cả bạn bè" } ?: "Tất cả bạn bè",
-                showDropdownArrow = !cameraSelected,
+                showDropdownArrow = !cameraChrome,
                 avatarUrl = currentUser.profilePictureUrl,
                 onSpeakerClick = { viewModel.syncAllData() },
-                onTitleClick = { if (cameraSelected) onOpenFriends() else setFriendFilter(!showFriendFilter) },
+                onTitleClick = { if (cameraChrome) onOpenFriends() else setFriendFilter(!showFriendFilter) },
                 dropdownExpanded = showFriendFilter,
-                adaptiveBackground = !cameraSelected,
+                adaptiveBackground = !cameraChrome,
                 onAvatarClick = onOpenProfile,
                 showAvatar = !sharedProfileAvatar
             )
         }
 
-        if (!cameraSelected) {
+        if (!cameraChrome && !crossingCamera) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .padding(bottom = cameraFooterHeight)
