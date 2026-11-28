@@ -93,7 +93,7 @@ fun LocketTopBar(
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
                     else Modifier.liquidGlassEffect(CircleShape))
                 .clickable(onClick = onSpeakerClick),
             contentAlignment = Alignment.Center
@@ -110,7 +110,7 @@ fun LocketTopBar(
         Box(Modifier.weight(1f).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
                     else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
                 .clickable(onClick = onTitleClick)
                 .padding(horizontal = if (adaptiveBackground) 20.dp else 18.dp, vertical = if (adaptiveBackground) 12.dp else 10.dp),
@@ -212,16 +212,13 @@ fun FeedBottomBar(
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
     unreadConversations: Int = 0,
-    adaptiveBackground: Boolean = false,
     pagePosition: Float? = null,
     feedMode: Boolean = showSideActions
 ) {
     if (separated) {
-        val base = if (adaptiveBackground) LocalMomentColor.current else null
-        // Same optical material as TKB's Calm tab bar. Do not replace the
-        // pager-driven selector or introduce the library's independent gestures.
-        val barGlass = if (base != null) Glass.TabBar.tint(base.copy(alpha = 0.35f)) else Glass.TabBar
-        val surface = momentSurface(base, LocketPillBg, 0.075f)
+        // Keep TKB's optical glass renderer with a neutral fixed tint.
+        val barGlass = Glass.TabBar.tint(LocketPillBg)
+        val surface = LocketPillBg
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
