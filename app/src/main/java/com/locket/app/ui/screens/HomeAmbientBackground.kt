@@ -24,21 +24,28 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private data class HomePalette(val top: Color, val middle: Color, val bottom: Color)
-private val neutral = HomePalette(LocketBlack, Color(0xFF19191B), LocketBlack)
-private val paletteCache = LruCache<String, HomePalette>(128)
+internal data class AmbientPalette(val top: Color, val middle: Color, val bottom: Color) {
+    fun brush(): Brush = Brush.verticalGradient(0f to top, 0.48f to middle, 1f to bottom)
+}
+private val neutral = AmbientPalette(LocketBlack, Color(0xFF19191B), LocketBlack)
+
+/** Each screen shares the extracted palette but chooses its own darkness. */
+internal enum class AmbientMode(val strength: Float, val durationMs: Int) {
+    HOME(1f, 280), HISTORY(0.74f, 220), MEMORY(1f, 280), CONVERSATION(0.68f, 300), ACTIVITY(0.74f, 280)
+}
+private val paletteCache = LruCache<String, AmbientPalette>(128)
 
 /**
- * Home-only three-tone ambient gradient. Sample overlapping horizontal regions
+ * Shared three-tone ambient gradient. Sample overlapping horizontal regions
  * of a thumbnail so the gradient follows the photo rather than a fixed theme.
  * Only three colors are rendered: no enlarged photo, no full-screen blur.
  */
 @Composable
-internal fun HomeAmbientBackground(url: String) {
+internal fun rememberAmbientPalette(url: String?, mode: AmbientMode): AmbientPalette {
     val context = LocalContext.current.applicationContext
-    var palette by remember { mutableStateOf(paletteCache.get(url) ?: neutral) }
+    var palette by remember { mutableStateOf(url?.let { paletteCache.get(it) } ?: neutral) }
     LaunchedEffect(context, url) {
-        if (url.isBlank()) {
+        if (url.isNullOrBlank()) {
             palette = neutral
         } else {
             val next = paletteCache.get(url) ?: withContext(Dispatchers.IO) {
@@ -47,7 +54,7 @@ internal fun HomeAmbientBackground(url: String) {
                         .size(64).allowHardware(false).crossfade(false).build()
                     val result = context.imageLoader.execute(request) as? SuccessResult
                     result?.drawable?.toBitmap(64, 64, Bitmap.Config.ARGB_8888)
-                        ?.let(::makeHomePalette)?.also { paletteCache.put(url, it) }
+                        ?.let(::makeAmbientPalette)?.also { paletteCache.put(url, it) }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -57,16 +64,24 @@ internal fun HomeAmbientBackground(url: String) {
             if (next != null) palette = next
         }
     }
-    val top by animateColorAsState(palette.top, tween(280, easing = FastOutSlowInEasing), label = "home-top")
-    val middle by animateColorAsState(palette.middle, tween(280, easing = FastOutSlowInEasing), label = "home-middle")
-    val bottom by animateColorAsState(palette.bottom, tween(280, easing = FastOutSlowInEasing), label = "home-bottom")
-
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-        0f to top, 0.48f to middle, 1f to bottom
-    )))
+    fun tone(color: Color): Color = Color(
+        red = LocketBlack.red + (color.red - LocketBlack.red) * mode.strength,
+        green = LocketBlack.green + (color.green - LocketBlack.green) * mode.strength,
+        blue = LocketBlack.blue + (color.blue - LocketBlack.blue) * mode.strength
+    )
+    val top by animateColorAsState(tone(palette.top), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-top")
+    val middle by animateColorAsState(tone(palette.middle), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-middle")
+    val bottom by animateColorAsState(tone(palette.bottom), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-bottom")
+    return AmbientPalette(top, middle, bottom)
 }
 
-private fun makeHomePalette(bitmap: Bitmap): HomePalette {
+@Composable
+internal fun AmbientBackground(url: String?, mode: AmbientMode) {
+    val palette = rememberAmbientPalette(url, mode)
+    Box(Modifier.fillMaxSize().background(palette.brush()))
+}
+
+private fun makeAmbientPalette(bitmap: Bitmap): AmbientPalette {
     // Overlap thirds to reduce abrupt hue changes and to keep the actual
     // spatial distribution of the photograph. The shared extractor is
     // unchanged; only the Home colors receive the following tone mapping.
@@ -91,5 +106,5 @@ private fun makeHomePalette(bitmap: Bitmap): HomePalette {
                   else 0.105f + 0.12f * lightness).coerceIn(0.075f, 0.225f)
         return Color(ColorUtils.HSLToColor(hsl))
     }
-    return HomePalette(band(0, 45, true), band(25, 75, false), band(55, 100, true))
+    return AmbientPalette(band(0, 45, true), band(25, 75, false), band(55, 100, true))
 }
