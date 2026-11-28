@@ -93,17 +93,22 @@ fun ChatDetailScreen(
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
 
-    val chatColor = LocketBlack
+    // Conversation detail uses only genuine attached moment thumbnails.
+    val conversationUrl = remember(messages, activeConversationId) {
+        messages.asReversed().firstOrNull { it.conversationId == activeConversationId && !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
+    }
+    val conversationTint = key(friend.uid) { rememberMomentColor(conversationUrl, 300) }
+    val chatColor = backdropColor(conversationTint, CONVERSATION_SCRIM)
     val bubbleColor = LocketChatReceived
     val composerColor = LocketSearchBg
     val chromeStops = floatArrayOf(0f, 0.2667f, 0.4667f, 0.6667f, 0.8667f, 1f)
-    val topChrome = remember {
+    val topChrome = remember(chatColor) {
         val alpha = floatArrayOf(1f, 0.823f, 0.676f, 0.52f, 0.18f, 0f)
-        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to LocketBlack.copy(alpha = alpha[it]) })
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to chatColor.copy(alpha = alpha[it]) })
     }
-    val bottomChrome = remember {
+    val bottomChrome = remember(chatColor) {
         val alpha = floatArrayOf(0f, 0.111f, 0.332f, 0.576f, 0.723f, 1f)
-        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to LocketBlack.copy(alpha = alpha[it]) })
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to chatColor.copy(alpha = alpha[it]) })
     }
 
     fun sendText(text: String, clearInput: Boolean = false) {
