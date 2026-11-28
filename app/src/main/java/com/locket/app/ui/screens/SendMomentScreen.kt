@@ -72,7 +72,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, STREAK, PARTY, OOTD, MISS }
+private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
 
 internal class MomentReviewSlots(
     val header: @Composable () -> Unit,
@@ -131,12 +131,17 @@ internal fun rememberMomentReviewSlots(
         translationX = offset.x
         translationY = offset.y
     }
-    val time = remember(bitmap) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
-    val general = remember(streak) {
+    val captureDate = remember(bitmap) { Date() }
+    val time = remember(captureDate) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(captureDate) }
+    val hour = remember(captureDate) { java.util.Calendar.getInstance().apply { this.time = captureDate }.let { it.get(java.util.Calendar.HOUR_OF_DAY) + it.get(java.util.Calendar.MINUTE) / 60f } }
+    val general = remember(streak, hour) {
         buildList {
             addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME))
             if (streak > 0) add(CaptionKind.STREAK)
-            addAll(listOf(CaptionKind.PARTY, CaptionKind.OOTD, CaptionKind.MISS))
+            add(CaptionKind.PARTY)
+            if (hour >= 5f && hour < 10f) add(CaptionKind.MORNING)
+            if (hour >= 19.5f) add(CaptionKind.NIGHT)
+            addAll(listOf(CaptionKind.OOTD, CaptionKind.MISS))
         }
     }
     val pager = rememberPagerState(pageCount = { general.size })
@@ -152,6 +157,8 @@ internal fun rememberMomentReviewSlots(
         CaptionKind.PARTY -> "🪩 Party Time!"
         CaptionKind.OOTD -> "🕶 OOTD"
         CaptionKind.MISS -> "🥰 Miss you"
+        CaptionKind.MORNING -> "☀️ Good morning"
+        CaptionKind.NIGHT -> "🌙 Goodnight"
     }
 
     fun overlay(k: CaptionKind): com.google.gson.JsonObject? {
@@ -173,12 +180,14 @@ internal fun rememberMomentReviewSlots(
             }
             CaptionKind.WEATHER -> weatherData?.overlay()
             CaptionKind.TIME -> o.make("time", time, icon = o.icon("sf_symbol", "clock.fill", "#FFFFFFCC"),
-                payload = com.google.gson.JsonObject().apply { addProperty("date", System.currentTimeMillis() / 1000) })
+                payload = com.google.gson.JsonObject().apply { addProperty("date", captureDate.time / 1000) })
             CaptionKind.STREAK -> o.make("streak", streak.toString(), colors = listOf("#FFE38B", "#FFB900"),
                 textColor = "#191919FF", blur = null, icon = o.icon("sf_symbol", "flame.fill", "#191919FF"))
             CaptionKind.PARTY -> preset("caption:party_time", "Party Time!", "🪩", listOf("#5EFFF5", "#FCFF57"), "#000000E6")
             CaptionKind.OOTD -> preset("caption:ootd", "OOTD", "🕶", listOf("#FFFFFF", "#DBDBDB"), "#101010E6")
             CaptionKind.MISS -> preset("caption:miss_you", "Miss you", "🥰", listOf("#EC0C00", "#FF493F"), "#FFFFFFDB")
+            CaptionKind.MORNING -> preset("caption:good_morning", "Good morning", "☀️", listOf("#EF7402", "#EABF0F"), "#FFFFFFE5")
+            CaptionKind.NIGHT -> preset("caption:goodnight", "Goodnight", "🌙", listOf("#370C6F", "#575CD4"), "#FFFFFFE6")
         }
     }
 
@@ -542,6 +551,14 @@ internal fun rememberMomentReviewSlots(
                 Spacer(Modifier.height(8.dp))
                 CaptionChip("🥰 Miss you", gradient = Brush.verticalGradient(
                     listOf(Color(0xFFFF1308), Color(0xFFFF4848)))) { choose(CaptionKind.MISS) }
+                if (CaptionKind.MORNING in general) {
+                    Spacer(Modifier.height(8.dp))
+                    CaptionChip("☀️ Good morning", gradient = Brush.verticalGradient(listOf(Color(0xFFEF7402), Color(0xFFEABF0F)))) { choose(CaptionKind.MORNING) }
+                }
+                if (CaptionKind.NIGHT in general) {
+                    Spacer(Modifier.height(8.dp))
+                    CaptionChip("🌙 Goodnight", gradient = Brush.verticalGradient(listOf(Color(0xFF370C6F), Color(0xFF575CD4)))) { choose(CaptionKind.NIGHT) }
+                }
                 Spacer(Modifier.height(14.dp))
                 Text("Thời tiết: Locket / Open-Meteo dự phòng · vị trí chỉ lấy khi bạn chọn.",
                     color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
@@ -593,27 +610,6 @@ private fun RecipientAvatar(
         Text(shortName, color = if (selected) selectionColor else Color.White.copy(alpha = 0.44f), fontSize = 16.sp,
             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp))
-    }
-}
-
-/** Filled five-point star with rounded tips, matching the reference review badge. */
-@Composable
-private fun ReviewStar(tint: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val radius = size.minDimension * 0.43f
-        val path = Path().apply {
-            repeat(10) { index ->
-                val angle = -Math.PI / 2 + index * Math.PI / 5
-                val r = radius * if (index % 2 == 0) 1f else 0.48f
-                val x = center.x + (kotlin.math.cos(angle) * r).toFloat()
-                val y = center.y + (kotlin.math.sin(angle) * r).toFloat()
-                if (index == 0) moveTo(x, y) else lineTo(x, y)
-            }
-            close()
-        }
-        drawPath(path, tint)
-        drawPath(path, tint, style = Stroke(width = size.minDimension * 0.065f,
-            cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
