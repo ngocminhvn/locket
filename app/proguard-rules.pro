@@ -7,4 +7,12 @@
 # Preserve database and converters for existing Room data.
 -keep class com.locket.app.storage.db.** { *; }
 -keep class com.locket.app.widget.** { *; }
+
+# Full protobuf extensions resolve this overload reflectively at runtime.
+# R8 cannot see that call and otherwise removes it from generated enums,
+# which crashes Firestore Listen during startup in minified Release builds.
+-keepclassmembers enum com.google.** {
+    public static ** valueOf(com.google.protobuf.Descriptors$EnumValueDescriptor);
+}
+
 -dontwarn com.google.errorprone.annotations.**
