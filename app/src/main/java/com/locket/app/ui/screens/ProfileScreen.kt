@@ -89,7 +89,8 @@ fun ProfileScreen(
     var showBlockedUsers by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var isUploadingAvatar by remember { mutableStateOf(false) }
-    var goldBadgeActive by remember { mutableStateOf(true) }
+    var goldBadgeActive by remember { mutableStateOf(AppearancePrefs.badge(context)) }
+    var appearanceSheet by remember { mutableStateOf<String?>(null) }
 
     // Chon anh dai dien tu gallery -> nen ve JPEG -> upload that len
     // Storage users/{uid}/public/profile_pic.jpg (xem ApiClient
@@ -158,7 +159,7 @@ fun ProfileScreen(
                 ) {
                     Box(
                         modifier = Modifier.fillMaxSize().clip(CircleShape)
-                            .background(LocketBlack).border(3.dp, LocketYellow, CircleShape)
+                            .background(LocketBlack).border(3.dp, if (goldBadgeActive) LocketYellow else Color.Transparent, CircleShape)
                             .padding(7.dp).clip(CircleShape).background(Color(0xFF2C2C2E)),
                         contentAlignment = Alignment.Center
                     ) {
@@ -174,7 +175,7 @@ fun ProfileScreen(
                         }
                     }
 
-                    Box(
+                    if (goldBadgeActive) Box(
                         modifier = Modifier.size(40.dp)
                             .background(LocketYellow, CircleShape)
                             .border(3.dp, LocketBlack, CircleShape),
@@ -316,7 +317,7 @@ fun ProfileScreen(
                     }
                 },
                 title = "Choose app icon",
-                onClick = { Toast.makeText(context, "Chọn icon", Toast.LENGTH_SHORT).show() }
+                onClick = { appearanceSheet = "icon" }
             )
             SettingsItem(
                 icon = {
@@ -326,12 +327,12 @@ fun ProfileScreen(
                     }
                 },
                 title = "Chỉnh sửa khung widget",
-                onClick = { Toast.makeText(context, "Sửa widget", Toast.LENGTH_SHORT).show() }
+                onClick = { appearanceSheet = "widget" }
             )
             SettingsItem(
                 icon = { Icon(Icons.Default.Brush, null, tint = LocketYellow) },
                 title = "Choose camera theme",
-                onClick = { Toast.makeText(context, "Đổi giao diện", Toast.LENGTH_SHORT).show() }
+                onClick = { appearanceSheet = "camera" }
             )
             SettingsItem(
                 icon = {
@@ -344,7 +345,7 @@ fun ProfileScreen(
                 trailing = {
                     Switch(
                         checked = goldBadgeActive,
-                        onCheckedChange = { goldBadgeActive = it },
+                        onCheckedChange = { goldBadgeActive = it; AppearancePrefs.setBadge(context, it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = LocketYellow
@@ -355,7 +356,7 @@ fun ProfileScreen(
             SettingsItem(
                 icon = { Icon(Icons.AutoMirrored.Filled.ReceiptLong, null, tint = LocketYellow) },
                 title = "Quản lý Gói đăng ký",
-                onClick = { Toast.makeText(context, "Gói đăng ký Locket Gold", Toast.LENGTH_SHORT).show() }
+                onClick = { appearanceSheet = "subscription" }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -404,6 +405,10 @@ fun ProfileScreen(
                     Toast.makeText(context, "Đã đăng xuất", Toast.LENGTH_SHORT).show()
                 }
             )
+        }
+
+        appearanceSheet?.let { page ->
+            AppearanceSheet(page, viewModel, onDismiss = { appearanceSheet = null })
         }
 
         // Modals & Dialogs

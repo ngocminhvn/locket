@@ -749,7 +749,7 @@ fun CameraScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LocketBlack)
+            .background(AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context)))
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

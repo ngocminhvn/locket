@@ -44,6 +44,9 @@ object LocketWidgetUpdater {
 
     private suspend fun buildViews(context: Context, latest: Moment?): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_locket)
+        val frame = com.locket.app.ui.screens.AppearancePrefs.frameResource(context)
+        views.setViewVisibility(R.id.widget_custom_frame, if (frame == 0) View.GONE else View.VISIBLE)
+        if (frame != 0) views.setImageViewResource(R.id.widget_custom_frame, frame)
 
         // Bam widget -> mo app dung man Home
         val intent = Intent(context, MainActivity::class.java).apply {
