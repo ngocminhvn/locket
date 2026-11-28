@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -243,12 +242,7 @@ fun FeedBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showSideActions) {
-                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp)
-                    .shadow(4.dp, CircleShape, clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.20f),
-                        spotColor = Color.Black.copy(alpha = 0.30f))
-                    .glassEffect(sideGlass, CircleShape)
-                    .border(0.5.dp, Color.White.copy(alpha = 0.055f), CircleShape)) {
+                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).glassEffect(sideGlass, CircleShape)) {
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
@@ -295,12 +289,7 @@ fun FeedBottomBar(
                 }
             }
             if (showSideActions) {
-                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp)
-                    .shadow(4.dp, CircleShape, clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.20f),
-                        spotColor = Color.Black.copy(alpha = 0.30f))
-                    .glassEffect(sideGlass, CircleShape)
-                    .border(0.5.dp, Color.White.copy(alpha = 0.055f), CircleShape)) {
+                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(sideGlass, CircleShape)) {
                     Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
