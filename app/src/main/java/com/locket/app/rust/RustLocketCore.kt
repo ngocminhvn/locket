@@ -80,7 +80,7 @@ internal object FeedWireDecoder {
     fun decode(bytes: ByteArray, nowSeconds: Long): RustLocketCore.FeedDelta =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             require(input.readNBytes(4).contentEquals("LKT1".toByteArray(Charsets.US_ASCII))) { "Invalid Rust wire magic" }
-            require(input.readUnsignedShort() == 1) { "Unsupported Rust wire schema" }
+            require(input.readUnsignedShort() == 2) { "Unsupported Rust wire schema" }
             require(input.readUnsignedByte() == 1) { "Unexpected Rust record type" }
             val notModified = input.readUnsignedByte() != 0
             val syncToken = input.optionalUtf8()
@@ -96,6 +96,7 @@ internal object FeedWireDecoder {
                 val nanos = input.readInt()
                 require(nanos in 0..999_999_999) { "Invalid timestamp nanoseconds" }
                 val md5 = input.utf8()
+                val overlays = input.utf8()
                 Moment(
                     id = id,
                     userUid = owner,
@@ -106,6 +107,7 @@ internal object FeedWireDecoder {
                     timestampSeconds = seconds,
                     timeAgo = age(nowSeconds, seconds),
                     md5 = md5,
+                    overlaysJson = overlays,
                 )
             }
             require(input.read() == -1) { "Trailing Rust wire bytes" }
@@ -146,7 +148,7 @@ internal object FeedWireDecoder {
     private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             require(input.readNBytes(4).contentEquals("LKT1".toByteArray(Charsets.US_ASCII)))
-            require(input.readUnsignedShort() == 1)
+            require(input.readUnsignedShort() == 2)
             require(input.readUnsignedByte() == recordType)
             block(input)
         }
@@ -156,7 +158,7 @@ internal object FeedWireDecoder {
     private fun DataInputStream.moment(nowSeconds: Long): Moment {
         val id = utf8(); val owner = utf8(); val thumbnail = utf8(); val video = optionalUtf8(); val caption = utf8()
         val seconds = readLong(); val nanos = readInt(); require(nanos in 0..999_999_999); val md5 = utf8()
-        return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds), emptyMap(), md5)
+        return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds), emptyMap(), md5, overlaysJson = utf8())
     }
 
     private fun DataInputStream.optionalUtf8(): String? = when (readUnsignedByte()) {
