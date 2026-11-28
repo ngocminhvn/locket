@@ -31,7 +31,7 @@ private val neutral = AmbientPalette(LocketBlack, Color(0xFF19191B), LocketBlack
 
 /** Each screen shares the extracted palette but chooses its own darkness. */
 internal enum class AmbientMode(val strength: Float, val durationMs: Int) {
-    HOME(1f, 280), HISTORY(0.74f, 220), MEMORY(1f, 280), CONVERSATION(0.68f, 300), ACTIVITY(0.74f, 280)
+    HOME(1f, 160), HISTORY(0.74f, 140), MEMORY(1f, 160), CONVERSATION(0.68f, 180), ACTIVITY(0.74f, 160)
 }
 private val paletteCache = LruCache<String, AmbientPalette>(128)
 
