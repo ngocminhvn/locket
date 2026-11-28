@@ -14,6 +14,13 @@ import java.io.DataInputStream
 object RustLocketCore {
     val isAvailable: Boolean = runCatching { System.loadLibrary("locket_core") }.isSuccess
 
+    private external fun weatherStyleNative(condition: String, daylight: Boolean, twilight: String): String
+    internal fun weatherStyle(condition: String, daylight: Boolean, twilight: String): List<String>? {
+        if (!isAvailable) return null
+        return try { weatherStyleNative(condition, daylight, twilight).split("|") }
+        catch (_: UnsatisfiedLinkError) { null }
+    }
+
     private external fun receiptStatusNative(created: Long, read: Long, delivered: Long): Int
 
     fun receiptStatus(created: Long, read: Long?, delivered: Long?): Int {

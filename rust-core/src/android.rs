@@ -268,3 +268,13 @@ pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_receiptStatusNati
 ) -> jni::sys::jint {
     crate::receipt::status(created, read, delivered)
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_weatherStyleNative(
+    mut env: JNIEnv<'_>, _this: JObject<'_>, condition: JString<'_>, daylight: jni::sys::jboolean, twilight: JString<'_>,
+) -> jni::sys::jstring {
+    let Ok(condition) = java_string(&mut env, &condition) else { return std::ptr::null_mut(); };
+    let Ok(twilight) = java_string(&mut env, &twilight) else { return std::ptr::null_mut(); };
+    let (symbol, first, second) = crate::weather::style(&condition, daylight != 0, &twilight);
+    env.new_string(format!("{symbol}|{first}|{second}")).map(JString::into_raw).unwrap_or(std::ptr::null_mut())
+}

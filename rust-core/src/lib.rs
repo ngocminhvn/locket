@@ -13,3 +13,5 @@ pub mod wire;
 pub use api::{parse_chat_response, parse_feed_response, parse_history_response, CoreError};
 
 mod receipt;
+
+mod weather;

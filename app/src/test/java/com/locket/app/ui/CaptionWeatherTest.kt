@@ -15,8 +15,10 @@ class CaptionWeatherTest {
     @Test
     fun weatherSymbolsCoverRareConditions() {
         assertEquals("wind", CaptionWeather(20.0, "windy", true, 0.0).symbol)
-        assertEquals("cloud.sleet.fill", CaptionWeather(0.0, "hail", true, 0.0).symbol)
-        assertEquals("snowflake", CaptionWeather(-2.0, "blizzard", false, 1.0).symbol)
+        assertEquals("cloud.hail.fill", CaptionWeather(0.0, "hail", true, 0.0).symbol)
+        assertEquals("wind.snow", CaptionWeather(-2.0, "blizzard", false, 1.0).symbol)
+        assertEquals("cloud.rain.fill", CaptionWeather(20.0, "rain", true, 1.0, "sunrise").symbol)
+        assertEquals(listOf("#7790A6", "#AAAAAA"), CaptionWeather(20.0, "rain", true, 1.0, "sunset").colors)
         assertEquals("moon.stars.fill", CaptionWeather(20.0, "clearNight", false, 0.0).symbol)
     }
 }

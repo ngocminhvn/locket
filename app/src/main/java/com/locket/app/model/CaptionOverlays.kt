@@ -153,11 +153,14 @@ internal fun captionSymbol(kind: String, iconKind: String, iconData: String): Ca
         iconData.startsWith("location") || iconData.startsWith("mappin") -> CaptionSymbol.LOCATION
         iconData.startsWith("clock") -> CaptionSymbol.CLOCK
         iconData.startsWith("flame") -> CaptionSymbol.FLAME
-        iconData.startsWith("sun.max") -> CaptionSymbol.SUN
+        iconData.startsWith("sunrise") || iconData.startsWith("sunset") || iconData.startsWith("sun.max") -> CaptionSymbol.SUN
+        iconData.startsWith("sun.haze") || iconData.startsWith("smoke") -> CaptionSymbol.FOG
+        iconData.startsWith("wind.snow") || iconData.startsWith("sun.snow") || iconData.startsWith("thermometer.snowflake") -> CaptionSymbol.SNOW
+        iconData.startsWith("cloud.sun.rain") || iconData.startsWith("cloud.heavyrain") -> CaptionSymbol.RAIN
         iconData.startsWith("moon") || iconData.startsWith("cloud.moon") -> CaptionSymbol.MOON
         iconData.startsWith("cloud.sun") -> CaptionSymbol.PARTLY_CLOUDY
         iconData.startsWith("snow") -> CaptionSymbol.SNOW
-        iconData.startsWith("wind") || iconData.startsWith("hurricane") -> CaptionSymbol.WIND
+        iconData.startsWith("wind") || iconData.startsWith("hurricane") || iconData.startsWith("tropicalstorm") -> CaptionSymbol.WIND
         iconData.startsWith("cloud.fog") || iconData.startsWith("cloud.haze") -> CaptionSymbol.FOG
         iconData.startsWith("cloud.sleet") || iconData.startsWith("cloud.hail") -> CaptionSymbol.SLEET
         iconData.startsWith("cloud.snow") -> CaptionSymbol.SNOW

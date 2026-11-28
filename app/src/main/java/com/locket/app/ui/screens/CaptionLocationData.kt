@@ -182,28 +182,9 @@ internal data class CaptionWeather(
     private val fahrenheit = celsius * 9 / 5 + 32
     private val useFahrenheit get() = Locale.getDefault().country in setOf("US", "BS", "KY", "LR", "PW", "FM", "MH")
     val label get() = if (useFahrenheit) "${fahrenheit.roundToInt()}°F" else "${celsius.roundToInt()}°C"
-    val symbol: String get() = when (condition) {
-        "clear", "mostlyClear", "hot" -> if (daylight) "sun.max.fill" else "moon.stars.fill"
-        "clearNight", "mostlyClearNight", "hotNight" -> "moon.stars.fill"
-        "partlyCloudy", "mostlyCloudy" -> if (daylight) "cloud.sun.fill" else "cloud.moon.fill"
-        "partlyCloudyNight" -> "cloud.moon.fill"
-        "foggy", "haze", "smoky", "blowingDust" -> "cloud.fog.fill"
-        "breezy", "windy" -> "wind"
-        "drizzle", "rain", "heavyRain", "freezingRain", "freezingDrizzle", "sunShowers" -> "cloud.rain.fill"
-        "snow", "heavySnow", "flurries", "blizzard", "blowingSnow", "sunFlurries", "wintryMix", "frigid" -> "snowflake"
-        "sleet", "hail" -> "cloud.sleet.fill"
-        "thunderstorms", "strongStorms", "isolatedThunderstorms", "scatteredThunderstorms" -> "cloud.bolt.rain.fill"
-        "hurricane", "tropicalStorm" -> "wind"
-        else -> "cloud.fill"
-    }
-    val colors: List<String> get() = when {
-        twilight == "sunrise" -> listOf("#AE88FF", "#FFC1AD")
-        twilight == "sunset" -> listOf("#6C77DA", "#FFC896")
-        condition in setOf("clearNight", "mostlyClearNight", "hotNight", "partlyCloudyNight") -> listOf("#370C6F", "#575CD4")
-        condition in setOf("clear", "mostlyClear", "partlyCloudy", "hot") ->
-            if (daylight) listOf("#2D9AFF", "#6BDCFF") else listOf("#370C6F", "#575CD4")
-        else -> listOf("#7790A6", "#AAAAAA")
-    }
+    private val style by lazy { com.locket.app.model.WeatherStyle.resolve(condition, daylight, twilight) }
+    val symbol: String get() = style.symbol
+    val colors: List<String> get() = style.colors
     fun overlay() = com.locket.app.model.CaptionOverlays.make("weather", label, colors = colors,
         icon = com.locket.app.model.CaptionOverlays.icon("sf_symbol", symbol),
         payload = com.google.gson.JsonObject().apply {
