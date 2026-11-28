@@ -14,7 +14,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.draw.clipToBounds
@@ -129,7 +140,7 @@ fun HomeMomentScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.0f)
-                    .clip(RoundedCornerShape(48.dp))
+                    .clip(RoundedCornerShape(52.dp))
                     .background(Color(0xFF1E1E1E))
                     .combinedClickable(
                         onLongClick = { if (currentMoment != null && !pinching && zoom <= 1f) menuAction = "menu" },
@@ -237,7 +248,7 @@ fun HomeMomentScreen(
 
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(25.dp))
 
             // User info; caption is shown only once inside the image.
             if (currentMoment != null) {
@@ -482,6 +493,8 @@ internal fun MomentReactionBar(
     val sending = replyKey != null && replyKey in sendingReplies
     var messageText by remember(currentMoment?.id, currentUser.uid) { mutableStateOf("") }
     var showEmoji by remember(currentMoment?.id) { mutableStateOf(false) }
+    var showReply by remember(currentMoment?.id, currentUser.uid) { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
     fun sendReply() {
         val moment = currentMoment ?: return
         val text = messageText
@@ -491,8 +504,10 @@ internal fun MomentReactionBar(
             message = text,
             momentUid = moment.id,
             onSuccess = {
-                if (messageText == text) messageText = ""
-                Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
+                if (messageText == text) {
+                    messageText = ""
+                    showReply = false
+                }
             },
             onError = { err ->
                 Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
@@ -506,91 +521,137 @@ internal fun MomentReactionBar(
         }
     }
     if (showEmoji) MomentEmojiSheet(onDismiss = { showEmoji = false }, onPick = { react(it); showEmoji = false })
-            // Reaction Bar (Calls real reactToMoment API & sends real chat message)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(Color.White.copy(alpha = 0.10f))
-                    .padding(horizontal = 8.dp, vertical = 0.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Text input
-                TextField(
-                    value = messageText,
-                    onValueChange = { messageText = it },
-                    placeholder = { Text("Gửi tin nhắn...", color = Color.White.copy(alpha = 0.44f), fontSize = 18.sp, maxLines = 1) },
-                    textStyle = LocalTextStyle.current.copy(fontSize = 18.sp),
-                    modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { sendReply() })
-                )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+            .height(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+            .padding(start = 24.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.weight(1f).fillMaxHeight().clickable(enabled = currentMoment != null) { showReply = true },
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(messageText.ifBlank { "Gửi tin nhắn..." },
+                color = Color.White.copy(alpha = if (messageText.isBlank()) 0.44f else 0.9f),
+                fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
+        }
+        for (emoji in listOf("🔥", "😍", "💛")) {
+            Box(Modifier.size(44.dp).clip(CircleShape).clickable(enabled = currentMoment != null) { react(emoji) },
+                contentAlignment = Alignment.Center) {
+                Text(emoji, fontSize = 30.sp)
+            }
+        }
+        IconButton(onClick = { showEmoji = true }, enabled = currentMoment != null,
+            modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Outlined.AddReaction, "Emoji", tint = Color.White.copy(alpha = 0.60f),
+                modifier = Modifier.size(28.dp))
+        }
+    }
 
-                // Quick emoji buttons calling reactToMoment
-                val emojis = listOf("🔥", "😍", "💛")
-                for (emoji in emojis) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .clickable(enabled = currentMoment != null) {
-                                onReaction(emoji)
-                                if (currentMoment != null) {
-                                    viewModel.reactToMoment(
-                                        momentId = currentMoment.id,
-                                        ownerUid = currentMoment.userUid,
-                                        reaction = emoji
-                                    )
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = emoji, fontSize = 28.sp)
+    if (showReply && currentMoment != null) {
+        MomentReplyDialog(
+            moment = currentMoment,
+            message = messageText,
+            sending = sending,
+            onMessageChange = { messageText = it },
+            onDismiss = { keyboard?.hide(); showReply = false },
+            onSend = { sendReply() }
+        )
+    }
+}
+
+/** A separate window leaves the moment, caption and root navigation in place behind the IME. */
+@Composable
+private fun MomentReplyDialog(
+    moment: Moment,
+    message: String,
+    sending: Boolean,
+    onMessageChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSend: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { window?.setDimAmount(0.65f) }
+        val focusRequester = remember { FocusRequester() }
+        val keyboard = LocalSoftwareKeyboardController.current
+        LaunchedEffect(Unit) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+        val firstName = moment.userName.trim().substringBefore(' ').ifBlank { moment.userUid }
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.matchParentSize().clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null, onClick = onDismiss
+            ))
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
+                    .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(bottom = 14.dp)) {
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(LocketAvatarBg),
+                        contentAlignment = Alignment.Center) {
+                        if (moment.userAvatarUrl.isNotBlank()) {
+                            SkeletonAsyncImage(moment.userAvatarUrl, null, Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop)
+                        } else {
+                            Icon(Icons.Default.Person, null, tint = Color.White,
+                                modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column {
+                        Text("Replying to", color = Color.White.copy(alpha = 0.60f),
+                            fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(firstName, color = Color.White, fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-
-                // Send message button if text entered
-                if (messageText.isNotBlank()) {
-                    IconButton(
-                        onClick = { sendReply() },
-                        enabled = currentMoment != null && !sending,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Gửi",
-                            tint = LocketYellow,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                } else {
-                    IconButton(
-                        onClick = {
-                            if (currentMoment != null) showEmoji = true
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.AddReaction,
-                            contentDescription = "Emoji",
-                            tint = Color.White.copy(alpha = 0.60f),
-                            modifier = Modifier.size(28.dp)
-                        )
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(30.dp))
+                        .background(Color(0xFF242422)).padding(start = 20.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = message,
+                        onValueChange = onMessageChange,
+                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                        textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+                        cursorBrush = SolidColor(Color.White),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                        minLines = 1, maxLines = 4,
+                        decorationBox = { inner ->
+                            Box(Modifier.fillMaxWidth()) {
+                                if (message.isEmpty()) Text("Trả lời $firstName...",
+                                    color = Color.White.copy(alpha = 0.55f), fontSize = 17.sp,
+                                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                inner()
+                            }
+                        }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    val canSend = message.isNotBlank() && !sending
+                    Box(Modifier.size(28.dp).clip(CircleShape)
+                        .background(if (canSend) LocketYellow else Color.White.copy(alpha = 0.16f))
+                        .clickable(enabled = canSend, onClick = onSend),
+                        contentAlignment = Alignment.Center) {
+                        if (sending) CircularProgressIndicator(Modifier.size(15.dp),
+                            color = Color.White, strokeWidth = 2.dp)
+                        else Icon(Icons.Default.ArrowUpward, "Gửi", tint = Color(0xFF242422),
+                            modifier = Modifier.size(18.dp))
                     }
                 }
             }
-
+        }
+    }
 }
 
 
