@@ -1,6 +1,24 @@
 package com.locket.app.ui.screens
 
 import android.widget.Toast
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -63,7 +81,7 @@ import java.util.Locale
  * cua minh (deleteChatMessage — goc goi la "unsend"), bao cao tin nguoi
  * khac (reportMessage).
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailScreen(
     viewModel: LocketViewModel,
@@ -76,7 +94,12 @@ fun ChatDetailScreen(
     var inputMessage by remember(friend.uid) { mutableStateOf("") }
     var showQuickEmojis by remember { mutableStateOf(false) }
     var sending by remember(friend.uid) { mutableStateOf(false) }
-    var reactingTo by remember { mutableStateOf<ChatMessage?>(null) }
+    var reactingTo by remember(friend.uid) { mutableStateOf<ChatMessage?>(null) }
+    var menuAnchor by remember(friend.uid) { mutableStateOf<Rect?>(null) }
+    var rootOrigin by remember { mutableStateOf(Offset.Zero) }
+    var showReactionPicker by remember { mutableStateOf(false) }
+    var menuBusy by remember { mutableStateOf(false) }
+    val messageBounds = remember(friend.uid) { mutableMapOf<String, Rect>() }
     // Buoc xac nhan trong menu tin nhan: null = chon emoji/menu,
     // "delete" = xac nhan thu hoi, "report" = xac nhan bao cao.
     var menuConfirm by remember { mutableStateOf<String?>(null) }
@@ -92,6 +115,37 @@ fun ChatDetailScreen(
     val activeConversationId by viewModel.activeConversationId.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val myUid = currentUser.uid
+    fun openMessageMenu(msg: ChatMessage) {
+        if (menuBusy) return
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        menuAnchor = messageBounds[msg.id]
+        reactingTo = msg
+        menuConfirm = null
+    }
+    fun dismissMessageMenu() {
+        reactingTo = null
+        menuConfirm = null
+        showReactionPicker = false
+        menuAnchor = null
+    }
+    fun copyMessage(msg: ChatMessage) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Tin nhắn", msg.text))
+        dismissMessageMenu()
+    }
+    fun reactToMessage(msg: ChatMessage, emoji: String) {
+        val convId = activeConversationId ?: return
+        if (msg.isMe || menuBusy) return
+        menuBusy = true
+        dismissMessageMenu()
+        viewModel.reactToChatMessage(
+            conversationId = convId, messageId = msg.id, emoji = emoji,
+            onSuccess = { menuBusy = false },
+            onRemoved = { menuBusy = false },
+            onError = { menuBusy = false; Toast.makeText(context, "Lỗi: $it", Toast.LENGTH_LONG).show() }
+        )
+    }
     val listState = rememberLazyListState()
     val newestFirst = remember(messages) { messages.asReversed() }
     val currentMessages by rememberUpdatedState(messages)
@@ -200,7 +254,7 @@ fun ChatDetailScreen(
             // Apply the larger bottom inset exactly once. The window resizes rather than pans.
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
     ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.boundsInRoot().topLeft }) {
             // Message Stream: tin nhan that tu server (cache Room + sync)
             if (isChatLoading && messages.isEmpty() && pendingHere.isEmpty()) {
                 Box(
@@ -265,17 +319,18 @@ fun ChatDetailScreen(
                                     badgeAtStart = false,
                                     insetBadge = true,
                                     modifier = Modifier.fillMaxWidth(),
-                                    onReactionClick = { reactingTo = msg }
+                                    onReactionClick = { openMessageMenu(msg) }
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .aspectRatio(1.0f)
+                                            .onGloballyPositioned { if (msg.text.isBlank()) messageBounds[msg.id] = it.boundsInRoot() }
                                             .clip(RoundedCornerShape(42.dp))
                                             .background(LocketSheetSurface)
                                             .combinedClickable(
                                                 onClick = {},
-                                                onLongClick = { reactingTo = msg }
+                                                onLongClick = { openMessageMenu(msg) }
                                             )
                                     ) {
                                         AsyncImage(
@@ -331,12 +386,12 @@ fun ChatDetailScreen(
                                 // Text kem theo moment (neu co)
                                 if (msg.text.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor, onLongClick = { reactingTo = msg })
+                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor, onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                                 }
                             }
                         } else if (msg.isMe) {
                             MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
-                                onLongClick = { reactingTo = msg })
+                                onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                         } else {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -345,7 +400,7 @@ fun ChatDetailScreen(
                             ) {
                                 ChatAvatar(friend.avatarUrl, 32)
                                 MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
-                                    modifier = Modifier.weight(1f), onLongClick = { reactingTo = msg })
+                                    modifier = Modifier.weight(1f), onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                             }
                         }
                     }
@@ -478,6 +533,27 @@ fun ChatDetailScreen(
                 )
             }
 
+            val incomingTarget = reactingTo?.takeUnless { it.isMe }
+            if (incomingTarget != null && menuConfirm == null && !showReactionPicker) {
+                val currentTarget = messages.firstOrNull { it.id == incomingTarget.id } ?: incomingTarget
+                val anchor = menuAnchor?.let {
+                    Rect(it.left - rootOrigin.x, it.top - rootOrigin.y, it.right - rootOrigin.x, it.bottom - rootOrigin.y)
+                }
+                val menuTint = lerp(ambient.middle, Color.White, 0.19f)
+                ReceivedMessageMenu(
+                    anchor = anchor,
+                    isImage = currentTarget.text.isBlank() && currentTarget.thumbnailUrl != null,
+                    tint = menuTint,
+                    canCopy = currentTarget.text.isNotBlank(),
+                    canReact = !activeConversationId.isNullOrBlank() && !menuBusy,
+                    selectedEmoji = currentTarget.reactions.firstOrNull { it.senderUid == myUid }?.emoji,
+                    onDismiss = { dismissMessageMenu() },
+                    onCopy = { copyMessage(currentTarget) },
+                    onReport = { menuConfirm = "report" },
+                    onReact = { reactToMessage(currentTarget, it) },
+                    onMore = { showReactionPicker = true }
+                )
+            }
         }
 
     }
@@ -489,196 +565,152 @@ fun ChatDetailScreen(
         })
     }
 
-    // Menu tin nhan (nhan giu 1 tin nhan that):
-    // - Chon emoji: gui reaction that qua sendChatMessageReaction; bam dung
-    //   emoji minh da react thi go (removeChatMessageReaction).
-    // - "Xoa tin nhan": chi tin do minh gui (goc goi la "unsend") -> hoi
-    //   xac nhan roi goi deleteChatMessage {message_uid, conversation_uid}.
-    // - "Bao cao tin nhan": chi tin cua nguoi khac -> hoi xac nhan roi goi
-    //   reportMessage {message_uid, conversation_uid}.
-    // Chi toast khi server tra 200.
+    BackHandler(enabled = reactingTo != null && menuConfirm == null && !showReactionPicker) {
+        dismissMessageMenu()
+    }
+
     val target = reactingTo
     if (target != null) {
-        val myReaction = target.reactions.firstOrNull { it.senderUid == myUid }
-        AlertDialog(
-            onDismissRequest = { reactingTo = null; menuConfirm = null },
-            containerColor = LocketModalBg,
-            title = {
-                Text(
-                    text = when (menuConfirm) {
-                        "delete" -> "Thu hồi tin nhắn?"
-                        "report" -> "Báo cáo tin nhắn?"
-                        else -> "Chọn biểu cảm"
-                    },
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                when (menuConfirm) {
-                    "delete" -> Text(
-                        text = "Tin nhắn này sẽ bị thu hồi.",
-                        color = Color.White,
-                        fontSize = 15.sp
-                    )
-                    "report" -> Text(
-                        text = "Tin nhắn này sẽ được gửi báo cáo.",
-                        color = Color.White,
-                        fontSize = 15.sp
-                    )
-                    else -> Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            for (emoji in listOf("🔥", "😍", "💛", "😂", "🥺")) {
-                                Text(
-                                    text = emoji,
-                                    fontSize = 28.sp,
-                                    modifier = Modifier
-                                        .clickable {
-                                            val convId = activeConversationId
-                                            if (convId.isNullOrBlank()) {
-                                                Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
-                                                reactingTo = null
-                                            } else {
-                                                viewModel.reactToChatMessage(
-                                                    conversationId = convId,
-                                                    messageId = target.id,
-                                                    emoji = emoji,
-                                                    onSuccess = {
-                                                        Toast.makeText(context, "Đã gửi $emoji", Toast.LENGTH_SHORT).show()
-                                                        reactingTo = null
-                                                    },
-                                                    onRemoved = {
-                                                        Toast.makeText(context, "Đã gỡ $emoji", Toast.LENGTH_SHORT).show()
-                                                        reactingTo = null
-                                                    },
-                                                    onError = { err ->
-                                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                                        reactingTo = null
-                                                    }
-                                                )
-                                            }
-                                        }
-                                        .padding(6.dp)
-                                )
+        if (showReactionPicker && !target.isMe) {
+            MomentEmojiSheet(onDismiss = { showReactionPicker = false }, onPick = {
+                showReactionPicker = false
+                reactToMessage(target, it)
+            })
+        } else if (menuConfirm != null) {
+            val deleting = menuConfirm == "delete"
+            AlertDialog(
+                onDismissRequest = { if (!menuBusy) dismissMessageMenu() },
+                containerColor = LocketModalBg,
+                title = { Text(if (deleting) "Thu hồi tin nhắn?" else "Báo cáo tin nhắn?", color = Color.White) },
+                text = { Text(if (deleting) "Tin nhắn này sẽ bị thu hồi." else "Tin nhắn này sẽ được gửi báo cáo.", color = Color.White) },
+                confirmButton = {
+                    TextButton(enabled = !menuBusy && !activeConversationId.isNullOrBlank(),
+                        onClick = {
+                            val convId = activeConversationId ?: return@TextButton
+                            if (deleting != target.isMe) return@TextButton
+                            menuBusy = true
+                            val success: () -> Unit = {
+                                menuBusy = false
+                                Toast.makeText(context, if (deleting) "Đã thu hồi tin nhắn" else "Đã gửi báo cáo", Toast.LENGTH_SHORT).show()
+                                dismissMessageMenu()
                             }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (target.isMe) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { menuConfirm = "delete" }
-                                    .padding(vertical = 10.dp)
-                            ) {
-                                Text("Xóa tin nhắn", color = LocketRed, fontSize = 16.sp)
+                            val failure: (String) -> Unit = { error ->
+                                menuBusy = false
+                                Toast.makeText(context, "Lỗi: $error", Toast.LENGTH_LONG).show()
+                                dismissMessageMenu()
                             }
-                        } else {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { menuConfirm = "report" }
-                                    .padding(vertical = 10.dp)
-                            ) {
-                                Text("Báo cáo tin nhắn", color = LocketRed, fontSize = 16.sp)
-                            }
-                        }
-                        if (myReaction != null) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val convId = activeConversationId
-                                        if (convId.isNullOrBlank()) {
-                                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
-                                            reactingTo = null
-                                        } else {
-                                            viewModel.removeChatMessageReaction(
-                                                conversationId = convId,
-                                                messageId = target.id,
-                                                emoji = myReaction.emoji,
-                                                onSuccess = {
-                                                    Toast.makeText(context, "Đã gỡ ${myReaction.emoji}", Toast.LENGTH_SHORT).show()
-                                                    reactingTo = null
-                                                },
-                                                onError = { err ->
-                                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                                    reactingTo = null
-                                                }
-                                            )
-                                        }
-                                    }
-                                    .padding(vertical = 10.dp)
-                            ) {
-                                Text("Gỡ reaction ${myReaction.emoji}", color = Color.White, fontSize = 16.sp)
-                            }
-                        }
+                            if (deleting) viewModel.deleteChatMessage(target.id, convId, success, failure)
+                            else viewModel.reportChatMessage(target.id, convId, success, failure)
+                        }) { Text(if (deleting) "Thu hồi" else "Báo cáo", color = LocketRed) }
+                },
+                dismissButton = { TextButton(enabled = !menuBusy, onClick = { dismissMessageMenu() }) { Text("Hủy") } }
+            )
+        } else if (target.isMe) {
+            ModalBottomSheet(
+                onDismissRequest = { dismissMessageMenu() },
+                containerColor = Color(0xFF242424),
+                shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+                dragHandle = null
+            ) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    if (target.text.isNotBlank()) MessageSheetAction("Sao chép") { copyMessage(target) }
+                    if (!activeConversationId.isNullOrBlank() && target.id.isNotBlank()) {
+                        MessageSheetAction("Thu hồi", LocketRed) { menuConfirm = "delete" }
                     }
-                }
-            },
-            confirmButton = {
-                when (menuConfirm) {
-                    "delete" -> TextButton(onClick = {
-                        val convId = activeConversationId
-                        if (convId.isNullOrBlank()) {
-                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
-                            reactingTo = null
-                            menuConfirm = null
-                        } else {
-                            viewModel.deleteChatMessage(
-                                messageId = target.id,
-                                conversationId = convId,
-                                onSuccess = {
-                                    Toast.makeText(context, "Đã thu hồi tin nhắn", Toast.LENGTH_SHORT).show()
-                                    reactingTo = null
-                                    menuConfirm = null
-                                },
-                                onError = { err ->
-                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                    reactingTo = null
-                                    menuConfirm = null
-                                }
-                            )
-                        }
-                    }) {
-                        Text("Thu hồi", color = LocketRed, fontWeight = FontWeight.Bold)
-                    }
-                    "report" -> TextButton(onClick = {
-                        val convId = activeConversationId
-                        if (convId.isNullOrBlank()) {
-                            Toast.makeText(context, "Chưa mở được cuộc trò chuyện", Toast.LENGTH_SHORT).show()
-                            reactingTo = null
-                            menuConfirm = null
-                        } else {
-                            viewModel.reportChatMessage(
-                                messageId = target.id,
-                                conversationId = convId,
-                                onSuccess = {
-                                    Toast.makeText(context, "Đã gửi báo cáo", Toast.LENGTH_SHORT).show()
-                                    reactingTo = null
-                                    menuConfirm = null
-                                },
-                                onError = { err ->
-                                    Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                    reactingTo = null
-                                    menuConfirm = null
-                                }
-                            )
-                        }
-                    }) {
-                        Text("Báo cáo", color = LocketRed, fontWeight = FontWeight.Bold)
-                    }
-                    else -> {}
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { reactingTo = null; menuConfirm = null }) {
-                    Text("Hủy", color = Color.White)
+                    MessageSheetAction("Hủy") { dismissMessageMenu() }
                 }
             }
-        )
+        }
+    }
+}
+
+@Composable
+private fun MessageSheetAction(label: String, color: Color = Color.White, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(56.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(label, color = color, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Screen-fixed, anchored menu for received messages. The selected bubble stays undimmed. */
+@Composable
+private fun ReceivedMessageMenu(
+    anchor: Rect?, isImage: Boolean, tint: Color, canCopy: Boolean, canReact: Boolean,
+    selectedEmoji: String?, onDismiss: () -> Unit, onCopy: () -> Unit,
+    onReport: () -> Unit, onReact: (String) -> Unit, onMore: () -> Unit
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val w = constraints.maxWidth.toFloat()
+        val h = constraints.maxHeight.toFloat()
+        val gap = with(density) { 8.dp.toPx() }
+        val barHeight = with(density) { 64.dp.toPx() }
+        val menuHeight = with(density) { (if (canCopy) 104.dp else 52.dp).toPx() }
+        val barWidth = (maxWidth - 24.dp).coerceAtMost(310.dp)
+        val menuWidth = (maxWidth - 24.dp).coerceAtMost(202.dp)
+        val barPx = with(density) { barWidth.toPx() }
+        val menuPx = with(density) { menuWidth.toPx() }
+        val top = anchor?.top ?: h * 0.42f
+        val bottom = anchor?.bottom ?: h * 0.50f
+        val left = anchor?.left ?: gap
+        val safeTop = with(density) { 48.dp.toPx() }
+        val barY = (top - gap - barHeight).coerceIn(safeTop.coerceAtMost((h - barHeight).coerceAtLeast(0f)), (h - barHeight).coerceAtLeast(0f))
+        val menuY = (bottom + gap).coerceIn(0f, (h - menuHeight - gap).coerceAtLeast(0f))
+        val barX = left.coerceIn(gap.coerceAtMost((w - barPx).coerceAtLeast(0f)), (w - barPx - gap).coerceAtLeast(gap.coerceAtMost((w - barPx).coerceAtLeast(0f))))
+        val menuX = left.coerceIn(0f, (w - menuPx - gap).coerceAtLeast(0f))
+        Canvas(Modifier.fillMaxSize().clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss
+        )) {
+            val scrim = Path().apply {
+                fillType = PathFillType.EvenOdd
+                addRect(Rect(0f, 0f, size.width, size.height))
+                anchor?.let {
+                    val radius = (if (isImage) 42.dp else 28.dp).toPx().coerceAtMost(it.height / 2f)
+                    if (it.width > 0f && it.height > 0f) addRoundRect(RoundRect(it, CornerRadius(radius, radius)))
+                }
+            }
+            drawPath(scrim, Color.Black.copy(alpha = 0.48f))
+        }
+        val surface = tint.copy(alpha = 0.98f)
+        if (canReact) Row(
+            Modifier.offset { IntOffset(barX.roundToInt(), barY.roundToInt()) }
+                .width(barWidth).height(64.dp).clip(CircleShape).background(surface)
+                .border(0.5.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            val defaults = listOf("🫶", "💕", "😍", "🤣", "💛")
+            val emojis = if (selectedEmoji != null && selectedEmoji !in defaults) defaults.dropLast(1) + selectedEmoji else defaults
+            emojis.forEach { emoji ->
+                Box(Modifier.weight(1f).height(48.dp).clip(CircleShape)
+                    .background(if (emoji == selectedEmoji) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+                    .clickable { onReact(emoji) }, contentAlignment = Alignment.Center) {
+                    Text(emoji, fontSize = 27.sp, maxLines = 1)
+                }
+            }
+            IconButton(onClick = onMore, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.AddReaction, "Thêm biểu cảm", tint = Color.White.copy(alpha = 0.60f), modifier = Modifier.size(29.dp))
+            }
+        }
+        Column(
+            Modifier.offset { IntOffset(menuX.roundToInt(), menuY.roundToInt()) }
+                .width(menuWidth).clip(RoundedCornerShape(18.dp)).background(surface)
+                .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
+        ) {
+            if (canCopy) {
+                Row(Modifier.fillMaxWidth().height(52.dp).clickable(onClick = onCopy).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Default.ContentCopy, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Text("Sao chép", color = Color.White, fontSize = 16.sp)
+                }
+                HorizontalDivider(color = Color.White.copy(alpha = 0.10f), modifier = Modifier.padding(horizontal = 12.dp))
+            }
+            Row(Modifier.fillMaxWidth().height(52.dp).clickable(onClick = onReport).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Default.Block, null, tint = LocketRed, modifier = Modifier.size(20.dp))
+                Text("Báo cáo tin nhắn", color = LocketRed, fontSize = 15.sp, maxLines = 1)
+            }
+        }
     }
 }
 
@@ -689,6 +721,7 @@ private fun MessageBubble(
     bubbleColor: Color,
     sentColor: Color,
     modifier: Modifier = Modifier.fillMaxWidth(),
+    onBounds: (Rect) -> Unit = {},
     onLongClick: () -> Unit
 ) {
     Row(
@@ -706,7 +739,7 @@ private fun MessageBubble(
                 color = if (msg.isMe) Color.Black else Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(shape)
+                modifier = Modifier.onGloballyPositioned { onBounds(it.boundsInRoot()) }.clip(shape)
                     .background(if (msg.isMe) sentColor else bubbleColor)
                     .then(if (msg.isMe) Modifier else Modifier.border(0.5.dp, Color.White.copy(alpha = 0.06f), shape))
                     .combinedClickable(onClick = {}, onLongClick = onLongClick)
