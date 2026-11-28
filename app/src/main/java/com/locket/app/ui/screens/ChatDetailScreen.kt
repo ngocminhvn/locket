@@ -189,7 +189,8 @@ fun ChatDetailScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(chatColor)
-            .imePadding()
+            // Apply the larger bottom inset exactly once. The window resizes rather than pans.
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -429,7 +430,7 @@ fun ChatDetailScreen(
 
             // Composer: a compact pill with real quick emoji sending.
             Row(
-                modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                modifier = Modifier.fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .clip(RoundedCornerShape(34.dp)).background(composerColor)
                     .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
