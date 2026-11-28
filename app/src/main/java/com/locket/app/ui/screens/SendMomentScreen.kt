@@ -96,6 +96,7 @@ internal fun rememberMomentReviewSlots(
     friends: List<Friend>,
     replyToFriend: Friend?,
     streak: Int,
+    fetchNativeWeather: suspend (Double, Double) -> com.google.gson.JsonObject?,
     isPosting: Boolean,
     onCancel: () -> Unit,
     onSend: (String, List<String>, String) -> Unit
@@ -109,13 +110,13 @@ internal fun rememberMomentReviewSlots(
     var selected by remember(bitmap) { mutableStateOf(listOfNotNull(replyToFriend?.uid).toSet()) }
     var text by remember(bitmap) { mutableStateOf("") }
     var location by remember(bitmap) { mutableStateOf("") }
-    var weather by remember(bitmap) { mutableStateOf("") }
+    var weather by remember(bitmap) { mutableStateOf(CaptionLocationData.recentWeather()?.label.orEmpty()) }
     var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableIntStateOf(0) }
     var reviewComment by remember(bitmap) { mutableStateOf("") }
     var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
-    var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(null) }
+    var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(CaptionLocationData.recentWeather()) }
     var sheet by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<CaptionKind?>(null) }
     var draft by remember { mutableStateOf("") }
@@ -131,10 +132,15 @@ internal fun rememberMomentReviewSlots(
         translationY = offset.y
     }
     val time = remember(bitmap) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
-    val general = remember { listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME) }
+    val general = remember(streak) {
+        buildList {
+            addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME))
+            if (streak > 0) add(CaptionKind.STREAK)
+            addAll(listOf(CaptionKind.PARTY, CaptionKind.OOTD, CaptionKind.MISS))
+        }
+    }
     val pager = rememberPagerState(pageCount = { general.size })
-    var special by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
-    val kind = special ?: general[pager.currentPage]
+    val kind = general[pager.currentPage.coerceIn(general.indices)]
 
     fun value(k: CaptionKind): String = when (k) {
         CaptionKind.TEXT -> text.trim()
@@ -188,7 +194,17 @@ internal fun rememberMomentReviewSlots(
                         locationFix = fix
                     }
                     CaptionKind.WEATHER -> {
-                        val data = CaptionLocationData.weather(fix)
+                        val data = try {
+                            fetchNativeWeather(fix.latitude, fix.longitude)?.let { raw ->
+                                val temp = raw.get("temperature").asDouble
+                                val condition = raw.get("condition_code").asString.replaceFirstChar { it.lowercaseChar() }
+                                val cover = raw.get("cloud_cover").asDouble
+                                require(temp.isFinite() && cover.isFinite() && condition.isNotBlank())
+                                CaptionWeather(temp, condition, raw.get("daylight").asBoolean, cover.coerceIn(0.0, 1.0))
+                            }
+                        } catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { null } ?: CaptionLocationData.weather(fix)
+                        CaptionLocationData.rememberWeather(data)
                         weatherData = data
                         weather = data.label
                     }
@@ -224,10 +240,7 @@ internal fun rememberMomentReviewSlots(
 
     fun choose(k: CaptionKind) {
         sheet = false
-        if (k in general) {
-            special = null
-            scope.launch { pager.scrollToPage(general.indexOf(k)) }
-        } else special = k
+        if (k in general) scope.launch { pager.scrollToPage(general.indexOf(k)) }
         when (k) {
             CaptionKind.TEXT -> {
                 draft = text
@@ -361,7 +374,7 @@ internal fun rememberMomentReviewSlots(
                     modifier = Modifier.fillMaxSize(),
                     userScrollEnabled = !isPosting && !transforming && zoom <= 1f
                 ) { page ->
-                    val item = special ?: general[page]
+                    val item = general[page]
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         val label = if (fetchingCaption == item) "Đang cập nhật…" else value(item).ifBlank {
                             when (item) {
@@ -374,36 +387,27 @@ internal fun rememberMomentReviewSlots(
                         val shape = RoundedCornerShape(30.dp)
                         val base = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).clip(shape)
                         if (item == CaptionKind.REVIEW) {
-                            Row(base.background(Color(0x99000000)).padding(horizontal = 9.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(1.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                repeat(5) { index ->
-                                    val picked = index < rating
-                                    IconButton(onClick = { rating = index + 1 }, enabled = !isPosting, modifier = Modifier.size(28.dp)) {
-                                        ReviewStar(
-                                            tint = Color(0xFFFFCF38).copy(alpha = if (picked) 1f else 0.38f),
-                                            modifier = Modifier.size(21.dp).semantics { contentDescription = "Đánh giá ${index + 1} sao" }
-                                        )
+                            Column(base.background(Color(0x99000000)).padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(1.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    repeat(5) { index ->
+                                        IconButton(onClick = { rating = index + 1 }, enabled = !isPosting, modifier = Modifier.size(28.dp)) {
+                                            OverlayReviewStar(fill = if (index < rating) 1f else 0f,
+                                                modifier = Modifier.size(21.dp).semantics { contentDescription = "Đánh giá ${index + 1} sao" })
+                                        }
                                     }
+                                }
+                                if (rating > 0) {
+                                    Text(reviewComment.ifBlank { "Viết nhận xét…" }, color = Color.White.copy(alpha = if (reviewComment.isBlank()) 0.45f else 1f),
+                                        fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                                        modifier = Modifier.clickable(enabled = !isPosting) { draft = reviewComment; editor = CaptionKind.REVIEW }.padding(top = 8.dp))
                                 }
                             }
                         } else {
-                            val color = when (item) {
-                                CaptionKind.OOTD -> Color.White
-                                CaptionKind.MISS -> LocketRed
-                                CaptionKind.STREAK -> LocketYellow
-                                else -> Color(0x99000000)
-                            }
-                            val styled = if (item == CaptionKind.PARTY) base.background(
-                                Brush.verticalGradient(listOf(Color(0xFF65F6E0), Color(0xFFEFFF72)))
-                            ) else base.background(color)
-                            Box(styled.clickable(enabled = !isPosting) {
-                                if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER)) choose(item)
-                                else sheet = true
-                            }.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                                Text(label, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3,
-                                    color = if (item in listOf(CaptionKind.OOTD, CaptionKind.PARTY, CaptionKind.STREAK)) Color.Black else Color.White)
-                            }
+                            val data = overlay(item)?.getAsJsonObject("data")
+                            val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER)) choose(item) else sheet = true }
+                            MomentOverlayPill(data, label, Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+                                .clickable(enabled = !isPosting, onClick = tap))
                         }
                     }
                 }
@@ -422,16 +426,20 @@ internal fun rememberMomentReviewSlots(
         }
         },
         indicators = {
-            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                general.forEachIndexed { index, k ->
-                    Box(Modifier.size(if (special == null && pager.currentPage == index) 8.dp else 6.dp)
-                        .clip(CircleShape).background(if (special == null && pager.currentPage == index) Color.White else Color(0xFF505050))
-                        .clickable(enabled = !isPosting) {
-                            special = null
-                            scope.launch { pager.animateScrollToPage(index) }
-                        })
+            val progress = pager.currentPage + pager.currentPageOffsetFraction
+            val center = progress.coerceIn(minOf(2f, (general.size - 1) / 2f), maxOf(general.size - 3f, (general.size - 1) / 2f))
+            Box(Modifier.width((minOf(5, general.size) * 19).dp).height(20.dp).clip(RoundedCornerShape(1.dp)), contentAlignment = Alignment.Center) {
+                general.forEachIndexed { index, _ ->
+                    val distance = kotlin.math.abs(index - center)
+                    val active = (1f - kotlin.math.abs(progress - index)).coerceIn(0f, 1f)
+                    val visible = (3f - distance).coerceIn(0f, 1f)
+                    Box(Modifier.offset(x = ((index - center) * 19f).dp)
+                        .size((6f + 2f * active).dp).clip(CircleShape)
+                        .background(Color.White.copy(alpha = (0.30f + 0.70f * active) * visible))
+                        .clickable(enabled = !isPosting && visible > 0f) { scope.launch { pager.animateScrollToPage(index) } })
                 }
-        }
+            }
+
         },
         controls = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp),
@@ -439,7 +447,7 @@ internal fun rememberMomentReviewSlots(
                 IconButton(onClick = onCancel, enabled = !isPosting && !saving, modifier = Modifier.size(56.dp)) {
                     ReviewActionIcon(ReviewIcon.CLOSE, "Hủy", Color.White, Modifier.size(34.dp))
                 }
-                val canSend = !isPosting && !saving && fetchingCaption != kind && permissionTarget != kind && (sendAll || selected.isNotEmpty())
+                val canSend = !isPosting && !saving && !pager.isScrollInProgress && fetchingCaption != kind && permissionTarget != kind && (sendAll || selected.isNotEmpty())
                 Box(Modifier.size(98.dp).clip(CircleShape)
                     .background(Color.White.copy(alpha = if (canSend || isPosting) 0.29f else 0.16f))
                     .clickable(enabled = canSend) { onSend(if (kind == CaptionKind.TEXT) text.trim() else "", if (sendAll) emptyList() else selected.toList(), com.google.gson.JsonArray().apply { overlay(kind)?.let { add(it) } }.toString()) },
@@ -535,7 +543,7 @@ internal fun rememberMomentReviewSlots(
                 CaptionChip("🥰 Miss you", gradient = Brush.verticalGradient(
                     listOf(Color(0xFFFF1308), Color(0xFFFF4848)))) { choose(CaptionKind.MISS) }
                 Spacer(Modifier.height(14.dp))
-                Text("Thời tiết: Open-Meteo · dùng vị trí khi bạn chọn Location hoặc Weather.",
+                Text("Thời tiết: Locket / Open-Meteo dự phòng · vị trí chỉ lấy khi bạn chọn.",
                     color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
                 Spacer(Modifier.height(20.dp))
             }
@@ -545,13 +553,13 @@ internal fun rememberMomentReviewSlots(
     editor?.let {
         AlertDialog(
             onDismissRequest = { editor = null },
-            title = { Text("Thêm một tin nhắn") },
+            title = { Text(if (editor == CaptionKind.REVIEW) "Viết nhận xét" else "Thêm một tin nhắn") },
             text = {
-                OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true,
+                OutlinedTextField(value = draft, onValueChange = { draft = it.take(if (editor == CaptionKind.REVIEW) 36 else 200) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth())
             },
             confirmButton = { TextButton(onClick = {
-                text = draft
+                if (editor == CaptionKind.REVIEW) reviewComment = draft.trim().take(36) else text = draft
                 editor = null
             }) { Text("Xong") } },
             dismissButton = { TextButton(onClick = { editor = null }) { Text("Hủy") } }
