@@ -62,6 +62,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -91,7 +92,9 @@ fun CameraScreen(
     onSwipeEnabledChange: (Boolean) -> Unit = {},
     sharedHeaderHeight: Dp? = null,
     sharedFooterHeight: Dp? = null,
-    onReviewVisibleChange: (Boolean) -> Unit = {}
+    onReviewVisibleChange: (Boolean) -> Unit = {},
+    chromeProgress: Float = 1f,
+    chromeOffsetPx: Float = 0f
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1060,6 +1063,7 @@ fun CameraScreen(
             } else Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer { translationY = chromeOffsetPx }
                     .padding(horizontal = 32.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -1068,7 +1072,8 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clickable(enabled = !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
+                        .locketHeaderTransition { chromeProgress }
+                        .clickable(enabled = chromeProgress >= 0.999f && !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1083,12 +1088,13 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(98.dp)
+                        .locketHeaderTransition { chromeProgress }
                         .border(4.dp, if (recording != null) Color.Red else LocketYellow, CircleShape)
                         .semantics {
                             contentDescription = "Chụp ảnh, giữ để quay video"
-                            onClick { tapShutter(); true }
+                            onClick { if (chromeProgress >= 0.999f) { tapShutter(); true } else false }
                         }
-                        .pointerInput(Unit) {
+                        .then(if (chromeProgress >= 0.999f) Modifier.pointerInput(Unit) {
                             var held = false
                             detectTapGestures(
                                 onPress = {
@@ -1098,7 +1104,7 @@ fun CameraScreen(
                                 onLongPress = { held = true; beginHold() },
                                 onTap = { tapShutter() }
                             )
-                        },
+                        } else Modifier),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(Modifier.size(if (recording != null) 40.dp else 82.dp)
@@ -1110,7 +1116,8 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clickable(enabled = !holdingShutter && recording == null && !processingVideo && !capturingPhoto) {
+                        .locketHeaderTransition { chromeProgress }
+                        .clickable(enabled = chromeProgress >= 0.999f && !holdingShutter && recording == null && !processingVideo && !capturingPhoto) {
                             frontCamera = !frontCamera
                             flashMode = ImageCapture.FLASH_MODE_OFF
                         },
@@ -1128,7 +1135,9 @@ fun CameraScreen(
             Spacer(modifier = Modifier.weight(1f))
             Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
                 if (review == null) Row(
-                    modifier = Modifier.clickable { openLatest() }.padding(horizontal = 14.dp),
+                    modifier = Modifier.graphicsLayer { translationY = chromeOffsetPx }
+                        .locketHeaderTransition { chromeProgress }
+                        .clickable(enabled = chromeProgress >= 0.999f) { openLatest() }.padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
