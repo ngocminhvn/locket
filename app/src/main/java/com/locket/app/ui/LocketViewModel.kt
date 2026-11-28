@@ -184,9 +184,9 @@ class LocketViewModel(
     // URL thumbnail da enqueue prefetch trong phien (tranh goi trung).
     // Chi truy cap tu main thread (LaunchedEffect + viewModelScope mac dinh
     // chay tren Main) nen khong can dong bo them.
-    private val prefetchedThumbnails = linkedSetOf<String>()
-    private val videoPrefetchJobs = mutableMapOf<String, Job>()
-    private val videoPrefetched = linkedSetOf<String>()
+    private val prefetchSlots = kotlinx.coroutines.sync.Semaphore(3)
+    private val prefetchedThumbnails = linkedSetOf<String>() // in-flight only
+    private var momentPrefetchJob: Job? = null
 
     // UID moment da goi markMomentAsViewed trong phien (dedupe + cap 100,
     // giong goc: viewedMomentUids, bundle ~1247103 — includes thi bo qua,
@@ -287,42 +287,69 @@ class LocketViewModel(
     fun prefetchThumbnails(urls: List<String>, sizePx: Int = LocketApplication.instance.resources.displayMetrics.widthPixels) {
         val size = sizePx.coerceAtLeast(1)
         val app = LocketApplication.instance
-        val loader = app.imageLoader
-        for (url in urls.distinct().filter { it.isNotBlank() }) {
+        for (url in urls.distinct().filter { it.isNotBlank() && it != sessionManager.currentUser.profilePictureUrl }) {
             val key = "$size:$url"
-            if (prefetchedThumbnails.remove(key)) { prefetchedThumbnails.add(key); continue }
-            prefetchedThumbnails.add(key)
-            while (prefetchedThumbnails.size > 300) prefetchedThumbnails.remove(prefetchedThumbnails.first())
-            loader.enqueue(ImageRequest.Builder(app).data(url).size(size)
-                .listener(onError = { _, _ -> viewModelScope.launch { prefetchedThumbnails.remove(key) } }).build())
+            if (!prefetchedThumbnails.add(key)) continue
+            viewModelScope.launch {
+                try { preloadImage(url, size) }
+                finally { prefetchedThumbnails.remove(key) }
+            }
         }
     }
 
-    /**
-     * Prefetch thumbnail cua `count` moment ke tiep sau `currentIndex`
-     * trong danh sach da sap xep moi-nhat-truoc. currentIndex = -1 (dang o
-     * camera) thi prefetch tu moment moi nhat.
-     */
-    fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 8, forward: Boolean = true) {
+    private suspend fun preloadImage(url: String, size: Int, urgent: Boolean = false): Boolean {
+        if (url.isBlank()) return false
+        val app = LocketApplication.instance
+        suspend fun fetch(): Boolean {
+            val request = ImageRequest.Builder(app).data(url).size(size).crossfade(false).build()
+            return app.imageLoader.execute(request) is coil.request.SuccessResult
+        }
+        return try {
+            if (urgent) fetch() else {
+                prefetchSlots.acquire()
+                try { fetch() } finally { prefetchSlots.release() }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+    }
+
+    fun cancelMomentPrefetch() {
+        momentPrefetchJob?.cancel()
+        momentPrefetchJob = null
+    }
+
+    /** Current/target photo first; keep 8 ahead and 3 behind. Video waits for photos. */
+    fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 8,
+                                forward: Boolean = true, targetIndex: Int = currentIndex) {
+        cancelMomentPrefetch()
         if (moments.isEmpty()) return
+        val app = LocketApplication.instance
+        val size = app.resources.displayMetrics.widthPixels.coerceAtLeast(1)
         val next = if (forward) ((currentIndex + 1)..(currentIndex + count)).toList()
             else ((currentIndex - 1) downTo (currentIndex - count)).toList()
-        val opposite = if (forward) listOf(currentIndex - 1, currentIndex - 2)
-            else listOf(currentIndex + 1, currentIndex + 2)
-        prefetchThumbnails((next + opposite).mapNotNull { moments.getOrNull(it)?.thumbnailUrl })
-        val nearbyVideos = (-3..3).filter { it != 0 }.mapNotNull { moments.getOrNull(currentIndex + it)?.videoUrl?.takeIf(String::isNotBlank) }.toSet()
-        videoPrefetchJobs.keys.filter { it !in nearbyVideos }.forEach { videoPrefetchJobs.remove(it)?.cancel() }
-        for (url in nearbyVideos) {
-            if (url in videoPrefetched || videoPrefetchJobs[url]?.isActive == true) continue
-            videoPrefetchJobs[url] = viewModelScope.launch {
-                try {
-                    MomentVideoCache.prefetch(LocketApplication.instance, url)
-                    videoPrefetched.add(url)
-                    while (videoPrefetched.size > 48) videoPrefetched.remove(videoPrefetched.first())
-                } finally {
-                    if (videoPrefetchJobs[url] == kotlin.coroutines.coroutineContext[Job]) videoPrefetchJobs.remove(url)
+        val opposite = if (forward) (1..3).map { currentIndex - it } else (1..3).map { currentIndex + it }
+        val target = if (targetIndex != currentIndex) {
+            if (forward) ((targetIndex + 1)..(targetIndex + 5)).toList()
+            else ((targetIndex - 1) downTo (targetIndex - 5)).toList()
+        } else emptyList()
+        val urgent = listOf(currentIndex, targetIndex).mapNotNull { moments.getOrNull(it)?.thumbnailUrl }.distinct()
+        val nearby = (next + opposite + target).mapNotNull { moments.getOrNull(it)?.thumbnailUrl }
+            .filter { it.isNotBlank() && it !in urgent }.distinct()
+        momentPrefetchJob = viewModelScope.launch {
+            val ready = urgent.map { preloadImage(it, size, urgent = true) }.all { it }
+            kotlinx.coroutines.coroutineScope {
+                // Ordered batches, bounded by the shared image semaphore.
+                nearby.chunked(3).forEach { batch ->
+                    batch.map { url -> async { preloadImage(url, size) } }.forEach { it.await() }
                 }
             }
+            if (!ready) return@launch
+            // Avoid competing with an image the user is still waiting for; only one video at a time.
+            kotlinx.coroutines.delay(350L)
+            val videos = (-3..3).filter { it != 0 }.mapNotNull {
+                moments.getOrNull(targetIndex + it)?.videoUrl?.takeIf(String::isNotBlank)
+            }.distinct()
+            for (url in videos) MomentVideoCache.prefetch(app, url)
         }
     }
 
@@ -865,6 +892,7 @@ class LocketViewModel(
                             if (activeAccount(account)) {
                                 _currentUser.value = user
                                 sessionManager.currentUser = user
+                                refreshOwnAvatar(user)
                             }
                         }
                     }
@@ -1711,7 +1739,13 @@ class LocketViewModel(
     suspend fun changeGeneralBirthday(month: Int, day: Int) = apiClient.changeBirthday(month, day)
 
     /** Doc lai profile tu server (fetchUserV2) roi cap nhat UI + session. */
-    fun refreshProfile(onDone: () -> Unit = {}) {
+    private fun refreshOwnAvatar(user: User, force: Boolean = false) {
+        viewModelScope.launch {
+            if (activeAccount(user.uid)) LocketApplication.instance.ownAvatarStore.refresh(user.uid, user.profilePictureUrl, force)
+        }
+    }
+
+    fun refreshProfile(onDone: () -> Unit = {}, forceAvatar: Boolean = false) {
         viewModelScope.launch {
             val uid = sessionManager.currentUser.uid
             if (uid.isBlank()) {
@@ -1722,7 +1756,7 @@ class LocketViewModel(
                 if (activeAccount(uid)) {
                     _currentUser.value = user
                     sessionManager.currentUser = user
-                    prefetchThumbnails(listOf(user.profilePictureUrl), 128)
+                    refreshOwnAvatar(user, forceAvatar)
                 }
             }
             onDone()
@@ -1760,7 +1794,7 @@ class LocketViewModel(
                 return@launch
             }
             val res = apiClient.changeProfilePictureUrl(up.downloadUrl)
-            if (res.isSuccess) refreshProfile(onSuccess)
+            if (res.isSuccess) refreshProfile(onSuccess, forceAvatar = true)
             else onError(res.exceptionOrNull()?.message ?: "Lỗi đổi ảnh đại diện")
         }
     }
@@ -1918,8 +1952,7 @@ class LocketViewModel(
         closeChat()
         apiClient.clearUserNameCache()
         prefetchedThumbnails.clear()
-        videoPrefetchJobs.values.toList().forEach { it.cancel() }
-        videoPrefetchJobs.clear(); videoPrefetched.clear()
+        cancelMomentPrefetch()
         viewedMomentUids.clear()
         _momentViewCounts.value = emptyMap()
         _momentViewers.value = emptyMap()
@@ -1941,6 +1974,8 @@ class LocketViewModel(
         _historyError.value = null
         _historyLoading.value = false
         sessionManager.logout()
+        LocketApplication.instance.ownAvatarStore.hide(oldOwner)
+        viewModelScope.launch { LocketApplication.instance.ownAvatarStore.clear(oldOwner) }
         cacheClearJob = viewModelScope.launch { momentWriteLock.withLock { cache.clearAll() } }
         LocketWidgetUpdater.updateAll(LocketApplication.instance)
         chatMessagesJob?.cancel()
@@ -1972,6 +2007,7 @@ class LocketViewModel(
     // Run only after all fields, including the persistent upload journal, exist.
     init {
         val startupAccount = sessionManager.currentUser.uid
+        if (_isLoggedIn.value) refreshOwnAvatar(sessionManager.currentUser)
         viewModelScope.launch {
             try {
                 momentWriteLock.withLock {

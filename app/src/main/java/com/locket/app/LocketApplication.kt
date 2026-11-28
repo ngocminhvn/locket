@@ -15,6 +15,9 @@ class LocketApplication : Application(), ImageLoaderFactory {
     lateinit var sessionManager: SessionManager
         private set
 
+    internal lateinit var ownAvatarStore: com.locket.app.storage.OwnAvatarStore
+        private set
+
     lateinit var database: LocketDatabase
         private set
 
@@ -26,6 +29,7 @@ class LocketApplication : Application(), ImageLoaderFactory {
         super.onCreate()
         instance = this
         sessionManager = SessionManager(this)
+        ownAvatarStore = com.locket.app.storage.OwnAvatarStore(this, sessionManager)
         database = Room.databaseBuilder(this, LocketDatabase::class.java, "locket_cache.db")
             // DB moi lap lan dau (version 1); xoa + tao lai neu schema doi
             // o ban phat trien sau — cache chi la ban sao du lieu API nen
