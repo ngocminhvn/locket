@@ -371,7 +371,8 @@ fun MemoryDetailDialog(
         Box(Modifier.fillMaxSize().background(Color.Black).clipToBounds()) {
             if (active.thumbnailUrl.isNotBlank()) MomentBackdrop(active.thumbnailUrl)
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                val photoSize = minOf(maxWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
+                val viewportWidth = maxWidth
+                val photoSize = minOf(viewportWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
                 Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 30.dp).height(58.dp)) {
                     IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
                         Icon(Icons.Default.Close, "Đóng", tint = Color.White, modifier = Modifier.size(30.dp))
@@ -392,7 +393,7 @@ fun MemoryDetailDialog(
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(photoSize),
                         pageSize = PageSize.Fixed(photoSize),
-                        contentPadding = PaddingValues(horizontal = (maxWidth - photoSize) / 2),
+                        contentPadding = PaddingValues(horizontal = (viewportWidth - photoSize) / 2),
                         pageSpacing = 16.dp,
                         userScrollEnabled = zoom <= 1f && !share && !delete) { page ->
                         val photo = photos[page]
@@ -447,7 +448,7 @@ fun MemoryDetailDialog(
                 LazyRow(
                     state = thumbs,
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp),
-                    contentPadding = PaddingValues(horizontal = maxWidth * 0.4f),
+                    contentPadding = PaddingValues(horizontal = viewportWidth * 0.4f),
                     horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -455,7 +456,7 @@ fun MemoryDetailDialog(
                         val selected = photo.id == active.id
                         val distance = kotlin.math.abs(photos.indexOf(photo) - pager.currentPage)
                         val thumbSize = when (distance) { 0 -> 60.dp; 1 -> 41.dp; else -> 32.dp }
-                        Box(Modifier.width(maxWidth / 5).height(60.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.width(viewportWidth / 5).height(60.dp), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(thumbSize).clip(RoundedCornerShape(if (selected) 18.dp else 10.dp))
                             .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(if (selected) 18.dp else 10.dp))
                             .clickable { scope.launch { pager.animateScrollToPage(photos.indexOf(photo)) } }

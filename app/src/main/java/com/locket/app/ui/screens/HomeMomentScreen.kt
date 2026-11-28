@@ -15,7 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurEdgeTreatment
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clipToBounds
 import coil.request.ImageRequest
 import android.widget.VideoView
@@ -644,7 +644,7 @@ internal fun MomentBackdrop(url: String) {
             contentDescription = null,
             modifier = Modifier.fillMaxSize()
                 .scale(1.12f)
-                .blur(25.dp, edgeTreatment = BlurEdgeTreatment.Unbounded),
+                .blur(25.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
             contentScale = ContentScale.Crop
         )
         Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
