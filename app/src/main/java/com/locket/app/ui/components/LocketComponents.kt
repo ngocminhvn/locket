@@ -28,12 +28,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.ui.theme.*
 import com.wexpa.liquidglass.Glass
-import com.wexpa.liquidglass.GlassTabBar
-import com.wexpa.liquidglass.GlassTabBarStyle
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import com.wexpa.liquidglass.glassEffect
+import com.locket.app.ui.glass.LocketGlassTabBar
 
 @Composable
 fun ShutterButton(
@@ -206,10 +202,6 @@ fun LocketBottomBar(
     }
 }
 
-private object SilentNavigationHaptics : HapticFeedback {
-    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
-}
-
 @Composable
 fun FeedBottomBar(
     onGridClick: () -> Unit,
@@ -256,9 +248,7 @@ fun FeedBottomBar(
             // Same Calm selector/held lens and release-to-select gesture as TKB SV.
             // The upstream bar owns touch dispatch; its items must not add IconButtons.
             val selected = when (currentScreen) { "history" -> 0; "chat" -> 2; else -> 1 }
-            val style = remember { GlassTabBarStyle.Calm(true).copy(height = 54.dp, contentPadding = 4.dp, pillInset = 4.dp) }
-            CompositionLocalProvider(LocalHapticFeedback provides SilentNavigationHaptics) {
-                GlassTabBar(
+            LocketGlassTabBar(
                     itemCount = 3,
                     selectedIndex = selected,
                     onSelected = { index ->
@@ -268,8 +258,7 @@ fun FeedBottomBar(
                             2 -> onChatClick()
                         }
                     },
-                    modifier = Modifier.weight(1f),
-                    style = style
+                    modifier = Modifier.weight(1f)
                 ) { index, isSelected ->
                     val tint = if (isSelected) Color.White else inactive
                     when (index) {
@@ -289,7 +278,6 @@ fun FeedBottomBar(
                         }
                     }
                 }
-            }
             if (showSideActions) {
                 IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(sideGlass, CircleShape)) {
                     Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
