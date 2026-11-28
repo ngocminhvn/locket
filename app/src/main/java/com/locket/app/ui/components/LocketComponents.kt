@@ -216,8 +216,22 @@ fun FeedBottomBar(
     feedMode: Boolean = showSideActions
 ) {
     if (separated) {
-        // Keep TKB's optical glass renderer with a neutral fixed tint.
-        val barGlass = Glass.TabBar.tint(LocketPillBg)
+        // Keep Locket's original base color and opacity; borrow only the
+        // optical refraction and rim from TKB, not its brightness/tint model.
+        val barGlass = remember {
+            val optics = requireNotNull(Glass.TabBar.style(dark = true))
+            Glass(
+                style = optics.copy(
+                    tint = LocketPillBg,
+                    tintLift = 0f,
+                    liftAdaptivity = 0f,
+                    adaptivity = 0f,
+                    legibility = 0f,
+                    dispersion = 0f
+                ),
+                light = Glass.TabBar.light(dark = true)
+            )
+        }
         val surface = LocketPillBg
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
