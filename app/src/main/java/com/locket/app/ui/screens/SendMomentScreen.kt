@@ -98,7 +98,7 @@ internal fun rememberMomentReviewSlots(
     streak: Int,
     isPosting: Boolean,
     onCancel: () -> Unit,
-    onSend: (String, List<String>) -> Unit
+    onSend: (String, List<String>, String) -> Unit
 ): MomentReviewSlots {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -113,6 +113,9 @@ internal fun rememberMomentReviewSlots(
     var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableIntStateOf(0) }
+    var reviewComment by remember(bitmap) { mutableStateOf("") }
+    var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
+    var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(null) }
     var sheet by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<CaptionKind?>(null) }
     var draft by remember { mutableStateOf("") }
@@ -145,6 +148,34 @@ internal fun rememberMomentReviewSlots(
         CaptionKind.MISS -> "🥰 Miss you"
     }
 
+    fun overlay(k: CaptionKind): com.google.gson.JsonObject? {
+        val label = value(k)
+        if (label.isBlank()) return null
+        fun preset(id: String, text: String, emoji: String, colors: List<String>, color: String) =
+            com.locket.app.model.CaptionOverlays.make("static_content", text, id, colors = colors,
+                textColor = color, blur = null, icon = com.locket.app.model.CaptionOverlays.icon("emoji", emoji))
+        val o = com.locket.app.model.CaptionOverlays
+        return when (k) {
+            CaptionKind.TEXT -> o.make("standard", text.trim(), blur = "ultra_thin", maxLines = 4)
+            CaptionKind.REVIEW -> o.make("review", "★$rating" + if (reviewComment.isBlank()) "" else " - $reviewComment",
+                payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", reviewComment) })
+            CaptionKind.LOCATION -> locationFix?.let { fix ->
+                o.make("location", location, payload = com.google.gson.JsonObject().apply {
+                    addProperty("location_name", location)
+                    add("location_coords", com.google.gson.JsonArray().apply { add(fix.latitude); add(fix.longitude) })
+                })
+            }
+            CaptionKind.WEATHER -> weatherData?.overlay()
+            CaptionKind.TIME -> o.make("time", time, icon = o.icon("sf_symbol", "clock.fill", "#FFFFFFCC"),
+                payload = com.google.gson.JsonObject().apply { addProperty("date", System.currentTimeMillis() / 1000) })
+            CaptionKind.STREAK -> o.make("streak", streak.toString(), colors = listOf("#FFE38B", "#FFB900"),
+                textColor = "#191919FF", blur = null, icon = o.icon("sf_symbol", "flame.fill", "#191919FF"))
+            CaptionKind.PARTY -> preset("caption:party_time", "Party Time!", "🪩", listOf("#5EFFF5", "#FCFF57"), "#000000E6")
+            CaptionKind.OOTD -> preset("caption:ootd", "OOTD", "🕶", listOf("#FFFFFF", "#DBDBDB"), "#101010E6")
+            CaptionKind.MISS -> preset("caption:miss_you", "Miss you", "🥰", listOf("#EC0C00", "#FF493F"), "#FFFFFFDB")
+        }
+    }
+
     fun refreshCaption(k: CaptionKind) {
         if (fetchingCaption != null) return
         fetchingCaption = k
@@ -152,8 +183,15 @@ internal fun rememberMomentReviewSlots(
             try {
                 val fix = CaptionLocationData.currentLocation(context)
                 when (k) {
-                    CaptionKind.LOCATION -> location = CaptionLocationData.placeName(context, fix)
-                    CaptionKind.WEATHER -> weather = CaptionLocationData.weather(fix)
+                    CaptionKind.LOCATION -> {
+                        location = CaptionLocationData.placeName(context, fix)
+                        locationFix = fix
+                    }
+                    CaptionKind.WEATHER -> {
+                        val data = CaptionLocationData.weather(fix)
+                        weatherData = data
+                        weather = data.label
+                    }
                     else -> Unit
                 }
             } catch (e: CancellationException) {
@@ -404,7 +442,7 @@ internal fun rememberMomentReviewSlots(
                 val canSend = !isPosting && !saving && fetchingCaption != kind && permissionTarget != kind && (sendAll || selected.isNotEmpty())
                 Box(Modifier.size(98.dp).clip(CircleShape)
                     .background(Color.White.copy(alpha = if (canSend || isPosting) 0.29f else 0.16f))
-                    .clickable(enabled = canSend) { onSend(value(kind), if (sendAll) emptyList() else selected.toList()) },
+                    .clickable(enabled = canSend) { onSend(if (kind == CaptionKind.TEXT) text.trim() else "", if (sendAll) emptyList() else selected.toList(), com.google.gson.JsonArray().apply { overlay(kind)?.let { add(it) } }.toString()) },
                     contentAlignment = Alignment.Center) {
                     if (isPosting) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
                     else ReviewActionIcon(ReviewIcon.SEND, "Gửi", if (canSend) Color.White else Color.White.copy(alpha = 0.42f), Modifier.size(44.dp))
