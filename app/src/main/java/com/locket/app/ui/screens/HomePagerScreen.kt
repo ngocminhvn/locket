@@ -53,7 +53,8 @@ fun HomePagerScreen(
     sharedProfileAvatar: Boolean = false,
     sharedFriendFilterOpen: Boolean? = null,
     onSharedFriendFilterChange: (Boolean) -> Unit = {},
-    tabTransitionProgress: () -> Float = { 1f }
+    tabTransitionProgress: () -> Float = { 1f },
+    onVerticalChromeProgress: (Float) -> Unit = {}
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -118,7 +119,11 @@ fun HomePagerScreen(
     val feedProgress = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
     val crossingCamera = pagerState.isScrollInProgress &&
         (pagerState.currentPage == 0 || pagerState.settledPage == 0 || pagerState.targetPage == 0)
+    val verticalChromeProgress = kotlin.math.abs(2f * feedProgress - 1f).coerceIn(0f, 1f)
+    val cameraControlProgress = (1f - 2f * feedProgress).coerceIn(0f, 1f)
+    val feedControlProgress = (2f * feedProgress - 1f).coerceIn(0f, 1f)
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
+        ?: if (!cameraChrome) moments.firstOrNull() else null
     val palette = rememberAmbientPalette(activeMoment?.thumbnailUrl ?: moments.firstOrNull()?.thumbnailUrl, AmbientMode.HOME)
     val feedBrush = palette.brush()
     val context = LocalContext.current
@@ -144,7 +149,10 @@ fun HomePagerScreen(
     LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
     BackHandler(enabled = showFriendFilter) { setFriendFilter(false) }
     SideEffect {
-        if (tabActive) onNavigationState(showChrome && !showFriendFilter, !cameraChrome)
+        if (tabActive) {
+            onNavigationState(showChrome && !showFriendFilter, !cameraChrome)
+            onVerticalChromeProgress(verticalChromeProgress)
+        }
         onTabSwipeEnabledChange(!showFriendFilter && !showShare && !zoomLocked && !pagerState.isScrollInProgress &&
             (!cameraSelected || (cameraSwipeEnabled && !cameraReviewVisible)))
     }
@@ -262,7 +270,9 @@ fun HomePagerScreen(
                 onSwipeEnabledChange = { cameraSwipeEnabled = it },
                 sharedHeaderHeight = headerHeight,
                 sharedFooterHeight = cameraFooterHeight,
-                onReviewVisibleChange = { cameraReviewVisible = it }
+                onReviewVisibleChange = { cameraReviewVisible = it },
+                chromeProgress = cameraControlProgress,
+                chromeOffsetPx = if (cameraControlProgress > 0f) feedProgress * pagerState.layoutInfo.pageSize else 0f
             )
         } else if (page > moments.size) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -318,8 +328,8 @@ fun HomePagerScreen(
     if (showChrome && pagerState.isScrollInProgress) {
         Canvas(Modifier.matchParentSize()) {
             val top = headerHeight.toPx().coerceAtMost(size.height)
-            val footer = (if (crossingCamera || cameraChrome) cameraFooterHeight else feedFooterHeight)
-                .toPx().coerceAtMost(size.height)
+            val footer = (cameraFooterHeight.toPx() + (feedFooterHeight - cameraFooterHeight).toPx() * feedControlProgress)
+                .coerceAtMost(size.height)
             // Both stationary navigation areas remain translucent while photos
             // travel underneath. No hard clipping or opaque background masks.
             val fadeHeight = (top + 38.dp.toPx()).coerceAtMost(size.height)
@@ -369,15 +379,16 @@ fun HomePagerScreen(
                 dropdownExpanded = showFriendFilter,
                 adaptiveBackground = !cameraChrome,
                 onAvatarClick = onOpenProfile,
-                showAvatar = !sharedProfileAvatar
+                showAvatar = !sharedProfileAvatar,
+                transitionProgress = { verticalChromeProgress }
             )
         }
 
-        if (!cameraChrome && !crossingCamera) {
+        if (!cameraChrome) {
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .padding(bottom = cameraFooterHeight)
-                    .locketHeaderTransition(tabTransitionProgress)
+                    .locketHeaderTransition { tabTransitionProgress() * feedControlProgress }
                     .onSizeChanged { measuredFeedControls = with(density) { it.height.toDp() } },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
