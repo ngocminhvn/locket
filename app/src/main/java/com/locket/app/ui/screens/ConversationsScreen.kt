@@ -100,7 +100,7 @@ fun ConversationsScreen(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E))
+                        .background(LocketAvatarBg)
                         .clickable(onClick = onOpenProfile),
                     contentAlignment = Alignment.Center
                 ) {
@@ -144,10 +144,10 @@ fun ConversationsScreen(
                         Box(
                             modifier = Modifier
                                 .size(59.dp)
-                                .border(2.5.dp, Color(0xFF292929), CircleShape)
+                                .border(2.5.dp, LocketSheetSurface, CircleShape)
                                 .padding(5.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF202020)),
+                                .background(LocketAvatarBg),
                             contentAlignment = Alignment.Center
                         ) {
                             if (conv.friend.avatarUrl.isNotBlank()) {
@@ -210,7 +210,7 @@ fun ConversationsScreen(
         FloatingActionButton(
             onClick = { showNewChatDialog = true },
             containerColor = LocketYellow,
-            contentColor = Color.Black,
+            contentColor = LocketOnYellow,
             shape = CircleShape,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -280,7 +280,7 @@ private fun NewChatDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
+        containerColor = LocketModalBg,
         title = { Text("Gửi tin nhắn mới", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

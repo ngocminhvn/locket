@@ -947,7 +947,7 @@ fun CameraScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF242426)),
+                            .background(LocketSheetBg),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1011,12 +1011,12 @@ fun CameraScreen(
                 if (recording != null || holdingShutter) {
                     Row(
                         modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
-                            .clip(RoundedCornerShape(24.dp)).background(Color(0xD92C2C2E))
+                            .clip(RoundedCornerShape(24.dp)).background(LocketPillBg)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(Modifier.size(9.dp).background(Color(0xFFFF453A), CircleShape))
+                        Box(Modifier.size(9.dp).background(LocketRed, CircleShape))
                         Text(
                             text = if (recordingStartedAt == 0L) "Đang chuẩn bị..." else
                                 java.lang.String.format(java.util.Locale.ROOT, "%d.%d s",

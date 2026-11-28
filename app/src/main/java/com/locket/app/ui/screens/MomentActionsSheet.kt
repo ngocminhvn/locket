@@ -126,13 +126,13 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
     )
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF262626), shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp),
+        containerColor = LocketSheetBg, shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp),
         dragHandle = if (compact) null else ({ BottomSheetDefaults.DragHandle() })) {
         if (compact) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp), color = LocketYellow)
-                error?.let { Text(it, color = Color(0xFFFF8888), modifier = Modifier.padding(12.dp)) }
+                error?.let { Text(it, color = LocketRed, modifier = Modifier.padding(12.dp)) }
                 val actions = listOf(
                     ShareTarget("Chia sẻ", Icons.Default.Share, action = "share"),
                     ShareTarget("Tải về", Icons.Default.Download, action = "save")
@@ -142,7 +142,7 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
                 actions.forEach { target ->
                     Box(Modifier.fillMaxWidth().height(56.dp).clickable(enabled = !busy) { execute(target) },
                         contentAlignment = Alignment.Center) {
-                        Text(target.name, color = if (target.action == "delete") Color(0xFFFF7777) else Color.White,
+                        Text(target.name, color = if (target.action == "delete") LocketRed else Color.White,
                             fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     }
                 }
@@ -159,7 +159,7 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
             AsyncImage(moment.thumbnailUrl, "Khoảnh khắc", Modifier.size(170.dp).rotate(-5f).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
             Spacer(Modifier.height(28.dp))
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 12.dp), color = LocketYellow)
-            error?.let { Text(it, color = Color(0xFFFF8888), modifier = Modifier.padding(bottom = 12.dp)) }
+            error?.let { Text(it, color = LocketRed, modifier = Modifier.padding(bottom = 12.dp)) }
             targets.chunked(3).forEach { group ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     group.forEach { target ->
@@ -170,7 +170,7 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
                             }
                             Box(Modifier.size(56.dp).clip(CircleShape).background(Color(0xFF414141)), contentAlignment = Alignment.Center) {
                                 if (appIcon != null) Image(appIcon, null, Modifier.size(42.dp))
-                                else Icon(target.icon, null, tint = if (target.action in listOf("report", "block", "delete")) Color(0xFFFF9D45) else Color.White, modifier = Modifier.size(27.dp))
+                                else Icon(target.icon, null, tint = if (target.action in listOf("report", "block", "delete")) LocketRed else Color.White, modifier = Modifier.size(27.dp))
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(target.name, color = Color.White, textAlign = TextAlign.Center,

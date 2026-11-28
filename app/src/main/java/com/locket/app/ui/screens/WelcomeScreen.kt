@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,8 +22,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.locket.app.ui.theme.LocketBlack
-import com.locket.app.ui.theme.LocketYellow
 
 @Composable
 fun WelcomeScreen(
@@ -50,7 +50,7 @@ fun WelcomeScreen(
                     .width(196.dp)
                     .height(352.dp)
                     .clip(RoundedCornerShape(42.dp))
-                    .background(Color(0xFF161618))
+                    .background(LocketModalBg)
                     .border(5.5.dp, Color(0xFF48484A), RoundedCornerShape(42.dp))
                     .padding(14.dp)
             ) {
@@ -68,7 +68,7 @@ fun WelcomeScreen(
                                 modifier = Modifier
                                     .size(78.dp)
                                     .clip(RoundedCornerShape(22.dp))
-                                    .background(Color(0xFF2C2C2E))
+                                    .background(LocketSheetSurface)
                                     .border(2.5.dp, LocketYellow, RoundedCornerShape(22.dp))
                             ) {
                                 AsyncImage(
@@ -111,7 +111,7 @@ fun WelcomeScreen(
                             .fillMaxWidth()
                             .height(46.dp)
                             .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFF2C2C2E))
+                            .background(LocketSheetSurface)
                     )
                 }
             }
@@ -167,7 +167,7 @@ fun WelcomeScreen(
                     .fillMaxWidth()
                     .height(58.dp),
                 colors = ButtonDefaults.buttonColors(
-                    disabledContainerColor = Color(0x66FFC800),
+                    disabledContainerColor = LocketYellow.copy(alpha = 0.4f),
                     disabledContentColor = Color(0x66000000)
                 ),
                 shape = RoundedCornerShape(29.dp)
@@ -204,6 +204,6 @@ private fun SmallAppIcon() {
         modifier = Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF2C2C2E))
+            .background(LocketSheetSurface)
     )
 }

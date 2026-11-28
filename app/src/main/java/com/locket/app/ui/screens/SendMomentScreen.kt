@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.widget.Toast
@@ -59,7 +61,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.locket.app.model.Friend
-import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -299,7 +300,7 @@ internal fun rememberMomentReviewSlots(
                         } else {
                             val color = when (item) {
                                 CaptionKind.OOTD -> Color.White
-                                CaptionKind.MISS -> Color(0xFFED3338)
+                                CaptionKind.MISS -> LocketRed
                                 CaptionKind.STREAK -> LocketYellow
                                 else -> Color(0x99000000)
                             }
@@ -395,7 +396,7 @@ internal fun rememberMomentReviewSlots(
         PhotoInfoDialog(bitmap, snapshotFile, preparedThumbnail, captureDetails) { infoOpen = false }
     }
     if (sheet) {
-        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = Color(0xFF242424),
+        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = LocketSheetBg,
             shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp)) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp)) {
                 Text("Chú thích", Modifier.align(Alignment.CenterHorizontally), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -424,7 +425,7 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("🕶 OOTD", Color.White, Color.Black) { choose(CaptionKind.OOTD) }
                 }
                 Spacer(Modifier.height(8.dp))
-                CaptionChip("🥰 Miss you", Color(0xFFED3338)) { choose(CaptionKind.MISS) }
+                CaptionChip("🥰 Miss you", LocketRed) { choose(CaptionKind.MISS) }
                 Spacer(Modifier.height(30.dp))
             }
         }
@@ -487,7 +488,7 @@ private fun RecipientAvatar(
 
 @Composable
 private fun CaptionChip(
-    label: String, background: Color = Color(0xFF303030), foreground: Color = Color.White, onClick: () -> Unit
+    label: String, background: Color = LocketSheetSurface, foreground: Color = Color.White, onClick: () -> Unit
 ) {
     Box(Modifier.clip(RoundedCornerShape(28.dp)).background(background).clickable(onClick = onClick)
         .padding(horizontal = 12.dp, vertical = 11.dp)) {

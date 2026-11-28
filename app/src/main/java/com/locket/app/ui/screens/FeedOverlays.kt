@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.content.Context
 import android.graphics.Paint
 import android.widget.TextView
@@ -60,7 +62,6 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.emoji2.emojipicker.EmojiPickerView
 import com.locket.app.model.Friend
-import com.locket.app.ui.theme.LocketYellow
 
 @Composable
 internal fun BoxScope.FeedFriendPopup(modifier: Modifier, friends: List<Friend>, selectedFriend: Friend?,
@@ -118,7 +119,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF242424),
+        containerColor = LocketSheetBg,
         shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
         // Apply bottom safe-area padding to the visible content, not to the
         // off-screen bottom edge of the partially expanded sheet.
@@ -198,7 +199,7 @@ internal fun MomentEmojiSheet(onDismiss: () -> Unit, onPick: (String) -> Unit) {
                         update = { host -> host.setSearchMode(searching) { clearSearch() } }
                     )
                     if (searching) {
-                        Box(Modifier.fillMaxSize().padding(top = headerHeight).background(Color(0xFF242424))) {
+                        Box(Modifier.fillMaxSize().padding(top = headerHeight).background(LocketSheetBg)) {
                             val found = results
                             when {
                                 found == null -> CircularProgressIndicator(

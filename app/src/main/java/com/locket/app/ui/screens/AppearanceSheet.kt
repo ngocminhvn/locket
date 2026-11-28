@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -46,7 +48,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.R
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.theme.LocketYellow
 import com.locket.app.widget.LocketWidgetUpdater
 
 internal object AppearancePrefs {
@@ -68,7 +69,7 @@ internal object AppearancePrefs {
         3 -> listOf(Color(0xFF061C3F), Color(0xFF167DC5))
         4 -> listOf(Color(0xFF25113C), Color(0xFF781BB0))
         5 -> listOf(Color(0xFF072E22), Color(0xFF13734C))
-        else -> listOf(Color.Black, Color.Black)
+        else -> listOf(LocketBlack, LocketBlack)
     })
     fun setIcon(c: Context, index: Int) {
         require(index in icons.indices)
@@ -98,7 +99,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
     var theme by remember { mutableIntStateOf(AppearancePrefs.cameraTheme(context)) }
     val pager = rememberPagerState(initialPage = theme) { AppearancePrefs.themes.size }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF242424), shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp)) {
+        containerColor = LocketSheetBg, shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.94f).navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally) {
             when (page) {
@@ -134,7 +135,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                         contentPadding = PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                         items(AppearancePrefs.frames.size) { i ->
                             Column(Modifier.clickable { frame = i; AppearancePrefs.setFrame(context, i) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFF2B2B2B)), contentAlignment = Alignment.Center) {
+                                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(22.dp)).background(LocketSheetSurface), contentAlignment = Alignment.Center) {
                                     if (i == 0) Text("Không có", color = Color.White, fontWeight = FontWeight.Bold)
                                     else Image(painterResource(AppearancePrefs.frames[i]), "Khung ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
                                 }
@@ -165,7 +166,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                         }
                     }
                     Button(onClick = { theme = pager.settledPage; AppearancePrefs.setCameraTheme(context, theme) }, modifier = Modifier.fillMaxWidth().padding(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = LocketYellow, contentColor = Color.Black)) {
+                        colors = ButtonDefaults.buttonColors(containerColor = LocketYellow, contentColor = LocketOnYellow)) {
                         Text(if (theme == pager.settledPage) "Đang sử dụng" else "Áp dụng")
                     }
                 }
@@ -214,14 +215,14 @@ private fun FreeFeaturesScreen(onDismiss: () -> Unit) {
                             Icon(Icons.Default.Close, "Đóng", tint = Color.White.copy(alpha = 0.65f))
                         }
                         Box(Modifier.align(Alignment.Center).padding(top = 18.dp).size(76.dp)
-                            .clip(RoundedCornerShape(22.dp)).background(Color(0xFF292413))
+                            .clip(RoundedCornerShape(22.dp)).background(LocketGoldBanner)
                             .border(4.dp, Color(0xFF494125), RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Favorite, null, tint = LocketYellow, modifier = Modifier.size(48.dp))
+                            Icon(Icons.Default.Favorite, null, tint = LocketGold, modifier = Modifier.size(48.dp))
                         }
                     }
                     Spacer(Modifier.height(20.dp))
-                    Text("Locket Gold", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFFE3A0))
-                    Text("Miễn phí", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = LocketYellow,
+                    Text("Locket Gold", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = LocketGoldHighlightStart)
+                    Text("Miễn phí", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = LocketGold,
                         modifier = Modifier.padding(top = 10.dp))
                     Text("Dự án ra đời ngày 27/11/2026", color = Color(0xFFC8B98B), fontSize = 15.sp,
                         modifier = Modifier.padding(top = 8.dp, bottom = 36.dp))
@@ -251,7 +252,7 @@ private fun FreeFeaturesScreen(onDismiss: () -> Unit) {
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ngocminhvn/locket/issues/new"))) }
                         .onFailure { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
                 }, modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp).height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB600), contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = LocketGold, contentColor = LocketOnYellow),
                     shape = CircleShape) {
                     Text("Yêu cầu một tính năng", fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 }

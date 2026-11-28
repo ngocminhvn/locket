@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.content.Context
 import android.content.ClipData
 import android.content.ActivityNotFoundException
@@ -40,8 +42,6 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.rust.RustLocketCore
-import com.locket.app.ui.theme.LocketTextDim
-import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -418,7 +418,7 @@ private fun CameraSettingsDialog(onClose: () -> Unit) {
                     color = LocketTextDim, fontSize = 12.sp)
             }
         },
-        containerColor = Color(0xFF242426),
+        containerColor = LocketModalBg,
         titleContentColor = Color.White,
         textContentColor = Color.White,
         confirmButton = { TextButton(onClick = onClose) { Text("Xong", color = LocketYellow) } }

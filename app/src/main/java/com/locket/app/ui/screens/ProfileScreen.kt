@@ -161,7 +161,7 @@ fun ProfileScreen(
                     Box(
                         modifier = Modifier.fillMaxSize().clip(CircleShape)
                             .background(LocketBlack).border(3.dp, if (goldBadgeActive) LocketYellow else Color.Transparent, CircleShape)
-                            .padding(7.dp).clip(CircleShape).background(Color(0xFF2C2C2E)),
+                            .padding(7.dp).clip(CircleShape).background(LocketAvatarBg),
                         contentAlignment = Alignment.Center
                     ) {
                         if (user.profilePictureUrl.isNotBlank()) {
@@ -245,7 +245,7 @@ fun ProfileScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
-                        .background(Color(0xFF1E1E1E))
+                        .background(LocketSheetSurface)
                         .heightIn(min = 100.dp).padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -278,14 +278,14 @@ fun ProfileScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp, bottomStart = 24.dp, bottomEnd = 24.dp))
-                        .background(Color(0xFF1E1E1E))
+                        .background(LocketSheetSurface)
                         .heightIn(min = 84.dp).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier.size(40.dp).clip(CircleShape)
                             .background(LocketBlack).border(2.dp, LocketYellow, CircleShape)
-                            .padding(4.dp).clip(CircleShape).background(Color(0xFF2C2C2E)),
+                            .padding(4.dp).clip(CircleShape).background(LocketAvatarBg),
                         contentAlignment = Alignment.Center
                     ) {
                         if (user.profilePictureUrl.isNotBlank()) {
@@ -488,7 +488,7 @@ private fun BlockedUsersBottomSheet(
                 .fillMaxHeight(0.7f)
                 .clickable(enabled = false) {}
                 .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(Color(0xFF141416))
+                .background(LocketSheetBg)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -531,7 +531,7 @@ private fun BlockedUsersBottomSheet(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF2C2C2E)),
+                                    .background(LocketAvatarBg),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (blocked.avatarUrl.isNotBlank()) {
@@ -653,7 +653,7 @@ internal fun QrShareBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF242424),
+        containerColor = LocketSheetBg,
         scrimColor = Color.Black.copy(alpha = 0.65f),
         shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp),
         dragHandle = {
@@ -898,7 +898,7 @@ private fun EditNameDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E22),
+        containerColor = LocketModalBg,
         title = { Text("Đổi tên hồ sơ", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

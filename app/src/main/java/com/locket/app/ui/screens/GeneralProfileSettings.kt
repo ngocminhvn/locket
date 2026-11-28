@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import android.content.Intent
 import android.provider.Settings
 import android.util.Patterns
@@ -21,8 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.locket.app.api.LocketApiClient
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.theme.LocketTextDim
-import com.locket.app.ui.theme.LocketYellow
 import kotlinx.coroutines.launch
 import java.time.MonthDay
 
@@ -102,7 +102,7 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
         }
         AlertDialog(
             onDismissRequest = { if (!busy) editing = null },
-            containerColor = Color(0xFF202022),
+            containerColor = LocketModalBg,
             title = { Text(title, color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -122,7 +122,7 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                     }
                     if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    error?.let { Text(it, color = Color(0xFFFF7777), fontSize = 13.sp) }
+                    error?.let { Text(it, color = LocketRed, fontSize = 13.sp) }
                 }
             },
             confirmButton = {

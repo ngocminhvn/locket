@@ -138,8 +138,8 @@ fun FriendsScreen(
                     unfocusedTextColor = Color.White,
                     focusedBorderColor = Color(0x33FFFFFF),
                     unfocusedBorderColor = Color(0x22FFFFFF),
-                    focusedContainerColor = Color(0xFF1C1C1E),
-                    unfocusedContainerColor = Color(0xFF1C1C1E)
+                    focusedContainerColor = LocketSearchBg,
+                    unfocusedContainerColor = LocketSearchBg
                 ),
                 singleLine = true
             )
@@ -151,7 +151,7 @@ fun FriendsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .liquidGlassEffect(RoundedCornerShape(16.dp), backgroundColor = Color(0xFF2C2C2E))
+                        .liquidGlassEffect(RoundedCornerShape(16.dp), backgroundColor = LocketSheetSurface)
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -159,7 +159,7 @@ fun FriendsScreen(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color.Gray),
+                            .background(LocketAvatarBg),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Person, null, tint = Color.White)
@@ -245,7 +245,7 @@ fun FriendsScreen(
                 )
                 SocialShareButton(
                     label = "Khác",
-                    backgroundColor = Color(0xFF2C2C2E),
+                    backgroundColor = LocketSheetSurface,
                     icon = { Icon(Icons.Default.Share, null, tint = Color.White) },
                     onClick = {
                         val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -263,7 +263,7 @@ fun FriendsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = Color(0xFF1E1E20))
+                    .liquidGlassEffect(RoundedCornerShape(20.dp), backgroundColor = LocketSheetSurface)
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -320,7 +320,7 @@ fun FriendsScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF2C2C2E))
+                                    .background(LocketAvatarBg)
                                     .border(2.dp, LocketYellow, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -393,7 +393,7 @@ fun FriendsScreen(
                                         }
                                     )
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2C2E)),
+                                colors = ButtonDefaults.buttonColors(containerColor = LocketSheetSurface),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text("Từ chối", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -428,7 +428,7 @@ fun FriendsScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF2C2C2E))
+                                    .background(LocketAvatarBg)
                                     .border(2.dp, LocketYellow, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -502,7 +502,7 @@ fun FriendsScreen(
                                 onClick = { viewModel.dismissRecommendation(rec.uid) },
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFF2C2C2E), CircleShape)
+                                    .background(LocketSheetSurface, CircleShape)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -551,7 +551,7 @@ fun FriendsScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clip(CircleShape)
-                                    .background(Color(0xFF2C2C2E))
+                                    .background(LocketAvatarBg)
                                     .border(2.dp, LocketYellow, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -613,7 +613,7 @@ fun FriendsScreen(
                             },
                             modifier = Modifier
                                 .size(34.dp)
-                                .background(Color(0xFF2C2C2E), CircleShape)
+                                .background(LocketSheetSurface, CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -632,7 +632,7 @@ fun FriendsScreen(
                     .fillMaxWidth()
                     .padding(vertical = 12.dp)
                     .height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF242426)),
+                colors = ButtonDefaults.buttonColors(containerColor = LocketSheetBg),
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Text("Đóng", color = Color.White, fontWeight = FontWeight.Bold)

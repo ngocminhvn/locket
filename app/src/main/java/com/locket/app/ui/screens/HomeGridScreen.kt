@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,11 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.ui.LocketViewModel
-import com.locket.app.ui.theme.LocketYellow
-import com.locket.app.ui.theme.LocketTextDim
 import com.locket.app.ui.components.LocketTopBar
 import com.locket.app.ui.components.liquidGlassEffect
-import com.locket.app.ui.theme.LocketBlack
 
 @Composable
 fun HomeGridScreen(
@@ -121,12 +120,12 @@ fun HomeGridScreen(
                         modifier = Modifier
                             .aspectRatio(1.0f)
                             .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFF202022))
+                            .background(LocketJournalDayBg)
                             .clickable { viewModel.prefetchThumbnails(listOf(moment.thumbnailUrl)); onMomentClick(index) }
                     ) {
                         AsyncImage(
                             model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(moment.thumbnailUrl).size(cellPx).build(),
-                            placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303032)),
+                            placeholder = androidx.compose.ui.graphics.painter.ColorPainter(LocketSheetSurface),
                             contentDescription = moment.caption,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop

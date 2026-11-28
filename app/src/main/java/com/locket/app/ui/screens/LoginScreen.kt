@@ -74,7 +74,7 @@ fun LoginScreen(
                     modifier = Modifier
                         .size(46.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF262628))
+                        .background(LocketSheetSurface)
                         .clickable {
                             if (step > 1) {
                                 step = 1
@@ -129,8 +129,8 @@ fun LoginScreen(
                         unfocusedTextColor = Color.White,
                         focusedBorderColor = LocketYellow,
                         unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = Color(0xFF1C1C1E),
-                        unfocusedContainerColor = Color(0xFF1C1C1E)
+                        focusedContainerColor = LocketSearchBg,
+                        unfocusedContainerColor = LocketSearchBg
                     ),
                     maxLines = 5
                 )
@@ -139,7 +139,7 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = emailInput,
                         onValueChange = { emailInput = it },
-                        placeholder = { Text("Địa chỉ email", color = Color(0xFF636366), fontSize = 16.sp) },
+                        placeholder = { Text("Địa chỉ email", color = LocketPlaceholderText, fontSize = 16.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(58.dp),
@@ -149,8 +149,8 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = LocketYellow,
                             unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color(0xFF1C1C1E),
-                            unfocusedContainerColor = Color(0xFF1C1C1E)
+                            focusedContainerColor = LocketSearchBg,
+                            unfocusedContainerColor = LocketSearchBg
                         ),
                         singleLine = true
                     )
@@ -158,7 +158,7 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
-                        placeholder = { Text("Số điện thoại (+84...)", color = Color(0xFF636366), fontSize = 16.sp) },
+                        placeholder = { Text("Số điện thoại (+84...)", color = LocketPlaceholderText, fontSize = 16.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(58.dp),
@@ -168,8 +168,8 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = LocketYellow,
                             unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color(0xFF1C1C1E),
-                            unfocusedContainerColor = Color(0xFF1C1C1E)
+                            focusedContainerColor = LocketSearchBg,
+                            unfocusedContainerColor = LocketSearchBg
                         ),
                         singleLine = true
                     )
@@ -181,7 +181,7 @@ fun LoginScreen(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(22.dp))
-                        .background(Color(0xFF1C1C1E))
+                        .background(LocketSearchBg)
                         .clickable { isPhoneMode = !isPhoneMode }
                         .padding(horizontal = 22.dp, vertical = 12.dp)
                 ) {
@@ -198,7 +198,7 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = passwordInput,
                         onValueChange = { passwordInput = it },
-                        placeholder = { Text("Mật khẩu", color = Color(0xFF636366), fontSize = 16.sp) },
+                        placeholder = { Text("Mật khẩu", color = LocketPlaceholderText, fontSize = 16.sp) },
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -209,8 +209,8 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = LocketYellow,
                             unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color(0xFF1C1C1E),
-                            unfocusedContainerColor = Color(0xFF1C1C1E)
+                            focusedContainerColor = LocketSearchBg,
+                            unfocusedContainerColor = LocketSearchBg
                         ),
                         singleLine = true
                     )
@@ -218,7 +218,7 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = otpInput,
                         onValueChange = { otpInput = it },
-                        placeholder = { Text("Mã xác thực gồm 6 số", color = Color(0xFF636366), fontSize = 16.sp) },
+                        placeholder = { Text("Mã xác thực gồm 6 số", color = LocketPlaceholderText, fontSize = 16.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(58.dp),
@@ -228,8 +228,8 @@ fun LoginScreen(
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = LocketYellow,
                             unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color(0xFF1C1C1E),
-                            unfocusedContainerColor = Color(0xFF1C1C1E)
+                            focusedContainerColor = LocketSearchBg,
+                            unfocusedContainerColor = LocketSearchBg
                         ),
                         singleLine = true
                     )
@@ -335,10 +335,10 @@ fun LoginScreen(
                     .fillMaxWidth()
                     .height(58.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isValid) LocketYellow else Color(0xFF1C1C1E),
-                    contentColor = if (isValid) Color.Black else Color(0xFF636366),
-                    disabledContainerColor = Color(0xFF1C1C1E),
-                    disabledContentColor = Color(0xFF636366)
+                    containerColor = if (isValid) LocketYellow else LocketSearchBg,
+                    contentColor = if (isValid) LocketOnYellow else LocketPlaceholderText,
+                    disabledContainerColor = LocketSearchBg,
+                    disabledContentColor = LocketPlaceholderText
                 ),
                 shape = RoundedCornerShape(29.dp)
             ) {

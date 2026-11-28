@@ -1,5 +1,7 @@
 package com.locket.app.ui.screens
 
+import com.locket.app.ui.theme.*
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -11,7 +13,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import com.locket.app.ui.components.LocketTopBar
 import com.locket.app.ui.components.FriendFilterSheet
-import com.locket.app.ui.theme.LocketBlack
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -255,7 +256,7 @@ fun HomePagerScreen(
                             // Keep the familiar square moment geometry on a cold start.
                             // No fabricated thumbnail; replace the placeholder with real Room/network data.
                             Box(Modifier.fillMaxWidth().aspectRatio(1f)
-                                .background(Color(0xFF202022), RoundedCornerShape(44.dp)),
+                                .background(LocketJournalDayBg, RoundedCornerShape(44.dp)),
                                 contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow,
                                     modifier = Modifier.size(30.dp), strokeWidth = 2.dp)
