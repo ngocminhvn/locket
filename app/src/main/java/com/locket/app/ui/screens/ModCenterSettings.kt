@@ -55,7 +55,10 @@ import java.util.concurrent.TimeUnit
 private const val REPO = "https://github.com/ngocminhvn/locket"
 private val updateClient = OkHttpClient.Builder()
     .connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
-private data class UpdateRelease(val version: String, val build: Long, val url: String, val size: Long, val sha256: String?)
+private const val PAGES = "https://ngocminhvn.github.io/locket"
+private data class UpdateRelease(val version: String, val build: Long, val url: String, val size: Long, val sha256: String?,
+    val packageUrl: String = url, val packageSize: Long = size, val packageSha256: String? = sha256, val compressed: Boolean = false)
+
 
 @Suppress("DEPRECATION")
 private fun installedBuild(context: Context): Long {
@@ -63,60 +66,43 @@ private fun installedBuild(context: Context): Long {
     return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
 }
 
-private suspend fun latestRelease(): UpdateRelease? = withContext(Dispatchers.IO) {
-    val req = Request.Builder().url("https://api.github.com/repos/ngocminhvn/locket/releases/latest")
-        .header("Accept", "application/vnd.github+json").header("Cache-Control", "no-cache").build()
-    updateClient.newCall(req).execute().use { response ->
+private suspend fun latestRelease(channel: String): UpdateRelease? = withContext(Dispatchers.IO) {
+    require(channel == "release" || channel == "dev")
+    val prefix = "$PAGES/$channel/"
+    val request = Request.Builder().url(prefix + "update.json?t=" + System.currentTimeMillis())
+        .header("Cache-Control", "no-cache").build()
+    updateClient.newCall(request).execute().use { response ->
         if (response.code == 404) return@withContext null
-        check(response.isSuccessful) { "GitHub HTTP ${response.code}" }
-        val json = JsonParser.parseString(response.body?.string().orEmpty()).asJsonObject
-        val tag = json.get("tag_name").asString
-        val version = tag.removePrefix("v")
-        val match = Regex("""1\.0\.(\d+)""").matchEntire(version) ?: error("Phiên bản phát hành không hợp lệ")
-        val build = match.groupValues[1].toLong()
-        val name = "Locket-$version.apk"
-        val asset = json.getAsJsonArray("assets").map { it.asJsonObject }
-            .firstOrNull { it.get("name").asString == name } ?: error("Bản phát hành chưa có APK")
-        val url = asset.get("browser_download_url").asString
-        check(url.startsWith("$REPO/releases/download/$tag/")) { "Nguồn APK không hợp lệ" }
-        val size = asset.get("size").asLong
-        val manifestAsset = json.getAsJsonArray("assets").map { it.asJsonObject }
-            .firstOrNull { it.get("name").asString == "update.json" }
-        val assetDigest = asset.get("digest")?.takeUnless { it.isJsonNull }?.asString
-            ?.removePrefix("sha256:")?.takeIf { it.matches(Regex("[0-9a-fA-F]{64}")) }
-        val sha256 = if (manifestAsset != null) {
-            val manifestUrl = manifestAsset.get("browser_download_url").asString
-            check(manifestUrl == "$REPO/releases/download/$tag/update.json") { "Nguồn update.json không hợp lệ" }
-            updateClient.newCall(Request.Builder().url(manifestUrl).header("Cache-Control", "no-cache").build())
-                .execute().use { manifestResponse ->
-                    check(manifestResponse.isSuccessful) { "Không đọc được update.json (HTTP ${manifestResponse.code})" }
-                    val manifestBytes = manifestResponse.body?.bytes() ?: byteArrayOf()
-                    if (RustLocketCore.isAvailable) {
-                        RustLocketCore.verifyUpdateManifest(manifestBytes, build, version, url, size, assetDigest)
-                    } else {
-                        val manifest = JsonParser.parseString(manifestBytes.toString(Charsets.UTF_8)).asJsonObject
-                        check(manifest.get("versionCode").asLong == build && manifest.get("versionName").asString == version &&
-                            manifest.get("apkUrl").asString == url && manifest.get("sizeBytes").asLong == size) { "Thông tin bản cập nhật không khớp" }
-                        manifest.get("sha256").asString.also { hash ->
-                            check(hash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
-                            check(assetDigest == null || assetDigest.equals(hash, ignoreCase = true)) { "SHA-256 của Release không khớp" }
-                        }
-                    }
-                }
-        } else assetDigest // Compatibility with releases predating update.json.
-        UpdateRelease(version, build, url, size, sha256)
+        check(response.isSuccessful) { "GitHub Pages HTTP ${response.code}" }
+        val bytes = response.body?.bytes() ?: error("Thiếu update.json")
+        val manifest = JsonParser.parseString(bytes.toString(Charsets.UTF_8)).asJsonObject
+        val build = manifest.get("versionCode").asLong
+        val version = manifest.get("versionName").asString
+        val suffix = if (channel == "release") "R" else "dev"
+        check(build > 0 && version == "1.0.$build$suffix" && manifest.get("channel").asString == channel) { "Sai kênh hoặc phiên bản cập nhật" }
+        val url = manifest.get("apkUrl").asString
+        val packageUrl = manifest.get("packageUrl").asString
+        check(url == prefix + "Locket.apk" && packageUrl == prefix + "Locket.apk.xz") { "Nguồn cập nhật không hợp lệ" }
+        val size = manifest.get("sizeBytes").asLong
+        val packageSize = manifest.get("packageSizeBytes").asLong
+        check(size in 1L..200_000_000L && packageSize in 1L..200_000_000L && manifest.get("compression").asString == "xz") { "Kích thước hoặc định dạng không hợp lệ" }
+        val hash = manifest.get("sha256").asString
+        val packageHash = manifest.get("packageSha256").asString
+        check(hash.matches(Regex("[0-9a-fA-F]{64}")) && packageHash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
+        if (RustLocketCore.isAvailable) RustLocketCore.verifyUpdateManifest(bytes, build, version, url, size, null)
+        UpdateRelease(version, build, url, size, hash, packageUrl, packageSize, packageHash, true)
     }
 }
 
 @Suppress("DEPRECATION")
-private fun verifyUpdate(context: Context, apk: File, build: Long) {
+private fun verifyUpdate(context: Context, apk: File, build: Long, version: String) {
     val pm = context.packageManager
     val flag = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
     val installed = pm.getPackageInfo(context.packageName, flag)
     val archive = pm.getPackageArchiveInfo(apk.absolutePath, flag) ?: error("APK không hợp lệ")
     check(archive.packageName == context.packageName) { "Sai tên gói ứng dụng" }
     val code = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
-    check(code == build && code > installedBuild(context)) { "Sai phiên bản APK" }
+    check(code == build && code > installedBuild(context) && archive.versionName == version) { "Sai phiên bản APK" }
     val currentCerts = if (Build.VERSION.SDK_INT >= 28) installed.signingInfo?.apkContentsSigners else installed.signatures
     val newCerts = if (Build.VERSION.SDK_INT >= 28) archive.signingInfo?.apkContentsSigners else archive.signatures
     // Some Android builds do not return signingInfo for an archive.
@@ -131,40 +117,66 @@ private fun verifyUpdate(context: Context, apk: File, build: Long) {
 
 private suspend fun downloadUpdate(context: Context, release: UpdateRelease, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
     val dir = File(context.cacheDir, "updates").apply { mkdirs() }
+    val packed = File(dir, "Locket-${release.version}.part")
     val partial = File(dir, "Locket-${release.version}.partial.apk")
     val apk = File(dir, "Locket-${release.version}.apk")
+    fun hex(digest: MessageDigest) = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     try {
         val digest = MessageDigest.getInstance("SHA-256")
-        updateClient.newCall(Request.Builder().url(release.url).header("Cache-Control", "no-cache").build()).execute().use { response ->
-            check(response.isSuccessful) { "Tải APK thất bại (HTTP ${response.code})" }
-            val body = response.body ?: error("Không nhận được APK")
-            val total = release.size.takeIf { it > 0 } ?: body.contentLength()
+        val request = Request.Builder().url(release.packageUrl + "?v=" + release.build)
+            .header("Cache-Control", "no-cache").build()
+        updateClient.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "Tải bản cập nhật thất bại (HTTP ${response.code})" }
+            val body = response.body ?: error("Không nhận được gói cập nhật")
             body.byteStream().use { input ->
-                partial.outputStream().use { output ->
+                packed.outputStream().use { output ->
                     val buffer = ByteArray(65536)
                     var received = 0L
+                    var lastProgress = 0L
                     while (true) {
                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         val n = input.read(buffer)
                         if (n < 0) break
+                        received += n
+                        check(received <= release.packageSize) { "Gói cập nhật vượt kích thước" }
                         output.write(buffer, 0, n)
                         digest.update(buffer, 0, n)
-                        received += n
-                        if (total > 0) withContext(Dispatchers.Main) { progress((received.toFloat() / total).coerceIn(0f, 1f)) }
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastProgress >= 120L || received == release.packageSize) {
+                            lastProgress = now
+                            withContext(Dispatchers.Main) { progress((received.toFloat() / release.packageSize).coerceIn(0f, 1f)) }
+                        }
                     }
-                    check(total <= 0 || received == total) { "APK tải chưa đủ" }
+                    check(received == release.packageSize) { "Gói cập nhật tải chưa đủ" }
                 }
             }
         }
-        val hash = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
-        release.sha256?.let { expected ->
-            check(expected.equals(hash, ignoreCase = true)) { "SHA-256 không khớp. Đã hủy file tải." }
+        check(release.packageSha256.equals(hex(digest), ignoreCase = true)) { "SHA-256 gói tải không khớp" }
+        val apkDigest = MessageDigest.getInstance("SHA-256")
+        var size = 0L
+        packed.inputStream().buffered().use { source ->
+            val input = if (release.compressed) org.tukaani.xz.XZInputStream(source, 64 * 1024) else source
+            input.use { stream ->
+                partial.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(65536)
+                    while (true) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val n = stream.read(buffer)
+                        if (n < 0) break
+                        size += n
+                        check(size <= release.size) { "APK vượt kích thước đã khai báo" }
+                        output.write(buffer, 0, n)
+                        apkDigest.update(buffer, 0, n)
+                    }
+                }
+            }
         }
-        verifyUpdate(context, partial, release.build)
+        check(size == release.size && release.sha256.equals(hex(apkDigest), ignoreCase = true)) { "APK không khớp SHA-256 hoặc kích thước" }
+        verifyUpdate(context, partial, release.build, release.version)
         apk.delete()
         check(partial.renameTo(apk)) { "Không lưu được APK" }
         apk
-    } finally { partial.delete() }
+    } finally { packed.delete(); partial.delete() }
 }
 
 private fun installUpdate(context: Context, file: File) {
@@ -200,22 +212,32 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     var progress by remember { mutableStateOf<Float?>(null) }
     var downloaded by remember { mutableStateOf<File?>(null) }
     var showCameraSettings by remember { mutableStateOf(false) }
-    // Keep version/update and GitHub as the first two Mod Center rows.
-    ModRow({ Icon(Icons.Default.Info, null, tint = Color.White) }, "Phiên bản ứng dụng",
-        if (busy) "$version · Đang kiểm tra..." else version,
-        enabled = !busy && progress == null) {
+    fun checkChannel(channel: String) {
+        if (busy || progress != null) return
         busy = true
+        val label = if (channel == "release") "Release" else "Dev"
         scope.launch {
             try {
-                val latest = latestRelease()
-                if (latest == null) message = "Chưa có bản phát hành APK."
-                else if (latest.build > installedBuild(context)) release = latest
-                else message = "Bạn đang sử dụng phiên bản mới nhất."
+                val latest = latestRelease(channel)
+                when {
+                    latest == null -> message = "Chưa có bản $label trên GitHub Pages."
+                    latest.build > installedBuild(context) -> { downloaded = null; release = latest }
+                    latest.build == installedBuild(context) -> message = "Bạn đang sử dụng bản $label mới nhất."
+                    else -> message = "Bản $label mới nhất (${latest.version}) cũ hơn bản đang cài ($version). Android không cho cập nhật xuống phiên bản cũ."
+                }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { message = e.localizedMessage ?: "Không kiểm tra được cập nhật" }
             finally { busy = false }
         }
     }
+    ProfileSettingsRow(
+        icon = { Icon(Icons.Default.Info, null, tint = Color.White) },
+        title = "Phiên bản ứng dụng",
+        subtitle = if (busy) "$version · Đang kiểm tra..." else "$version · Nhấn giữ để kiểm tra Dev",
+        enabled = !busy && progress == null,
+        onLongClick = { checkChannel("dev") },
+        onClick = { checkChannel("release") }
+    )
     ModRow({ Icon(Icons.Default.Code, null, tint = Color.White) }, "GitHub", "github.com/ngocminhvn/locket") {
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO))) }
         catch (e: Exception) { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
@@ -245,7 +267,8 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
 
     release?.let { update ->
         AlertDialog(onDismissRequest = { if (progress == null) { release = null; downloaded = null } },
-            title = { Text("Có phiên bản mới") },
+            containerColor = LocketModalBg,
+            title = { Text(if (update.version.endsWith("dev")) "Có bản Dev mới" else "Có bản Release mới") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Phiên bản ${update.version}")

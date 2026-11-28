@@ -7,16 +7,19 @@ on:
     paths: ['.github/manual-build-request.txt']
   workflow_dispatch:
     inputs:
-      publish_release:
-        description: 'Publish signed APK to GitHub Releases'
+      release:
+        description: 'Release (R) — unchecked builds Dev'
         type: boolean
-        default: true
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+  actions: read
 
 concurrency:
-  group: locket-signed-release
+  group: locket-pages-release
   cancel-in-progress: false
 
 jobs:
@@ -25,6 +28,8 @@ jobs:
     name: Build signed APK
     runs-on: ubuntu-latest
 
+    env:
+      LOCKET_CHANNEL: ${{ ((github.event_name == 'workflow_dispatch' && inputs.release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[release build]'))) && 'release' || 'dev' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -162,54 +167,66 @@ jobs:
 
       - name: Prepare APK and update manifest
         run: |
-          cp app/build/outputs/apk/release/app-release.apk "Locket-1.0.$GITHUB_RUN_NUMBER.apk"
-          python3 - <<'PY'
-          import hashlib, json, os
-          from pathlib import Path
-          build = int(os.environ["GITHUB_RUN_NUMBER"])
-          version = f"1.0.{build}"
-          apk = Path(f"Locket-{version}.apk")
-          data = {
-              "versionCode": build,
-              "versionName": version,
-              "apkUrl": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/v{version}/{apk.name}",
-              "sha256": hashlib.file_digest(apk.open("rb"), "sha256").hexdigest(),
-              "sizeBytes": apk.stat().st_size,
-              "certificateSha256": os.environ["LOCKET_CERT_SHA256"],
-              "commit": os.environ["GITHUB_SHA"]
-          }
-          Path("update.json").write_text(json.dumps(data, indent=2) + "\n")
-          print(json.dumps(data, indent=2))
-          PY
+          set -euo pipefail
+          suffix=dev
+          [[ "$LOCKET_CHANNEL" != release ]] || suffix=R
+          version="1.0.${GITHUB_RUN_NUMBER}${suffix}"
+          mkdir -p output
+          cp app/build/outputs/apk/release/app-release.apk "output/Locket-$version.apk"
+          xz -T0 -6 -c "output/Locket-$version.apk" > "output/Locket-$version.apk.xz"
+          python3 scripts/prepare-pages-update.py
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: locket-signed-apk
+          name: locket-signed-apk-${{ env.LOCKET_CHANNEL }}
           path: |
-            Locket-*.apk
-            update.json
+            output/
             app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish signed update APK
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish_release)
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+
+      - name: Stage both update channels
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="v1.0.$GITHUB_RUN_NUMBER"
-          apk="Locket-1.0.$GITHUB_RUN_NUMBER.apk"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$apk" update.json --clobber
-          else
-            gh release create "$tag" "$apk" update.json --target "$GITHUB_SHA" --title "Locket 1.0.$GITHUB_RUN_NUMBER" --generate-notes --latest
-          fi
+          python3 scripts/stage-pages-update.py
+          # Keep the complete verified snapshot as a recovery artifact.
+          du -sh pages
 
-      - name: Summarize artifact-only build
-        if: success() && (github.ref != 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && !inputs.publish_release))
-        run: echo 'Signed APK and R8 mapping are available in Artifacts. Release publication was not requested.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Save Pages snapshot
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: locket-pages-snapshot
+          path: pages/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload GitHub Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
 
       - name: Remove private signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/locket-signing.keystore"
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

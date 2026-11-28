@@ -1,6 +1,8 @@
 package com.locket.app.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +29,7 @@ internal fun profileTextStyle(size: TextUnit, line: TextUnit, weight: FontWeight
     platformStyle = PlatformTextStyle(includeFontPadding = false)
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ProfileSettingsRow(
     icon: @Composable () -> Unit,
@@ -35,12 +38,13 @@ internal fun ProfileSettingsRow(
     titleColor: Color = Color.White,
     trailing: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
     val hasSubtitle = !subtitle.isNullOrBlank()
     Row(
         modifier = Modifier.fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
+            .then(if (onClick != null && onLongClick != null) Modifier.combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick) else if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
             .heightIn(min = if (hasSubtitle) 68.dp else 56.dp)
             .padding(horizontal = 17.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically

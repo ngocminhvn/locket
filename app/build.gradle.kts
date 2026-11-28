@@ -18,7 +18,8 @@ android {
         targetSdk = 34
         val buildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         versionCode = buildNumber
-        versionName = "1.0.$buildNumber"
+        val suffix = if (providers.environmentVariable("LOCKET_CHANNEL").orNull == "release") "R" else "dev"
+        versionName = "1.0.$buildNumber$suffix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -91,6 +92,7 @@ dependencies {
 
     // Network & JSON
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    implementation("org.tukaani:xz:1.10")
     implementation("com.google.code.gson:gson:2.15.0")
     // Authenticated Firestore Listen (existing REST session; no second sign-in).
     implementation("com.google.api.grpc:grpc-google-cloud-firestore-v1:3.44.0")
