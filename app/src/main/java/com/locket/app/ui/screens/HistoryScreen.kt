@@ -41,6 +41,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.material.icons.filled.AccessTime
+import coil.request.ImageRequest
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -228,7 +232,11 @@ fun HistoryScreen(
                 onReact = { emoji ->
                     viewModel.reactToMoment(moment.id, moment.userUid, emoji)
                 },
-                dayMoments = momentsByDate.values.firstOrNull { day -> day.any { it.id == moment.id } }.orEmpty(),
+                historyMoments = moments,
+                hasMore = historyHasMore,
+                loadingOlder = historyLoading,
+                historyError = historyError,
+                onLoadOlder = { viewModel.loadOwnHistory() },
                 onDelete = { target, globally, done ->
                     viewModel.deleteMoment(target, globally, onSuccess = {
                         done()
@@ -337,11 +345,15 @@ fun MemoryDetailDialog(
     moment: Moment,
     onDismiss: () -> Unit,
     onReact: (String) -> Unit,
-    dayMoments: List<Moment> = emptyList(),
+    historyMoments: List<Moment> = emptyList(),
+    hasMore: Boolean = false,
+    loadingOlder: Boolean = false,
+    historyError: String? = null,
+    onLoadOlder: () -> Unit = {},
     onDelete: ((Moment, Boolean, () -> Unit) -> Unit)? = null
 ) {
-    val photos = remember(moment.id, dayMoments) {
-        (dayMoments + moment).distinctBy { it.id }.sortedBy { it.timestampSeconds }
+    val photos = remember(moment.id, historyMoments) {
+        (historyMoments + moment).distinctBy { it.id }.sortedByDescending { it.timestampSeconds }
     }
     val pager = rememberPagerState(initialPage = photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0)) { photos.size }
     val scope = rememberCoroutineScope()
@@ -357,11 +369,14 @@ fun MemoryDetailDialog(
     var deleting by remember(active.id) { mutableStateOf(false) }
     var zoom by remember(active.id) { mutableFloatStateOf(1f) }
     var pan by remember(active.id) { mutableStateOf(Offset.Zero) }
-    val thumbs = rememberLazyListState()
-    LaunchedEffect(pager.currentPage) {
+    val thumbs = rememberLazyListState(initialFirstVisibleItemIndex = pager.currentPage)
+    LaunchedEffect(active.id, pager.currentPage) {
         zoom = 1f
         pan = Offset.Zero
         if (photos.size > 1) thumbs.animateScrollToItem(pager.currentPage)
+    }
+    LaunchedEffect(pager.currentPage, photos.size, hasMore, loadingOlder, historyError) {
+        if (hasMore && !loadingOlder && historyError == null && pager.currentPage >= (photos.size - 5).coerceAtLeast(0)) onLoadOlder()
     }
 
     Dialog(
@@ -369,13 +384,13 @@ fun MemoryDetailDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Box(Modifier.fillMaxSize().background(Color.Black).clipToBounds()) {
-            if (active.thumbnailUrl.isNotBlank()) MomentBackdrop(active.thumbnailUrl)
+            if (active.thumbnailUrl.isNotBlank()) MemoryBackdrop(active.thumbnailUrl)
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 val viewportWidth = maxWidth
                 val photoSize = minOf(viewportWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
-                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 30.dp).height(58.dp)) {
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 22.dp).height(58.dp)) {
                     IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart).size(44.dp)) {
-                        Icon(Icons.Default.Close, "Đóng", tint = Color.White, modifier = Modifier.size(30.dp))
+                        Icon(Icons.Default.Close, "Đóng", tint = Color.White, modifier = Modifier.size(32.dp))
                     }
                     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -389,16 +404,21 @@ fun MemoryDetailDialog(
                     }
                 }
 
-                Column(Modifier.align(Alignment.Center).offset(y = (-18).dp),
+                Column(Modifier.align(Alignment.Center).offset(y = (-31).dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(photoSize),
                         pageSize = PageSize.Fixed(photoSize),
                         contentPadding = PaddingValues(horizontal = (viewportWidth - photoSize) / 2),
                         pageSpacing = 16.dp,
+                        beyondViewportPageCount = 1,
+                        key = { photos[it].id },
                         userScrollEnabled = zoom <= 1f && !share && !delete) { page ->
                         val photo = photos[page]
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(photoSize).clip(RoundedCornerShape(46.dp))
+                            Box(Modifier.size(photoSize).graphicsLayer {
+                                val distance = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                scaleY = 1f - 0.28f * distance
+                            }.clip(RoundedCornerShape(46.dp))
                                 .background(Color(0xFF1E1E20))) {
                                 val selected = page == pager.currentPage
                                 AsyncImage(photo.thumbnailUrl, photo.caption,
@@ -427,11 +447,18 @@ fun MemoryDetailDialog(
                                             translationX = pan.x; translationY = pan.y
                                         } else Modifier),
                                     contentScale = ContentScale.Crop)
-                                if (photo.caption.isNotBlank()) {
-                                    Text(photo.caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)
-                                            .background(Color.Black.copy(alpha = 0.40f), RoundedCornerShape(24.dp))
-                                            .padding(horizontal = 12.dp, vertical = 7.dp))
+                                if (zoom <= 1f || !selected) {
+                                    val photoTime = remember(photo.timestampSeconds) {
+                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(photo.timestampSeconds * 1000))
+                                    }
+                                    val timeChip = photo.caption.isBlank() || photo.caption.trim() == photoTime
+                                    Row(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)
+                                        .background(Color.Black.copy(alpha = 0.44f), CircleShape)
+                                        .padding(horizontal = 13.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (timeChip) Icon(Icons.Default.AccessTime, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp))
+                                        Text(if (timeChip) photoTime else photo.caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                                 if (selected && zoom > 1f) {
                                     Text("1×", color = Color.White, modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
@@ -445,6 +472,9 @@ fun MemoryDetailDialog(
                     Text(time, color = Color.White.copy(alpha = 0.38f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
 
+                if (historyError != null && pager.currentPage >= (photos.size - 3).coerceAtLeast(0)) {
+                    TextButton(onClick = onLoadOlder, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 94.dp)) { Text("Thử tải ảnh cũ", color = Color.White) }
+                }
                 LazyRow(
                     state = thumbs,
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp),
@@ -461,7 +491,7 @@ fun MemoryDetailDialog(
                             .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(if (selected) 18.dp else 10.dp))
                             .clickable { scope.launch { pager.animateScrollToPage(photos.indexOf(photo)) } }
                             .padding(if (selected) 5.dp else 0.dp)) {
-                            AsyncImage(photo.thumbnailUrl, "Ảnh trong ngày", Modifier.fillMaxSize().clip(RoundedCornerShape(if (selected) 12.dp else 9.dp)),
+                            AsyncImage(photo.thumbnailUrl, "Ảnh kỷ niệm", Modifier.fillMaxSize().clip(RoundedCornerShape(if (selected) 12.dp else 9.dp)),
                                 contentScale = ContentScale.Crop)
                         }
                         }
@@ -488,5 +518,25 @@ fun MemoryDetailDialog(
                     onDelete(active, false) { deleting = false; delete = false }
                 }) { Text("Chỉ xóa của mình") } })
         }
+    }
+}
+
+
+/** Blur the actual image on a tiny layer before stretching it to the viewer.
+ * This gives an even backdrop without extracting a palette or blurring a full-screen buffer. */
+@Composable
+private fun MemoryBackdrop(url: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val request = remember(url, context) {
+        ImageRequest.Builder(context).data(url).size(12).allowHardware(false).crossfade(false).build()
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
+        val sx = maxWidth / 48.dp
+        val sy = maxHeight / 48.dp
+        AsyncImage(request, null, Modifier.align(Alignment.Center).size(48.dp)
+            .graphicsLayer { scaleX = sx; scaleY = sy }
+            .blur(25.dp, edgeTreatment = BlurredEdgeTreatment.Rectangle),
+            contentScale = ContentScale.FillBounds)
+        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
     }
 }
