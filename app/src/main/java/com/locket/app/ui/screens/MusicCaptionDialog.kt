@@ -237,13 +237,8 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
         return
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF242424),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
-    ) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 540.dp).padding(horizontal = 16.dp).imePadding(),
+    CaptionPickerSheet(onDismiss = onDismiss) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 16.dp).imePadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Chọn bài hát", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
             OutlinedTextField(value = query, onValueChange = { query = it.take(100) }, enabled = !isBusy,

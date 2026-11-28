@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +27,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -130,14 +129,9 @@ internal fun LocationCaptionDialog(
         )
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF242424),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
-    ) {
+    CaptionPickerSheet(onDismiss = onDismiss) {
         Column(
-            Modifier.fillMaxWidth().heightIn(max = 620.dp).padding(horizontal = 16.dp).imePadding(),
+            Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 16.dp).imePadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(

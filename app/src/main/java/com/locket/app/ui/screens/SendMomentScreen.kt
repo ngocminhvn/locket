@@ -565,20 +565,11 @@ internal fun rememberMomentReviewSlots(
         PhotoInfoDialog(bitmap, snapshotFile, preparedThumbnail, captureDetails) { infoOpen = false }
     }
     if (sheet) {
-        ModalBottomSheet(
-            onDismissRequest = { sheet = false },
-            containerColor = Color(0xFF222222),
-            shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp),
-            dragHandle = {
-                Box(Modifier.padding(top = 13.dp, bottom = 12.dp)
-                    .size(width = 34.dp, height = 4.dp)
-                    .background(Color.White.copy(alpha = 0.20f), CircleShape))
-            }
-        ) {
+        CaptionPickerSheet(onDismiss = { sheet = false }) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 18.dp, vertical = 4.dp)) {
                 Text("Chú thích", Modifier.align(Alignment.CenterHorizontally), color = Color.White,
-                    fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(20.dp))
                 Text("General", color = Color.White.copy(alpha = 0.45f), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
@@ -640,18 +631,7 @@ internal fun rememberMomentReviewSlots(
         var url by remember { mutableStateOf(link?.url.orEmpty()) }
         val valid = LinkCaption.create(title, url)
         val invalidUrl = url.isNotBlank() && LinkCaption.validUrl(url.trim()) == null
-        ModalBottomSheet(
-            onDismissRequest = { linkPicker = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color(0xFF242424),
-            contentColor = Color.White,
-            shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-            dragHandle = {
-                Box(Modifier.padding(top = 13.dp, bottom = 12.dp)
-                    .size(width = 34.dp, height = 4.dp)
-                    .background(Color.White.copy(alpha = 0.20f), CircleShape))
-            }
-        ) {
+        CaptionPickerSheet(onDismiss = { linkPicker = false }) {
             Column(
                 Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
                     .padding(horizontal = 18.dp, vertical = 8.dp),
