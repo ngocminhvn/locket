@@ -25,6 +25,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,6 +87,10 @@ internal object AppearancePrefs {
 @Composable
 internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    if (page == "subscription") {
+        FreeFeaturesScreen(onDismiss)
+        return
+    }
     val moments by viewModel.moments.collectAsState()
     val photo = moments.firstOrNull()
     var icon by remember { mutableIntStateOf(AppearancePrefs.icon(context)) }
@@ -161,19 +169,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                         Text(if (theme == pager.settledPage) "Đang sử dụng" else "Áp dụng")
                     }
                 }
-                else -> {
-                    AppearanceTitle("Locket Gold", "Quản lý gói đăng ký")
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
-                        Text("Không có dữ liệu xác minh gói đăng ký trong ứng dụng này.", color = Color.LightGray)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Các tùy chỉnh icon, widget và camera được lưu trên thiết bị.", color = Color.White)
-                        Spacer(Modifier.height(24.dp))
-                        Button(onClick = {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/account/subscriptions"))) }
-                                .onFailure { Toast.makeText(context, "Không mở được Google Play", Toast.LENGTH_SHORT).show() }
-                        }) { Text("Quản lý gói đăng ký trên Google Play") }
-                    }
-                }
+
             }
         }
     }
@@ -189,5 +185,83 @@ private fun AppearanceCheck(selected: Boolean) {
     Box(Modifier.size(28.dp).clip(CircleShape).background(if (selected) LocketYellow else Color.Transparent)
         .border(2.dp, if (selected) LocketYellow else Color(0xFF555555), CircleShape), contentAlignment = Alignment.Center) {
         if (selected) Icon(Icons.Default.Check, "Đang sử dụng", tint = Color.Black, modifier = Modifier.size(20.dp))
+    }
+}
+
+
+@Composable
+private fun FreeFeaturesScreen(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // Repository created_at: 2026-11-27T09:10:35Z (GitHub).
+    val features = listOf(
+        Triple("🚫", "Không có quảng cáo!", "Không chèn quảng cáo trong ứng dụng"),
+        Triple("🎥", "Video Lockets", "Ghi lại các video clip ngắn!"),
+        Triple("👀", "Lượt xem Locket", "Xem hoạt động trên ảnh của bạn khi máy chủ cung cấp dữ liệu"),
+        Triple("🖼️", "Tải lên từ cuộn camera", "Chia sẻ các kỷ niệm từ thư viện của bạn"),
+        Triple("❤️‍🔥", "Thêm bạn bè", "Kết bạn theo giới hạn của máy chủ Locket"),
+        Triple("💛", "Biểu tượng ứng dụng tùy chỉnh", "Trang trí Màn hình chính của bạn"),
+        Triple("💬", "Gửi phụ đề", "Thêm nội dung trên các ảnh của bạn"),
+        Triple("🎨", "Khung widget", "Trang trí widget của bạn"),
+        Triple("🖌️", "Chủ đề máy ảnh", "Tùy chỉnh màu sắc giao diện camera")
+    )
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF050403), Color(0xFF181306), Color(0xFF4A3504))))) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd)) {
+                            Icon(Icons.Default.Close, "Đóng", tint = Color.White.copy(alpha = 0.65f))
+                        }
+                        Box(Modifier.align(Alignment.Center).padding(top = 18.dp).size(76.dp)
+                            .clip(RoundedCornerShape(22.dp)).background(Color(0xFF292413))
+                            .border(4.dp, Color(0xFF494125), RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Favorite, null, tint = LocketYellow, modifier = Modifier.size(48.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Text("Locket Gold", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFFE3A0))
+                    Text("Miễn phí", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = LocketYellow,
+                        modifier = Modifier.padding(top = 10.dp))
+                    Text("Dự án ra đời ngày 27/11/2026", color = Color(0xFFC8B98B), fontSize = 15.sp,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 36.dp))
+                    features.forEachIndexed { i, (emoji, title, description) ->
+                        val shape = RoundedCornerShape(
+                            topStart = if (i == 0) 24.dp else 5.dp,
+                            topEnd = if (i == 0) 24.dp else 5.dp,
+                            bottomStart = if (i == features.lastIndex) 24.dp else 5.dp,
+                            bottomEnd = if (i == features.lastIndex) 24.dp else 5.dp)
+                        Row(Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = 0.09f))
+                            .padding(horizontal = 16.dp, vertical = 11.dp).heightIn(min = 52.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
+                            Text(emoji, fontSize = 32.sp, modifier = Modifier.width(38.dp), textAlign = TextAlign.Center)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF3EFE6))
+                                Text(description, fontSize = 13.sp, color = Color(0xFFB6AD98))
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Text("Và nhiều tính năng khác nữa...", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFC8B98B), modifier = Modifier.padding(vertical = 18.dp))
+                    Text("Bản tùy chỉnh miễn phí; không phải gói thuê bao Gold chính thức.", color = Color(0xFFB6AD98),
+                        fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 12.dp))
+                }
+                Button(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ngocminhvn/locket/issues/new"))) }
+                        .onFailure { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
+                }, modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp).height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB600), contentColor = Color.Black),
+                    shape = CircleShape) {
+                    Text("Yêu cầu một tính năng", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+                TextButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ngocminhvn/locket"))) }
+                        .onFailure { Toast.makeText(context, "Không mở được GitHub", Toast.LENGTH_SHORT).show() }
+                }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text("GitHub · Miễn phí", color = Color(0xFFC8B98B), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
