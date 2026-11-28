@@ -31,7 +31,7 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val user by viewModel.currentUser.collectAsState()
-    var details by remember(user.uid) { mutableStateOf<LocketApiClient.AccountDetails?>(null) }
+    var details by remember(user.uid) { mutableStateOf(viewModel.cachedGeneralAccount()) }
     var loading by remember(user.uid) { mutableStateOf(true) }
     var readError by remember(user.uid) { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<String?>(null) }
@@ -69,7 +69,7 @@ internal fun GeneralProfileSettings(viewModel: LocketViewModel, displayName: Str
         day = birthday?.let { (it % 100).toString() }.orEmpty()
     }
     fun shown(value: String?): String = value?.takeIf { it.isNotBlank() }
-        ?: if (loading) "Đang tải..." else if (readError != null) "Không tải được" else "Chưa có thông tin"
+        ?: if (details == null && loading) "Đang tải..." else if (details == null && readError != null) "Không tải được" else "Chưa có thông tin"
 
     GeneralRow(Icons.Default.Notifications, "Thông báo") {
         try {

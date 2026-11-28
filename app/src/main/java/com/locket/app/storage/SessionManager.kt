@@ -34,6 +34,13 @@ class SessionManager(context: Context) {
         get() = prefs.getStringSet("dismissed_recommendations_" + currentUser.uid, emptySet()) ?: emptySet()
         set(value) = prefs.edit().putStringSet("dismissed_recommendations_" + currentUser.uid, value).apply()
 
+    // Small account-scoped cache, separate from Room's large lists.
+    fun readAux(owner: String, key: String): String? =
+        if (owner.isBlank()) null else prefs.getString("aux:${owner}:${key}", null)
+    fun writeAux(owner: String, key: String, json: String?) {
+        if (owner.isNotBlank() && currentUser.uid == owner) prefs.edit().putString("aux:${owner}:${key}", json).apply()
+    }
+
     var savedEmail: String?
         get() = prefs.getString("saved_email", null)
         set(value) = prefs.edit().putString("saved_email", value).apply()

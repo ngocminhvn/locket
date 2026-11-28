@@ -600,7 +600,7 @@ private fun BlockedUsersBottomSheet(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QrShareBottomSheet(
+internal fun QrShareBottomSheet(
     user: com.locket.app.model.User,
     viewModel: LocketViewModel,
     onDismiss: () -> Unit

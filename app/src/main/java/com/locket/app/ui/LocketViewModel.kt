@@ -52,12 +52,17 @@ class LocketViewModel(
 
     // Loi moi ket ban den (inbox): REST moi lan mo man Ban be, khong cache
     // Room. Nguon that: Firestore users/{uid}/incoming_friend_requests.
-    private val _incomingFriendRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
+    private val auxGson = com.google.gson.Gson()
+    private fun <T> readAuxList(owner: String, key: String, type: java.lang.reflect.Type): List<T> =
+        runCatching { sessionManager.readAux(owner, key)?.let { auxGson.fromJson<List<T>>(it, type) } }.getOrNull().orEmpty()
+    private val inboxType = object : com.google.gson.reflect.TypeToken<List<FriendRequest>>() {}.type
+    private val recommendationsType = object : com.google.gson.reflect.TypeToken<List<RecommendedFriend>>() {}.type
+    private val _incomingFriendRequests = MutableStateFlow(readAuxList<FriendRequest>(sessionManager.currentUser.uid, "inbox", inboxType))
     val incomingFriendRequests: StateFlow<List<FriendRequest>> = _incomingFriendRequests.asStateFlow()
 
     // Goi y ket ban (Batch 6, defensive): chi co gia tri khi server tra 200;
     // loi/401 thi rong -> UI an section, khong bao loi.
-    private val _friendRecommendations = MutableStateFlow<List<RecommendedFriend>>(emptyList())
+    private val _friendRecommendations = MutableStateFlow(readAuxList<RecommendedFriend>(sessionManager.currentUser.uid, "recommendations", recommendationsType).filter { it.uid !in sessionManager.dismissedRecommendationUids })
     val friendRecommendations: StateFlow<List<RecommendedFriend>> = _friendRecommendations.asStateFlow()
 
     // Danh sach that cac tai khoan bi chan: REST moi lan mo man Profile,
@@ -88,6 +93,10 @@ class LocketViewModel(
     private var cacheHydrated = false
     private var friendsListenJob: Job? = null
     private var conversationsListenJob: Job? = null
+    private var inboxListenJob: Job? = null
+    private var inboxRefreshJob: Job? = null
+    private var recommendationsJob: Job? = null
+    private var recommendationsFetchedAt = 0L
     private val friendsSyncLock = Mutex()
     private var friendsLive = false
     private var conversationsLive = false
@@ -138,6 +147,7 @@ class LocketViewModel(
                         userAvatarUrl = _currentUser.value.profilePictureUrl)
                 }
                 mergeMoments(own)
+                prefetchThumbnails(own.take(8).map { it.thumbnailUrl })
                 val next = page.nextPageToken
                 if (next != null && next == ownHistoryCursor) error("Máy chủ trả lại cùng con trỏ")
                 ownHistoryCursor = next
@@ -482,9 +492,12 @@ class LocketViewModel(
         viewModelScope.launch {
             cache.migrateLegacyCacheIfNeeded()
             if (activeAccount(startupAccount) && startupAccount.isNotBlank()) {
-                val savedMoments = cache.observeMoments().first()
-                val savedFriends = cache.observeFriends().first()
-                val savedConversations = cache.observeConversations().first()
+                val momentsTask = async { cache.observeMoments().first() }
+                val friendsTask = async { cache.observeFriends().first() }
+                val conversationsTask = async { cache.observeConversations().first() }
+                val savedMoments = momentsTask.await()
+                val savedFriends = friendsTask.await()
+                val savedConversations = conversationsTask.await()
                 if (!activeAccount(startupAccount)) return@launch
                 _moments.value = savedMoments
                 _friends.value = savedFriends
@@ -551,6 +564,7 @@ class LocketViewModel(
             chatListenJob?.cancel(); chatListenJob = null
             friendsListenJob?.cancel(); friendsListenJob = null
             conversationsListenJob?.cancel(); conversationsListenJob = null
+        inboxListenJob?.cancel(); inboxListenJob = null
             friendsLive = false; conversationsLive = false
             _feedRealtime.value = false
             _chatRealtime.value = false
@@ -715,6 +729,33 @@ class LocketViewModel(
                 }
             }
         }
+        if (inboxListenJob?.isActive != true) inboxListenJob = viewModelScope.launch {
+            var retry = 1_000L
+            while (foreground && activeAccount(account)) {
+                try {
+                    apiClient.listenInbox(account).collect { delta ->
+                        if (!activeAccount(account)) return@collect
+                        val known = _incomingFriendRequests.value.associateBy { it.uid }
+                        val updated = if (delta.ready) linkedMapOf<String, FriendRequest>() else LinkedHashMap(known)
+                        delta.deletedIds.forEach { updated.remove(it) }
+                        val names = apiClient.resolveUserNames(delta.upserts.filter { known[it]?.displayName.isNullOrBlank() || known[it]?.displayName == it })
+                        if (!activeAccount(account)) return@collect
+                        delta.upserts.forEach { uid ->
+                            updated[uid] = names[uid]?.let { FriendRequest(uid, displayName = it.first, avatarUrl = it.second) }
+                                ?: known[uid] ?: FriendRequest(uid, displayName = uid)
+                        }
+                        publishInbox(account, updated.values.toList())
+                        if (delta.ready) retry = 1_000L
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { android.util.Log.w("LocketListen", "Inbox disconnected: " + e.javaClass.simpleName) }
+                if (foreground && activeAccount(account)) {
+                    refreshIncomingFriendRequests()
+                    kotlinx.coroutines.delay(retry)
+                    retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
         if (conversationsListenJob?.isActive != true) conversationsListenJob = viewModelScope.launch {
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
@@ -785,6 +826,7 @@ class LocketViewModel(
                             }
                         }
                     }
+                    launch { if (ownHistoryCursor == null && _ownHistoryCoveredThrough.value == null && _ownHistoryHasMore.value) loadOwnHistory() }
                     launch { refreshFriendsNow(account) }
                     launch { refreshConversations(force = false) }
                 }
@@ -1383,32 +1425,49 @@ class LocketViewModel(
         }
     }
 
-    /** Tai lai inbox loi moi ket ban (goi khi mo man Ban be). Loi thi giu danh sach cu. */
+    private fun publishInbox(owner: String, requests: List<FriendRequest>) {
+        if (!activeAccount(owner)) return
+        _incomingFriendRequests.value = requests
+        sessionManager.writeAux(owner, "inbox", auxGson.toJson(requests))
+    }
+
+    fun refreshFriendsScreen() {
+        val account = sessionManager.currentUser.uid
+        if (!activeAccount(account)) return
+        viewModelScope.launch { refreshFriendsNow(account) }
+        refreshIncomingFriendRequests()
+        refreshFriendRecommendations()
+    }
+
     fun refreshIncomingFriendRequests() {
-        viewModelScope.launch {
-            apiClient.fetchIncomingFriendRequests().onSuccess { requests ->
-                if (_isLoggedIn.value) _incomingFriendRequests.value = requests
-            }
+        val account = sessionManager.currentUser.uid
+        if (!activeAccount(account) || inboxRefreshJob?.isActive == true) return
+        inboxRefreshJob = viewModelScope.launch {
+            apiClient.fetchIncomingFriendRequests().onSuccess { publishInbox(account, it) }
         }
     }
 
-    /** Tai lai goi y ket ban (goi khi mo man Ban be). Loi/401 -> rong, UI an section. */
     fun refreshFriendRecommendations() {
-        viewModelScope.launch {
+        val account = sessionManager.currentUser.uid
+        if (!activeAccount(account) || recommendationsJob?.isActive == true ||
+            (recommendationsFetchedAt > 0 && now() - recommendationsFetchedAt < 300_000L)) return
+        recommendationsJob = viewModelScope.launch {
             val dismissed = sessionManager.dismissedRecommendationUids
             apiClient.getFriendRecommendations(dismissed.toList()).onSuccess { recs ->
-                if (!_isLoggedIn.value) return@onSuccess
-                val myUid = sessionManager.currentUser.uid
+                if (!activeAccount(account)) return@onSuccess
                 val friendUids = _friends.value.map { it.uid }.toSet()
-                _friendRecommendations.value = recs.filter { it.uid != myUid && it.uid !in friendUids && it.uid !in dismissed }
+                val filtered = recs.filter { it.uid != account && it.uid !in friendUids && it.uid !in sessionManager.dismissedRecommendationUids }
+                _friendRecommendations.value = filtered
+                sessionManager.writeAux(account, "recommendations", auxGson.toJson(filtered))
+                recommendationsFetchedAt = now()
             }
         }
     }
 
-    /** An 1 goi y: luu uid vao dismissed (goc gui lai o lan goi sau) + bo khoi danh sach hien. */
     fun dismissRecommendation(uid: String) {
         sessionManager.dismissedRecommendationUids = sessionManager.dismissedRecommendationUids + uid
         _friendRecommendations.value = _friendRecommendations.value.filter { it.uid != uid }
+        sessionManager.writeAux(sessionManager.currentUser.uid, "recommendations", auxGson.toJson(_friendRecommendations.value))
     }
 
     /**
@@ -1424,7 +1483,7 @@ class LocketViewModel(
         viewModelScope.launch {
             val res = apiClient.acceptFriendRequest(userUid)
             if (res.isSuccess) {
-                _incomingFriendRequests.value = _incomingFriendRequests.value.filter { it.uid != userUid }
+                publishInbox(sessionManager.currentUser.uid, _incomingFriendRequests.value.filter { it.uid != userUid })
                 apiClient.fetchFriends(sessionManager.currentUser.uid).onSuccess { liveFriends ->
                     if (liveFriends.isNotEmpty()) {
                         _friends.value = liveFriends
@@ -1450,7 +1509,7 @@ class LocketViewModel(
         viewModelScope.launch {
             val res = apiClient.declineFriendRequest(userUid)
             if (res.isSuccess) {
-                _incomingFriendRequests.value = _incomingFriendRequests.value.filter { it.uid != userUid }
+                publishInbox(sessionManager.currentUser.uid, _incomingFriendRequests.value.filter { it.uid != userUid })
                 onDone()
             } else {
                 onError(res.exceptionOrNull()?.message ?: "Lỗi từ chối kết bạn")
@@ -1558,7 +1617,28 @@ class LocketViewModel(
 
     // ---- Ho so: doi ten / username / anh dai dien / link moi (batch 5) ----
 
-    suspend fun readGeneralAccount() = apiClient.fetchAccountDetails()
+    fun cachedGeneralAccount(): LocketApiClient.AccountDetails? {
+        val raw = sessionManager.readAux(sessionManager.currentUser.uid, "account_details") ?: return null
+        return runCatching {
+            val obj = org.json.JSONObject(raw)
+            LocketApiClient.AccountDetails(
+                if (obj.isNull("email")) null else obj.getString("email"),
+                if (obj.isNull("phone")) null else obj.getString("phone"),
+                if (obj.isNull("birthday")) null else obj.getInt("birthday"))
+        }.getOrNull()
+    }
+
+    suspend fun readGeneralAccount(): Result<LocketApiClient.AccountDetails> {
+        val owner = sessionManager.currentUser.uid
+        return apiClient.fetchAccountDetails().onSuccess { value ->
+            if (activeAccount(owner)) sessionManager.writeAux(owner, "account_details", org.json.JSONObject().apply {
+                put("email", value.email ?: org.json.JSONObject.NULL)
+                put("phone", value.phone ?: org.json.JSONObject.NULL)
+                put("birthday", value.birthdayMdd ?: org.json.JSONObject.NULL)
+                put("fetchedAt", System.currentTimeMillis())
+            }.toString())
+        }
+    }
 
     suspend fun changeGeneralEmail(email: String): Result<Unit> {
         val result = apiClient.changeAccountEmail(email)
@@ -1630,20 +1710,23 @@ class LocketViewModel(
      * lan roi giu trong RAM — goc cache theo uid trong MMKV
      * (getInviteLink/setInviteLink); repo chua luu persistent.
      */
-    private val _inviteLink = MutableStateFlow<String?>(null)
+    private val _inviteLink = MutableStateFlow(sessionManager.readAux(sessionManager.currentUser.uid, "invite:Link"))
     val inviteLink: StateFlow<String?> = _inviteLink.asStateFlow()
 
     private val _inviteLinkLoading = MutableStateFlow(false)
     val inviteLinkLoading: StateFlow<Boolean> = _inviteLinkLoading.asStateFlow()
 
     fun loadInviteLink(onError: (String) -> Unit = {}) {
-        if (_inviteLink.value != null || _inviteLinkLoading.value) return
+        val owner = sessionManager.currentUser.uid
+        if (!activeAccount(owner) || _inviteLinkLoading.value) return
+        sessionManager.readAux(owner, "invite:Link")?.takeIf { it.isNotBlank() }?.let { _inviteLink.value = it; return }
+        _inviteLinkLoading.value = true
         viewModelScope.launch {
-            _inviteLinkLoading.value = true
-            apiClient.createInviteLink()
-                .onSuccess { _inviteLink.value = it }
-                .onFailure { onError(it.message ?: "Không tạo được link mời") }
-            _inviteLinkLoading.value = false
+            try {
+                apiClient.createInviteLink()
+                    .onSuccess { if (activeAccount(owner)) { _inviteLink.value = it; sessionManager.writeAux(owner, "invite:Link", it) } }
+                    .onFailure { if (activeAccount(owner)) onError(it.message ?: "Không tạo được link mời") }
+            } finally { if (activeAccount(owner)) _inviteLinkLoading.value = false }
         }
     }
 
@@ -1764,6 +1847,7 @@ class LocketViewModel(
         feedListenJob?.cancel(); feedListenJob = null
         friendsListenJob?.cancel(); friendsListenJob = null
         conversationsListenJob?.cancel(); conversationsListenJob = null
+        inboxListenJob?.cancel(); inboxListenJob = null
         friendsLive = false; conversationsLive = false
         _feedRealtime.value = false
         _feedLoading.value = false
@@ -1807,7 +1891,13 @@ class LocketViewModel(
         _currentUser.value = sessionManager.currentUser
         _isLoggedIn.value = false
         _friends.value = emptyList()
+        inboxRefreshJob?.cancel()
+        recommendationsJob?.cancel()
+        recommendationsFetchedAt = 0L
         _incomingFriendRequests.value = emptyList()
+        _friendRecommendations.value = emptyList()
+        _inviteLink.value = null
+        _inviteLinkLoading.value = false
         _blockedUsers.value = emptyList()
         deletedMomentIds.clear()
         hiddenFriendUids.clear()

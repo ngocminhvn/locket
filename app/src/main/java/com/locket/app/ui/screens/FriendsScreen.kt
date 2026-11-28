@@ -43,15 +43,35 @@ fun FriendsScreen(
     val recommendations by viewModel.friendRecommendations.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
-    LaunchedEffect(Unit) {
-        viewModel.syncAllData()
-        viewModel.refreshIncomingFriendRequests()
-        viewModel.refreshFriendRecommendations()
-    }
+    LaunchedEffect(currentUser.uid) { viewModel.refreshFriendsScreen() }
+    var showQr by remember { mutableStateOf(false) }
+    if (showQr) QrShareBottomSheet(currentUser, viewModel, onDismiss = { showQr = false })
 
     var searchQuery by remember { mutableStateOf("") }
     var searchedUser by remember { mutableStateOf<User?>(null) }
     var isSearching by remember { mutableStateOf(false) }
+    val searchCache = remember(currentUser.uid) { linkedMapOf<String, Pair<Long, User?>>() }
+    LaunchedEffect(searchQuery, currentUser.uid) {
+        val query = searchQuery.trim()
+        searchedUser = null
+        isSearching = false
+        if (query.length < 3) return@LaunchedEffect
+        val cached = searchCache[query]
+        if (cached != null && android.os.SystemClock.elapsedRealtime() - cached.first < 300_000L) {
+            searchedUser = cached.second
+            return@LaunchedEffect
+        }
+        isSearching = true
+        try {
+            kotlinx.coroutines.delay(350)
+            val result = viewModel.apiClient.searchUserByUsername(query)
+            if (searchQuery.trim() == query) result.onSuccess { user ->
+                searchedUser = user
+                searchCache[query] = android.os.SystemClock.elapsedRealtime() to user
+                while (searchCache.size > 50) searchCache.remove(searchCache.keys.first())
+            }
+        } finally { if (searchQuery.trim() == query) isSearching = false }
+    }
 
     Box(
         modifier = Modifier
@@ -93,19 +113,7 @@ fun FriendsScreen(
             // Search Bar ("Tìm hoặc thêm bạn bè" - Calls real Locket getUserByUsername)
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = {
-                    searchQuery = it
-                    if (it.length >= 3) {
-                        isSearching = true
-                        scope.launch {
-                            val res = viewModel.apiClient.searchUserByUsername(it.trim())
-                            res.onSuccess { u -> searchedUser = u }
-                            isSearching = false
-                        }
-                    } else {
-                        searchedUser = null
-                    }
-                },
+                onValueChange = { searchQuery = it },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Search,
@@ -199,7 +207,7 @@ fun FriendsScreen(
                     label = "QR Code",
                     backgroundColor = LocketYellow,
                     icon = { Icon(Icons.Default.QrCode, null, tint = Color.Black) },
-                    onClick = { Toast.makeText(context, "Mã QR Locket", Toast.LENGTH_SHORT).show() }
+                    onClick = { showQr = true }
                 )
                 SocialShareButton(
                     label = "Messenger",

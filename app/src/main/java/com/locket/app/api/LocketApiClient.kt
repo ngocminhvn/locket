@@ -15,6 +15,7 @@ import com.locket.app.model.Moment
 import com.locket.app.model.User
 import com.locket.app.rust.RustLocketCore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
@@ -86,7 +87,7 @@ class LocketApiClient(
         for (friend in friends) {
             if (friend.uid.isBlank() || friend.displayName.isBlank() || friend.displayName == friend.uid) continue
             val key = nameKey(friend.uid)
-            val entry = CachedName(friend.displayName to friend.avatarUrl, nameNow() + if (fresh) 900_000L else 120_000L)
+            val entry = CachedName(friend.displayName to friend.avatarUrl, nameNow() + if (fresh) 86_400_000L else 0L)
             if (fresh) nameCache[key] = entry else nameCache.putIfAbsent(key, entry)
         }
     }
@@ -786,7 +787,7 @@ class LocketApiClient(
             // 1. Try callable fetchUsers (chia nho: server chi nhan toi da 20 uid/call,
             // 21+ tra "Malformed request", da verify live voi 23 ban)
             val allUsers = mutableListOf<com.google.gson.JsonElement>()
-            for (batch in friendUids.filterNot { it in reusedIds }.chunked(10)) {
+            for (batch in friendUids.filterNot { it in reusedIds }.chunked(20)) {
                 val payload = JsonObject().apply {
                     add("data", JsonObject().apply {
                         add("user_uids", gson.toJsonTree(batch))
@@ -839,45 +840,13 @@ class LocketApiClient(
 
             // 2. For any friend not returned by fetchUsers, fetch document users/{uid} individually
             val missingUids = friendUids.filter { uid -> friendsList.none { it.uid == uid } }
-            for (mUid in missingUids) {
-                try {
-                    val userDocUrl = "$FIRESTORE_BASE_URL/users/$mUid"
-                    val uReq = Request.Builder()
-                        .url(userDocUrl)
-                        .addHeader("Authorization", "Bearer $token")
-                        .get()
-                        .build()
-                    val uResp = client.newCall(uReq).execute()
-                    if (uResp.isSuccessful) {
-                        val doc = gson.fromJson(uResp.body?.string(), JsonObject::class.java)
-                        val fields = doc.getAsJsonObject("fields")
-                        val fFirst = extractString(fields, "first_name").trim()
-                        val fLast = extractString(fields, "last_name").trim()
-                        val uName = extractString(fields, "username").trim()
-                        val avatar = extractString(fields, "profile_picture_url")
-                        val fDisplayName = when {
-                            fFirst.isNotEmpty() && fLast.isNotEmpty() -> "$fFirst $fLast"
-                            fFirst.isNotEmpty() -> fFirst
-                            fLast.isNotEmpty() -> fLast
-                            uName.isNotEmpty() -> uName
-                            else -> mUid
-                        }
-                        friendsList.add(
-                            Friend(
-                                uid = mUid,
-                                username = uName.ifBlank { mUid },
-                                displayName = fDisplayName,
-                                avatarUrl = avatar,
-                                isBestFriend = true
-                            )
-                        )
-                    } else {
-                        friendsList.add(Friend(uid = mUid, username = mUid, displayName = mUid))
-                    }
-                } catch (e: Exception) {
-                    friendsList.add(Friend(uid = mUid, username = mUid, displayName = mUid))
+            friendsList.addAll(kotlinx.coroutines.coroutineScope {
+                missingUids.chunked(4).flatMap { batch ->
+                    batch.map { uid -> async {
+                        fetchUserProfileFromDoc(uid) ?: cachedByUid[uid] ?: Friend(uid, uid, uid)
+                    } }.map { it.await() }
                 }
-            }
+            })
 
             if (getUid() == userUid) seedUserNames(friendsList.filterNot { it.uid in reusedIds }, fresh = true)
             Result.success(friendsList.map { friend ->
@@ -907,7 +876,7 @@ class LocketApiClient(
         val missing = distinct.filter { nameCache[nameKey(it)]?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
         // fetchUsers chi nhan toi da 20 uid/call (21+ server tra "Malformed request", da verify live)
         // -> chia nho moi batch 10 uid cho an toan.
-        for (batch in missing.chunked(10)) {
+        for (batch in missing.chunked(20)) {
             try {
                 val payload = JsonObject().apply {
                     add("data", JsonObject().apply {
@@ -941,7 +910,7 @@ class LocketApiClient(
                         if (displayName != uid) {
                             val pair = displayName to avatar
                             result[uid] = pair
-                            nameCache[nameKey(uid)] = CachedName(pair, nameNow() + 900_000L)
+                            nameCache[nameKey(uid)] = CachedName(pair, nameNow() + 86_400_000L)
                         }
                     }
                 }
@@ -949,6 +918,16 @@ class LocketApiClient(
             catch (e: Exception) {
                 // Keep known cached names if refresh fails.
             }
+        }
+        val unresolved = missing.filter { nameCache[nameKey(it)]?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
+        val fallback = kotlinx.coroutines.coroutineScope {
+            unresolved.chunked(4).flatMap { batch -> batch.map { uid -> async { fetchUserProfileFromDoc(uid) } }.mapNotNull { it.await() } }
+        }
+        if (getUid() != account) return@withLock emptyMap<String, Pair<String, String>>()
+        fallback.filter { it.displayName != it.uid && it.displayName.isNotBlank() }.forEach { friend ->
+            val pair = friend.displayName to friend.avatarUrl
+            result[friend.uid] = pair
+            nameCache[nameKey(friend.uid)] = CachedName(pair, nameNow() + 86_400_000L)
         }
         result
         }
@@ -1874,6 +1853,16 @@ class LocketApiClient(
         val db = "projects/locket-4252a/databases/(default)"
         realtime.listen(db, "$db/documents/users/$account", "conversations", "__name__", null, checkNotNull(getToken())).collect { event ->
             emit(LiveDelta(event.documents.mapNotNull { parseConversationDocument(it, account) }, event.deletedIds, event.ready))
+        }
+    }
+
+    fun listenInbox(account: String): kotlinx.coroutines.flow.Flow<LiveDelta<String>> = kotlinx.coroutines.flow.flow {
+        check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
+        val db = "projects/locket-4252a/databases/(default)"
+        realtime.listen(db, "$db/documents/users/$account", "incoming_friend_requests", "__name__", null, checkNotNull(getToken())).collect { event ->
+            emit(LiveDelta(event.documents.map { doc ->
+                extractString(doc.getAsJsonObject("fields"), "requesting_user").ifBlank { optString(doc, "name").substringAfterLast('/') }
+            }.filter { it.isNotBlank() }, event.deletedIds, event.ready))
         }
     }
 
