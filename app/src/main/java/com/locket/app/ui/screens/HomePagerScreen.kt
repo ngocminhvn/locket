@@ -312,9 +312,8 @@ fun HomePagerScreen(
         }
     }
 
-    // Restore the stationary background under the fixed chrome when an image
-    // slides through its bounds. Draw using the full viewport coordinates so
-    // the gradient never restarts at a header/footer boundary.
+    // Keep a soft top scrim and the existing stationary footer while scrolling.
+    // The bottom gradient uses full viewport coordinates.
     if (showChrome && pagerState.isScrollInProgress) {
         Canvas(Modifier.matchParentSize()) {
             val top = headerHeight.toPx().coerceAtMost(size.height)
@@ -325,7 +324,21 @@ fun HomePagerScreen(
                 drawRect(cameraBrush)
                 drawRect(feedBrush, alpha = feedProgress)
             }
-            clipRect(bottom = top) { paintChrome() }
+            // Reference Home header: the photo remains visible behind the
+            // stationary controls, fading smoothly into the feed background.
+            // Keep the existing opaque footer treatment unchanged.
+            val fadeHeight = (top + 38.dp.toPx()).coerceAtMost(size.height)
+            val tint = androidx.compose.ui.graphics.lerp(LocketBlack, palette.top, feedProgress)
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to tint.copy(alpha = 0.90f),
+                    0.42f to tint.copy(alpha = 0.65f),
+                    0.72f to tint.copy(alpha = 0.30f),
+                    1f to tint.copy(alpha = 0f),
+                    endY = fadeHeight
+                ),
+                size = androidx.compose.ui.geometry.Size(size.width, fadeHeight)
+            )
             clipRect(top = size.height - footer) { paintChrome() }
         }
     }
