@@ -2,6 +2,11 @@ name: Build Locket Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish signed APK to GitHub Releases'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -184,7 +189,7 @@ jobs:
           retention-days: 14
 
       - name: Publish signed update APK
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.publish_release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -195,6 +200,10 @@ jobs:
           else
             gh release create "$tag" "$apk" update.json --target "$GITHUB_SHA" --title "Locket 1.0.$GITHUB_RUN_NUMBER" --generate-notes --latest
           fi
+
+      - name: Summarize artifact-only build
+        if: success() && (github.event_name != 'workflow_dispatch' || !inputs.publish_release || github.ref != 'refs/heads/main')
+        run: echo 'Signed APK and R8 mapping are available in Artifacts. Release publication was not requested.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove private signing material
         if: always()
