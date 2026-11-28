@@ -54,7 +54,7 @@ private data class ShareTarget(val name: String, val icon: ImageVector, val pkg:
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> Unit,
-    onAction: (String) -> Unit, shareOnly: Boolean = false) {
+    onAction: (String) -> Unit, shareOnly: Boolean = false, compact: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val video = !moment.videoUrl.isNullOrBlank()
@@ -126,8 +126,32 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
     )
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF262626), shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp)) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
+        containerColor = Color(0xFF262626), shape = RoundedCornerShape(topStart = 38.dp, topEnd = 38.dp),
+        dragHandle = if (compact) null else ({ BottomSheetDefaults.DragHandle() })) {
+        if (compact) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp), color = LocketYellow)
+                error?.let { Text(it, color = Color(0xFFFF8888), modifier = Modifier.padding(12.dp)) }
+                val actions = listOf(
+                    ShareTarget("Chia sẻ", Icons.Default.Share, action = "share"),
+                    ShareTarget("Tải về", Icons.Default.Download, action = "save")
+                ) + if (own && !shareOnly) listOf(
+                    ShareTarget(if (video) "Xóa video" else "Xóa ảnh", Icons.Default.Delete, action = "delete")
+                ) else emptyList()
+                actions.forEach { target ->
+                    Box(Modifier.fillMaxWidth().height(56.dp).clickable(enabled = !busy) { execute(target) },
+                        contentAlignment = Alignment.Center) {
+                        Text(target.name, color = if (target.action == "delete") Color(0xFFFF7777) else Color.White,
+                            fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(56.dp).clickable(enabled = !busy, onClick = onDismiss),
+                    contentAlignment = Alignment.Center) {
+                    Text("Hủy", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                }
+            }
+        } else Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (shareOnly) "Chia sẻ với bạn bè!" else "Tùy chọn khoảnh khắc", color = Color.White,
                 style = profileTextStyle(19.sp, 24.sp, FontWeight.Bold))

@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -390,7 +391,10 @@ fun MemoryDetailDialog(
                 Column(Modifier.align(Alignment.Center).offset(y = (-18).dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(photoSize),
-                        userScrollEnabled = zoom <= 1f) { page ->
+                        pageSize = PageSize.Fixed(photoSize),
+                        contentPadding = PaddingValues(horizontal = (maxWidth - photoSize) / 2),
+                        pageSpacing = 16.dp,
+                        userScrollEnabled = zoom <= 1f && !share && !delete) { page ->
                         val photo = photos[page]
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Box(Modifier.size(photoSize).clip(RoundedCornerShape(46.dp))
@@ -443,18 +447,22 @@ fun MemoryDetailDialog(
                 LazyRow(
                     state = thumbs,
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    contentPadding = PaddingValues(horizontal = maxWidth * 0.4f),
+                    horizontalArrangement = Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     items(photos, key = { it.id }) { photo ->
                         val selected = photo.id == active.id
-                        Box(Modifier.size(60.dp).clip(RoundedCornerShape(18.dp))
-                            .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(18.dp))
+                        val distance = kotlin.math.abs(photos.indexOf(photo) - pager.currentPage)
+                        val thumbSize = when (distance) { 0 -> 60.dp; 1 -> 41.dp; else -> 32.dp }
+                        Box(Modifier.width(maxWidth / 5).height(60.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(thumbSize).clip(RoundedCornerShape(if (selected) 18.dp else 10.dp))
+                            .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(if (selected) 18.dp else 10.dp))
                             .clickable { scope.launch { pager.animateScrollToPage(photos.indexOf(photo)) } }
-                            .padding(if (selected) 5.dp else 3.dp)) {
-                            AsyncImage(photo.thumbnailUrl, "Ảnh trong ngày", Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                            .padding(if (selected) 5.dp else 0.dp)) {
+                            AsyncImage(photo.thumbnailUrl, "Ảnh trong ngày", Modifier.fillMaxSize().clip(RoundedCornerShape(if (selected) 12.dp else 9.dp)),
                                 contentScale = ContentScale.Crop)
+                        }
                         }
                     }
                 }
@@ -464,11 +472,11 @@ fun MemoryDetailDialog(
         if (share) {
             MomentActionsSheet(active, own = true, onDismiss = { share = false },
                 onAction = { action -> share = false; if (action == "delete") delete = true },
-                shareOnly = onDelete == null)
+                shareOnly = onDelete == null, compact = true)
         }
         if (delete && onDelete != null) {
             AlertDialog(onDismissRequest = { if (!deleting) delete = false },
-                title = { Text("Xóa khoảnh khắc?") },
+                title = { Text(if (active.videoUrl.isNullOrBlank()) "Xóa ảnh?" else "Xóa video?") },
                 text = { Text("Chỉ xóa khỏi lịch sử của bạn hoặc xóa cho mọi người.") },
                 confirmButton = { TextButton(enabled = !deleting, onClick = {
                     deleting = true
