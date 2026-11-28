@@ -13,99 +13,13 @@
         android:scaleType="centerCrop" />
 
     <ImageView
-        android:id="@+id/widget_scrim"
-        android:layout_width="match_parent"
-        android:layout_height="72dp"
-        android:layout_gravity="bottom"
-        android:src="@drawable/widget_scrim" />
-
-    <LinearLayout
-        android:id="@+id/widget_info"
-        android:layout_width="match_parent"
+        android:id="@+id/widget_footer"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:orientation="vertical"
-        android:padding="12dp">
-
-        <TextView
-            android:id="@+id/widget_name"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:maxLines="1"
-            android:ellipsize="end" />
-
-        <TextView
-            android:id="@+id/widget_time"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#CCCCCC"
-            android:textSize="12sp" />
-
-        <ImageView
-            android:id="@+id/widget_overlay"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxHeight="60dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="2dp"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/widget_caption"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="2dp"
-            android:background="@drawable/widget_caption_pill"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="5dp"
-            android:maxLines="2"
-            android:ellipsize="end" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/widget_compact_info"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:visibility="gone">
-
-        <ImageView
-            android:id="@+id/widget_avatar"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginEnd="8dp"
-            android:scaleType="fitCenter"
-            android:visibility="gone" />
-
-        <ImageView
-            android:id="@+id/widget_compact_overlay"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxHeight="46dp"
-            android:adjustViewBounds="true"
-            android:scaleType="fitCenter"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/widget_compact_caption"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:maxLines="2"
-            android:ellipsize="end" />
-    </LinearLayout>
+        android:layout_gravity="bottom|start"
+        android:adjustViewBounds="true"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
 
     <TextView
         android:id="@+id/widget_empty"

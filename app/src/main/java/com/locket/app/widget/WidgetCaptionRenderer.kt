@@ -3,28 +3,27 @@ package com.locket.app.widget
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.text.TextPaint
 import android.text.TextUtils
 import com.locket.app.model.Moment
+import com.locket.app.model.CaptionOverlays
 import com.locket.app.model.CaptionSymbol
 import com.locket.app.model.captionSymbol
 import kotlin.math.cos
 import kotlin.math.sin
 
 internal object WidgetCaptionRenderer {
-    fun render(context: Context, moment: Moment, maxWidth: Float = 244f, compact: Boolean = false): Bitmap? {
-        val data = moment.overlay ?: return null
-        val type = data.kind
-        val rating = data.rating
+    fun render(context: Context, moment: Moment, maxWidth: Float, widgetScale: Float): Bitmap? {
+        val data = moment.overlay
+        val type = data?.kind.orEmpty()
+        val rating = data?.rating ?: 0f
         val review = type == "review" && rating > 0f
-        val comment = data.comment
-        val symbol = data.iconData
-        val prefix = when (captionSymbol(type, data.iconKind, symbol)) {
+        val comment = data?.comment.orEmpty()
+        val symbol = data?.iconData.orEmpty()
+        val prefix = when (captionSymbol(type, data?.iconKind.orEmpty(), symbol)) {
             CaptionSymbol.LOCATION -> "📍"
             CaptionSymbol.CLOCK -> "◷"
             CaptionSymbol.FLAME -> "🔥"
@@ -38,30 +37,27 @@ internal object WidgetCaptionRenderer {
             CaptionSymbol.WIND -> "💨"
             CaptionSymbol.FOG -> "🌫"
             CaptionSymbol.SLEET -> "🌨"
-            null -> if (data.iconKind == "emoji") symbol else ""
+            null -> if (data?.iconKind == "emoji") symbol else ""
         }
-        val label = if (review) comment else listOf(prefix, data.text).filter { it.isNotBlank() }.joinToString(" ")
+        val label = if (review) comment else listOf(prefix, data?.text.orEmpty()).filter { it.isNotBlank() }.joinToString(" ")
+            .ifBlank { CaptionOverlays.label(moment) }
         if (!review && label.isBlank()) return null
-        val scale = context.resources.displayMetrics.density.coerceIn(1f, 3f)
+        val scale = context.resources.displayMetrics.density * widgetScale
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = if (compact) 12f else 14f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            this.color = data.foreground
+            textSize = 12f
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            this.color = 0xFFFFFFFF.toInt()
         }
-        val limit = maxWidth.coerceIn(32f, 320f)
-        val clipped = TextUtils.ellipsize(label, paint, (limit - 20f).coerceAtLeast(1f), TextUtils.TruncateAt.END).toString()
-        val width = (if (review) maxOf(if (compact) 70f else 112f, paint.measureText(clipped) + 20f) else paint.measureText(clipped) + 20f).coerceIn(32f, limit)
-        val height = if (review && comment.isNotBlank()) 46f else if (compact) 24f else 30f
+        val limit = (maxWidth / widgetScale).coerceAtLeast(12f)
+        val clipped = TextUtils.ellipsize(label, paint, (limit - 16f).coerceAtLeast(1f), TextUtils.TruncateAt.END).toString()
+        val width = (if (review) maxOf(76f, paint.measureText(clipped) + 16f) else paint.measureText(clipped) + 16f).coerceIn(12f, limit)
+        val height = if (review && comment.isNotBlank()) 38f else 24f
         val bitmap = Bitmap.createBitmap((width * scale).toInt(), (height * scale).toInt(), Bitmap.Config.ARGB_8888)
         bitmap.density = context.resources.displayMetrics.densityDpi
         val canvas = Canvas(bitmap)
         canvas.scale(scale, scale)
-        val colors = data.colors
-        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = colors.firstOrNull() ?: 0x99000000.toInt()
-            if (colors.size >= 2) shader = LinearGradient(0f, 0f, 0f, height, colors.toIntArray(), null, Shader.TileMode.CLAMP)
-        }
-        if (!(compact && review)) canvas.drawRoundRect(0f, 0f, width, height, height / 2f, height / 2f, bg)
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xB3000000.toInt() }
+        canvas.drawRoundRect(0f, 0f, width, height, height / 2f, height / 2f, bg)
         paint.textAlign = Paint.Align.CENTER
         if (review) {
             val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -70,10 +66,10 @@ internal object WidgetCaptionRenderer {
                 strokeJoin = Paint.Join.ROUND
             }
             repeat(5) { i ->
-                val spacing = minOf(if (compact) 12f else 19f, width / 5f)
+                val spacing = minOf(12f, (width - 8f) / 5f)
                 val starScale = minOf(1f, spacing / 19f)
                 val cx = width / 2f + (i - 2) * spacing
-                val cy = if (compact && comment.isBlank()) height / 2f else 15f
+                val cy = if (comment.isBlank()) height / 2f else 10f
                 val path = Path()
                 repeat(10) { j ->
                     val angle = -Math.PI / 2 + j * Math.PI / 5
@@ -96,7 +92,7 @@ internal object WidgetCaptionRenderer {
                     canvas.restoreToCount(save)
                 }
             }
-            if (comment.isNotBlank()) canvas.drawText(clipped, width / 2f, 37f, paint)
+            if (comment.isNotBlank()) canvas.drawText(clipped, width / 2f, 28f, paint)
         } else {
             canvas.drawText(clipped, width / 2f, height / 2f - (paint.ascent() + paint.descent()) / 2f, paint)
         }

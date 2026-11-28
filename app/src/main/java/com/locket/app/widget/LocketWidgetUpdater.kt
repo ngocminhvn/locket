@@ -14,7 +14,6 @@ import coil.request.ImageRequest
 import com.locket.app.MainActivity
 import com.locket.app.R
 import com.locket.app.model.Moment
-import com.locket.app.storage.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -86,9 +85,9 @@ object LocketWidgetUpdater {
             val options = manager.getAppWidgetOptions(id)
             val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 150).takeIf { it > 0 } ?: 150
             val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 150).takeIf { it > 0 } ?: 150
-            val compact = width < 210 || height < 210
+            val scale = (minOf(width, height) / 150f).coerceIn(0.75f, 2.2f)
             val avatarUrl = named?.let { friends[it.userUid]?.avatarUrl.orEmpty().ifBlank { it.userAvatarUrl } }.orEmpty()
-            val views = buildViews(context, named, compact, width, avatarUrl)
+            val views = buildViews(context, named, scale, width, avatarUrl)
             if (session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty() != owner ||
                 session.readAux(owner, "widget_friend:$id").orEmpty() != selection ||
                 id !in manager.getAppWidgetIds(ComponentName(context, LocketWidgetProvider::class.java))) continue
@@ -97,7 +96,7 @@ object LocketWidgetUpdater {
         success
     }
 
-    private suspend fun buildViews(context: Context, latest: Moment?, compact: Boolean, width: Int, avatarUrl: String): RemoteViews {
+    private suspend fun buildViews(context: Context, latest: Moment?, scale: Float, width: Int, avatarUrl: String): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_locket)
         val frame = com.locket.app.ui.screens.AppearancePrefs.frameResource(context)
         views.setViewVisibility(R.id.widget_custom_frame, if (frame == 0) View.GONE else View.VISIBLE)
@@ -117,48 +116,31 @@ object LocketWidgetUpdater {
         if (latest == null) {
             // Chua co du lieu that: hien trang thai trong that, khong dung anh mau
             views.setViewVisibility(R.id.widget_image, View.GONE)
-            views.setViewVisibility(R.id.widget_scrim, View.GONE)
-            views.setViewVisibility(R.id.widget_info, View.GONE)
-            views.setViewVisibility(R.id.widget_compact_info, View.GONE)
+            views.setViewVisibility(R.id.widget_footer, View.GONE)
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
             return views
         }
 
         views.setViewVisibility(R.id.widget_image, View.VISIBLE)
-        views.setViewVisibility(R.id.widget_scrim, View.VISIBLE)
-        views.setViewVisibility(R.id.widget_info, if (compact) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_compact_info, if (compact) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.widget_empty, View.GONE)
 
-        val name = latest.userName.ifBlank { latest.userUid }
-        val caption = com.locket.app.model.CaptionOverlays.label(latest)
-        if (compact) {
-            val avatar = loadBitmap(context, avatarUrl, 96)?.let(::roundAvatar)
-            views.setViewVisibility(R.id.widget_avatar, if (avatar != null) View.VISIBLE else View.GONE)
-            if (avatar != null) views.setImageViewBitmap(R.id.widget_avatar, avatar)
-            val available = (width - if (avatar != null) 60 else 20).coerceAtLeast(36)
-            val overlay = if (latest.overlay?.kind == "standard") null
-                else WidgetCaptionRenderer.render(context, latest, available.toFloat(), compact = true)
-            views.setViewVisibility(R.id.widget_compact_overlay, if (overlay != null) View.VISIBLE else View.GONE)
-            views.setViewVisibility(R.id.widget_compact_caption, if (overlay == null) View.VISIBLE else View.GONE)
-            if (overlay != null) {
-                views.setImageViewBitmap(R.id.widget_compact_overlay, overlay)
-                views.setContentDescription(R.id.widget_compact_overlay, caption)
-            } else {
-                views.setTextViewText(R.id.widget_compact_caption, caption.ifBlank { name })
-            }
-        } else {
-            views.setTextViewText(R.id.widget_name, name)
-            views.setTextViewText(R.id.widget_time, latest.timeAgo)
-            val overlay = WidgetCaptionRenderer.render(context, latest, (width - 24).coerceAtLeast(36).toFloat())
-            views.setViewVisibility(R.id.widget_overlay, if (overlay != null) View.VISIBLE else View.GONE)
-            views.setViewVisibility(R.id.widget_caption, if (overlay == null && caption.isNotBlank()) View.VISIBLE else View.GONE)
-            if (overlay != null) {
-                views.setImageViewBitmap(R.id.widget_overlay, overlay)
-                views.setContentDescription(R.id.widget_overlay, caption)
-            } else {
-                views.setTextViewText(R.id.widget_caption, caption)
-            }
+        // Same composition at every size: real avatar + caption pill, never a name or time.
+        val avatar = loadBitmap(context, avatarUrl, 192)
+        val inset = 8f * scale
+        val avatarDp = if (avatar != null) 32f * scale else 0f
+        val gapDp = if (avatar != null) 6f * scale else 0f
+        val caption = WidgetCaptionRenderer.render(context, latest,
+            (width - 2 * inset - avatarDp - gapDp).coerceAtLeast(24f), scale)
+        val footer = buildFooter(context, avatar, caption, scale)
+        views.setViewVisibility(R.id.widget_footer, if (footer == null) View.GONE else View.VISIBLE)
+        if (footer != null) {
+            views.setImageViewBitmap(R.id.widget_footer, footer)
+            val padding = (inset * context.resources.displayMetrics.density).toInt()
+            views.setViewPadding(R.id.widget_footer, padding, 0, padding, padding)
+            val label = com.locket.app.model.CaptionOverlays.label(latest)
+            val review = latest.overlay?.takeIf { it.kind == "review" && it.rating > 0f }
+            views.setContentDescription(R.id.widget_footer,
+                if (review != null) "${review.rating}/5 sao ${review.comment}".trim() else label)
         }
 
         val bitmap = loadBitmap(context, latest.thumbnailUrl)
@@ -170,16 +152,35 @@ object LocketWidgetUpdater {
         return views
     }
 
-    private fun roundAvatar(source: Bitmap): Bitmap {
-        val size = minOf(source.width, source.height)
-        val result = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    private fun buildFooter(context: Context, avatar: Bitmap?, caption: Bitmap?, scale: Float): Bitmap? {
+        if (avatar == null && caption == null) return null
+        val density = context.resources.displayMetrics.density
+        val avatarSize = if (avatar != null) (32f * scale * density).toInt().coerceAtLeast(1) else 0
+        val gap = if (avatar != null && caption != null) (6f * scale * density).toInt() else 0
+        val width = avatarSize + gap + (caption?.width ?: 0)
+        val height = maxOf(avatarSize, caption?.height ?: 0)
+        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        result.density = context.resources.displayMetrics.densityDpi
         val canvas = android.graphics.Canvas(result)
-        val path = android.graphics.Path().apply {
-            addCircle(size / 2f, size / 2f, size / 2f, android.graphics.Path.Direction.CW)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+        if (avatar != null) {
+            val side = minOf(avatar.width, avatar.height)
+            val shader = android.graphics.BitmapShader(avatar, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+            val factor = avatarSize.toFloat() / side
+            val top = (height - avatarSize) / 2f
+            shader.setLocalMatrix(android.graphics.Matrix().apply {
+                setScale(factor, factor)
+                postTranslate((side - avatar.width) * factor / 2f, top + (side - avatar.height) * factor / 2f)
+            })
+            paint.shader = shader
+            canvas.drawCircle(avatarSize / 2f, height / 2f, avatarSize / 2f, paint)
+            paint.shader = null
         }
-        canvas.clipPath(path)
-        canvas.drawBitmap(source, (size - source.width) / 2f, (size - source.height) / 2f,
-            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+        if (caption != null) {
+            val left = (avatarSize + gap).toFloat()
+            val top = (height - caption.height) / 2f
+            canvas.drawBitmap(caption, null, android.graphics.RectF(left, top, left + caption.width, top + caption.height), paint)
+        }
         return result
     }
 
