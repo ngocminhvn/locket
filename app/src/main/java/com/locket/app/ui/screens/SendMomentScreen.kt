@@ -87,6 +87,7 @@ internal fun rememberMomentReviewSlots(
     bitmap: Bitmap,
     previewBitmap: Bitmap = bitmap,
     snapshotFile: File? = null,
+    originalJpeg: ByteArray? = null,
     showPhotoInfo: Boolean = false,
     captureDetails: String? = null,
     preparedThumbnail: Deferred<ByteArray>? = null,
@@ -157,9 +158,12 @@ internal fun rememberMomentReviewSlots(
         }
     }
 
-    // System document picker writes real captured bytes, without storage permission.
+    // Export the capture source, never the preview JPEG or upload thumbnail.
+    // PreviewView produces a bitmap, so PNG is the lossless source export.
+    val saveMime = if (videoFile != null) "video/mp4" else if (originalJpeg != null) "image/jpeg" else "image/png"
+    val saveExtension = if (videoFile != null) "mp4" else if (originalJpeg != null) "jpg" else "png"
     val saveLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument(if (videoFile == null) "image/jpeg" else "video/mp4")
+        ActivityResultContracts.CreateDocument(saveMime)
     ) { uri ->
         if (uri != null) {
             saving = true
@@ -168,11 +172,13 @@ internal fun rememberMomentReviewSlots(
                     withContext(Dispatchers.IO) {
                         context.contentResolver.openOutputStream(uri)?.use { out ->
                             if (videoFile != null) videoFile.inputStream().use { it.copyTo(out) }
-                            else if (snapshotFile?.isFile == true) snapshotFile.inputStream().use { it.copyTo(out) }
-                            else check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out))
+                            else if (originalJpeg != null) out.write(originalJpeg)
+                            else check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
                         } ?: error("Không mở được tệp")
                     }
                     Toast.makeText(context, "Đã lưu", Toast.LENGTH_SHORT).show()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Toast.makeText(context, "Lỗi lưu: ${e.message}", Toast.LENGTH_LONG).show()
                 } finally { saving = false }
@@ -196,7 +202,7 @@ internal fun rememberMomentReviewSlots(
                 Text("Gửi đến...", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.Center))
                 IconButton(
-                    onClick = { saveLauncher.launch("Locket_${System.currentTimeMillis()}." + if (videoFile == null) "jpg" else "mp4") },
+                    onClick = { saveLauncher.launch("Locket_${System.currentTimeMillis()}.$saveExtension") },
                     enabled = !isPosting && !saving,
                     modifier = Modifier.align(Alignment.CenterEnd)
                 ) {
