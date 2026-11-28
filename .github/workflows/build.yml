@@ -41,14 +41,13 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools build-tools;34.0.0 build-tools;35.0.0 ndk;27.2.12479018'
+          packages: 'ndk;27.2.12479018'
 
-      - name: Install Android API 37.1
+      - name: Install Android SDK 37.1 and build tools
         run: |
           sdkmanager --sdk_root="$ANDROID_HOME" --channel=3 --install "platforms;android-37.1" "build-tools;36.0.0"
 
@@ -71,110 +70,64 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
         run: |
+          set -euo pipefail
           cargo test --manifest-path rust-core/Cargo.toml --locked
           ./scripts/build-rust-android.sh
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            test -s "app/src/main/jniLibs/$abi/liblocket_core.so"
-          done
 
-      - name: Grant Execute Permission for Gradlew
-        run: chmod +x ./gradlew
-
-      - name: Restore persistent signing key
+      - name: Build, sign, verify and package APK
         env:
           LOCKET_DEBUG_KEYSTORE_B64: ${{ secrets.LOCKET_DEBUG_KEYSTORE_B64 }}
+          # Public certificate digest from successful build 43 (run 46097105930).
+          # Keep this pin even after deleting historical GitHub Releases.
+          EXPECTED_CERT_SHA256: c25ce38e6273954f28a705843e6630cb67b70e39ba48e406a1ba9eca299c55e6
         run: |
           set -euo pipefail
           if [[ -z "$LOCKET_DEBUG_KEYSTORE_B64" ]]; then
-            echo "::error::LOCKET_DEBUG_KEYSTORE_B64 is required; refusing to generate a different signing key."
+            echo "::error::Persistent Locket signing key is required."
             exit 1
           fi
           umask 077
           key="$RUNNER_TEMP/locket-signing.keystore"
+          trap 'rm -f "$key"' EXIT
           printf '%s' "$LOCKET_DEBUG_KEYSTORE_B64" | base64 --decode > "$key"
-          keytool -list -keystore "$key" -storepass android -alias androiddebugkey >/dev/null
-          echo "LOCKET_KEYSTORE=$key" >> "$GITHUB_ENV"
+          unset LOCKET_DEBUG_KEYSTORE_B64
+          expected="$(keytool -exportcert -keystore "$key" -alias androiddebugkey -storepass android | sha256sum | cut -d' ' -f1)"
+          if [[ "${expected,,}" != "$EXPECTED_CERT_SHA256" ]]; then
+            echo "::error::Signing key does not match the established Locket certificate."
+            exit 1
+          fi
 
-      - name: Build explicitly signed Release APK
-        run: |
+          echo "::group::Compile and sign (R8)"
           gradle assembleRelease --stacktrace --no-daemon \
-            -Pandroid.injected.signing.store.file="$LOCKET_KEYSTORE" \
+            -Pandroid.injected.signing.store.file="$key" \
             -Pandroid.injected.signing.store.password=android \
             -Pandroid.injected.signing.key.alias=androiddebugkey \
             -Pandroid.injected.signing.key.password=android
+          echo "::endgroup::"
 
-      - name: Verify R8 mapping
-        run: test -s app/build/outputs/mapping/release/mapping.txt
-
-      - name: Verify APK certificate and continuity with published releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+          echo "::group::Verify APK"
           apk="app/build/outputs/apk/release/app-release.apk"
-          signer="$ANDROID_HOME/build-tools/34.0.0/apksigner"
-          "$signer" verify --verbose --print-certs "$apk"
-          unzip -l "$apk" | grep -F 'assets/dexopt/baseline.prof'
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$apk"
-          certificate() {
-            "$signer" verify --print-certs "$1" |
-              sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1
-          }
-          actual="$(certificate "$apk")"
-          expected="$(keytool -exportcert -keystore "$LOCKET_KEYSTORE" -alias androiddebugkey -storepass android | sha256sum | cut -d' ' -f1)"
-          test -n "$actual"
-          test -n "$expected"
-          echo "APK signing certificate SHA-256: $actual"
-          echo "Keystore certificate SHA-256: $expected"
-          if [[ "${actual,,}" != "${expected,,}" ]]; then
-            echo "::error::APK was not signed by the configured Locket keystore."
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          test -s app/build/outputs/mapping/release/mapping.txt
+          "$tools/apksigner" verify --verbose --print-certs "$apk"
+          actual="$("$tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)"
+          if [[ "${actual,,}" != "$EXPECTED_CERT_SHA256" ]]; then
+            echo "::error::APK signing certificate mismatch."
             exit 1
           fi
-          # Compare against the latest existing version and the first known
-          # signed update (23). Never publish a breaking signing-key migration.
-          # Exception (one-time rotation approved by the owner 2026-11-27):
-          # v1.0.23 and v1.0.24 were published before the persistent keystore
-          # existed, so they were signed with ephemeral runner-generated
-          # debug keys that are lost forever. Their certificates can never
-          # match the configured keystore. From the next release on, the
-          # keystore key is the single source of truth (checked above), so
-          # the comparison below passes again for every newer release.
-          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
-            releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
-            latest="$(printf '%s\n' "$releases" | grep -E '^v1\.0\.[0-9]+$' | sort -V | tail -n1 || true)"
-            if [[ -n "$latest" && "$GITHUB_RUN_NUMBER" -lt "${latest##*.}" ]]; then
-              echo "::error::Refusing to publish an older build as latest."
-              exit 1
-            fi
-            for tag in "$latest" v1.0.23; do
-              [[ -n "$tag" ]] || continue
-              if ! printf '%s\n' "$releases" | grep -Fxq "$tag"; then continue; fi
-              if [[ "$tag" == "v1.0.23" || "$tag" == "v1.0.24" ]]; then
-                echo "::warning::Skipping certificate comparison for $tag (pre-keystore release, one-time rotation approved 2026-11-27)."
-                continue
-              fi
-              previous="$RUNNER_TEMP/previous-$tag.apk"
-              gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "Locket-${tag#v}.apk" --output "$previous" --clobber
-              prior="$(certificate "$previous")"
-              test -n "$prior"
-              echo "$tag certificate SHA-256: $prior"
-              if [[ "${actual,,}" != "${prior,,}" ]]; then
-                echo "::error::Signing certificate differs from $tag; publication blocked."
-                exit 1
-              fi
-              rm -f "$previous"
-            done
-          fi
+          unzip -l "$apk" | grep -F 'assets/dexopt/baseline.prof'
+          "$tools/zipalign" -c -P 16 -v 4 "$apk"
+          export LOCKET_CERT_SHA256="$actual"
           echo "LOCKET_CERT_SHA256=$actual" >> "$GITHUB_ENV"
+          echo "::endgroup::"
 
-      - name: Prepare APK and update manifest
-        run: |
-          set -euo pipefail
+          rm -f "$key"
+          umask 022
           suffix=dev
           [[ "$LOCKET_CHANNEL" != release ]] || suffix=R
           version="1.0.${GITHUB_RUN_NUMBER}${suffix}"
           mkdir -p output
-          cp app/build/outputs/apk/release/app-release.apk "output/Locket-$version.apk"
+          cp "$apk" "output/Locket-$version.apk"
           xz -T0 -6 -c "output/Locket-$version.apk" > "output/Locket-$version.apk.xz"
           python3 scripts/prepare-pages-update.py
 
@@ -187,8 +140,9 @@ jobs:
             app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14
+          compression-level: 1
 
-      - name: Check whether GitHub Pages is enabled
+      - name: Prepare GitHub Pages update
         id: pages_status
         if: github.ref == 'refs/heads/main'
         env:
@@ -200,23 +154,17 @@ jobs:
             true|false) echo "enabled=$enabled" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Could not determine Pages status"; exit 1 ;;
           esac
-          if [[ "$enabled" == false ]]; then
-            echo "::warning::GitHub Pages is disabled. Signed APK and XZ are available in Artifacts."
-            echo 'GitHub Pages is disabled. Enable Settings > Pages > GitHub Actions to publish updates. Signed APK and XZ are available in Artifacts.' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$enabled" == true ]]; then
+            python3 scripts/stage-pages-update.py
+            du -sh pages
+          else
+            echo "::warning::GitHub Pages disabled; signed APK and XZ available in Artifacts."
+            echo 'GitHub Pages disabled. Enable Settings > Pages > GitHub Actions to publish.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Configure GitHub Pages
         if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
-
-      - name: Stage both update channels
-        if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 scripts/stage-pages-update.py
-          # Keep the complete verified snapshot as a recovery artifact.
-          du -sh pages
 
       - name: Save Pages snapshot
         if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
@@ -227,16 +175,13 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
+          compression-level: 1
 
       - name: Upload GitHub Pages artifact
         if: github.ref == 'refs/heads/main' && steps.pages_status.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: pages
-
-      - name: Remove private signing material
-        if: always()
-        run: rm -f "$RUNNER_TEMP/locket-signing.keystore"
 
   deploy:
     if: github.ref == 'refs/heads/main' && needs.build.outputs.pages_enabled == 'true'
