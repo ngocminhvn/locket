@@ -9,16 +9,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material.icons.filled.AddReaction
-import androidx.core.graphics.drawable.toBitmap
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -100,32 +93,18 @@ fun ChatDetailScreen(
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
 
-    val visiblePhoto = remember(messages, listState) {
-        derivedStateOf {
-            val visibleKeys = listState.layoutInfo.visibleItemsInfo.map { it.key }.toSet()
-            val firstPhoto = messages.firstOrNull { it.id in visibleKeys && !it.thumbnailUrl.isNullOrBlank() }
-            firstPhoto?.thumbnailUrl ?: messages.lastOrNull { !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
-        }
-    }.value
-    var photoTint by remember(friend.uid) { mutableStateOf(LocketBlack) }
-    LaunchedEffect(visiblePhoto, friend.uid) {
-        if (visiblePhoto == null) {
-            photoTint = LocketBlack
-            return@LaunchedEffect
-        }
-        try {
-            val result = context.imageLoader.execute(ImageRequest.Builder(context)
-                .data(visiblePhoto).size(48).allowHardware(false).build())
-            val drawable = (result as? SuccessResult)?.drawable
-            if (drawable != null) {
-                photoTint = withContext(Dispatchers.Default) { chatPhotoTint(drawable.toBitmap(48, 48)) }
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { photoTint = LocketBlack }
+    val chatColor = LocketBlack
+    val bubbleColor = LocketChatReceived
+    val composerColor = LocketSearchBg
+    val chromeStops = floatArrayOf(0f, 0.2667f, 0.4667f, 0.6667f, 0.8667f, 1f)
+    val topChrome = remember {
+        val alpha = floatArrayOf(1f, 0.823f, 0.676f, 0.52f, 0.18f, 0f)
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to LocketBlack.copy(alpha = alpha[it]) })
     }
-    val chatColor by animateColorAsState(photoTint, label = "chat-photo-tint")
-    val bubbleColor = androidx.compose.ui.graphics.lerp(chatColor, Color.White, 0.13f)
-    val composerColor = androidx.compose.ui.graphics.lerp(chatColor, Color.White, 0.19f)
+    val bottomChrome = remember {
+        val alpha = floatArrayOf(0f, 0.111f, 0.332f, 0.576f, 0.723f, 1f)
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to LocketBlack.copy(alpha = alpha[it]) })
+    }
 
     fun sendText(text: String, clearInput: Boolean = false) {
         if (text.isBlank() || sending) return
@@ -195,7 +174,7 @@ fun ChatDetailScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(chatColor)
+                    .background(topChrome)
                     .statusBarsPadding()
                     .padding(horizontal = 4.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -214,7 +193,7 @@ fun ChatDetailScreen(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF2C2C2E)),
+                        .background(LocketAvatarBg),
                     contentAlignment = Alignment.Center
                 ) {
                     if (friend.avatarUrl.isNotBlank()) {
@@ -311,7 +290,7 @@ fun ChatDetailScreen(
                                         .fillMaxWidth()
                                         .aspectRatio(1.0f)
                                         .clip(RoundedCornerShape(42.dp))
-                                        .background(Color(0xFF1E1E1E))
+                                        .background(LocketSheetSurface)
                                         .combinedClickable(
                                             onClick = {},
                                             onLongClick = { reactingTo = msg }
@@ -436,6 +415,7 @@ fun ChatDetailScreen(
             // Composer: a compact pill with real quick emoji sending.
             Row(
                 modifier = Modifier.fillMaxWidth()
+                    .background(bottomChrome)
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .clip(RoundedCornerShape(34.dp)).background(composerColor)
                     .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
@@ -505,7 +485,7 @@ fun ChatDetailScreen(
         val myReaction = target.reactions.firstOrNull { it.senderUid == myUid }
         AlertDialog(
             onDismissRequest = { reactingTo = null; menuConfirm = null },
-            containerColor = Color(0xFF1E1E22),
+            containerColor = LocketModalBg,
             title = {
                 Text(
                     text = when (menuConfirm) {
@@ -576,7 +556,7 @@ fun ChatDetailScreen(
                                     .clickable { menuConfirm = "delete" }
                                     .padding(vertical = 10.dp)
                             ) {
-                                Text("Xóa tin nhắn", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                                Text("Xóa tin nhắn", color = LocketRed, fontSize = 16.sp)
                             }
                         } else {
                             Row(
@@ -585,7 +565,7 @@ fun ChatDetailScreen(
                                     .clickable { menuConfirm = "report" }
                                     .padding(vertical = 10.dp)
                             ) {
-                                Text("Báo cáo tin nhắn", color = Color(0xFFFF6B6B), fontSize = 16.sp)
+                                Text("Báo cáo tin nhắn", color = LocketRed, fontSize = 16.sp)
                             }
                         }
                         if (myReaction != null) {
@@ -646,7 +626,7 @@ fun ChatDetailScreen(
                             )
                         }
                     }) {
-                        Text("Thu hồi", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                        Text("Thu hồi", color = LocketRed, fontWeight = FontWeight.Bold)
                     }
                     "report" -> TextButton(onClick = {
                         val convId = activeConversationId
@@ -671,7 +651,7 @@ fun ChatDetailScreen(
                             )
                         }
                     }) {
-                        Text("Báo cáo", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                        Text("Báo cáo", color = LocketRed, fontWeight = FontWeight.Bold)
                     }
                     else -> {}
                 }
@@ -695,7 +675,7 @@ private fun MessageBubble(msg: ChatMessage, bubbleColor: Color, onLongClick: () 
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(28.dp))
-                .background(if (msg.isMe) Color.White else bubbleColor)
+                .background(if (msg.isMe) LocketChatSent else bubbleColor)
                 .combinedClickable(onClick = {}, onLongClick = onLongClick)
                 .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
@@ -724,7 +704,7 @@ private fun ReactionRow(reactions: List<com.locket.app.model.MessageReaction>) {
 
 @Composable
 private fun ChatAvatar(url: String, sizeDp: Int) {
-    Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(Color(0xFF353535)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(LocketAvatarBg), contentAlignment = Alignment.Center) {
         if (url.isNotBlank()) {
             AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
@@ -743,30 +723,4 @@ private fun chatMomentAge(timestamp: Long): String {
         minutes < 10080 -> "${minutes / 1440}d"
         else -> "${minutes / 10080}w"
     }
-}
-
-// Sample the actual shared photo on a small bitmap, emphasizing colored pixels.
-private fun chatPhotoTint(bitmap: android.graphics.Bitmap): Color {
-    var red = 0f
-    var green = 0f
-    var blue = 0f
-    var total = 0f
-    for (y in 0 until bitmap.height step 2) {
-        for (x in 0 until bitmap.width step 2) {
-            val pixel = bitmap.getPixel(x, y)
-            val r = android.graphics.Color.red(pixel) / 255f
-            val g = android.graphics.Color.green(pixel) / 255f
-            val b = android.graphics.Color.blue(pixel) / 255f
-            val weight = 0.15f + (maxOf(r, g, b) - minOf(r, g, b)) * 2f
-            red += r * weight
-            green += g * weight
-            blue += b * weight
-            total += weight
-        }
-    }
-    if (total <= 0f) return LocketBlack
-    val max = maxOf(red, green, blue) / total
-    if (max < 0.04f) return LocketBlack
-    val scale = 0.25f / (max * total)
-    return Color(red * scale, green * scale, blue * scale)
 }

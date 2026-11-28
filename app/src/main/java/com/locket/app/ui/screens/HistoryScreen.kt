@@ -44,8 +44,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.material.icons.filled.AccessTime
 import coil.request.ImageRequest
 import androidx.compose.ui.graphics.Color
@@ -171,7 +169,7 @@ fun HistoryScreen(
             if (historyError != null) {
                 item(key = "history-error") {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(historyError.orEmpty(), color = Color(0xFFFF6B6B), fontSize = 13.sp)
+                        Text(historyError.orEmpty(), color = LocketRed, fontSize = 13.sp)
                         TextButton(onClick = { viewModel.loadOwnHistory() }) { Text("Thử lại", color = LocketYellow) }
                     }
                 }
@@ -182,7 +180,7 @@ fun HistoryScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
-                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = Color(0xD91E1E20))
+                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = LocketPillBg)
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -216,7 +214,7 @@ fun HistoryScreen(
             Text("Kỷ niệm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
             Box(Modifier.align(Alignment.CenterEnd).size(46.dp).clip(CircleShape)
-                .background(Color(0xFF2C2C2E)).clickable(onClick = onOpenProfile),
+                .background(LocketAvatarBg).clickable(onClick = onOpenProfile),
                 contentAlignment = Alignment.Center) {
                 if (currentUser.profilePictureUrl.isNotBlank()) {
                     AsyncImage(currentUser.profilePictureUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -278,10 +276,10 @@ private fun MonthCardDynamic(
     val rows = (offset + monthData.daysCount + 6) / 7
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 24.dp)
-            .clip(RoundedCornerShape(24.dp)).background(Color(0xFF141416))
+            .clip(RoundedCornerShape(24.dp)).background(LocketSheetBg)
     ) {
         Text(monthData.monthTitle, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.fillMaxWidth().background(Color(0xFF242424)).padding(horizontal = 16.dp, vertical = 12.dp))
+            modifier = Modifier.fillMaxWidth().background(LocketSheetBg).padding(horizontal = 16.dp, vertical = 12.dp))
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(rows) { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -302,9 +300,9 @@ private fun MonthCardDynamic(
                                 !valid -> Unit
                                 ownMoment != null -> AsyncImage(ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                     .data(ownMoment.thumbnailUrl).size((androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)).build(), null,
-                                    Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF292929))
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(LocketJournalDayBg)
                                         .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop,
-                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303030)))
+                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(LocketSheetSurface))
                                 isLoading && !future -> {
                                     val phase = (shimmer * 2f - (row * 7 + col) / 35f).coerceIn(0f, 1f)
                                     val intensity = (1f - kotlin.math.abs(phase * 2f - 1f)) * 0.55f
@@ -312,13 +310,13 @@ private fun MonthCardDynamic(
                                         .background(androidx.compose.ui.graphics.lerp(Color(0xFF191919), Color(0xFF343434), intensity)))
                                 }
                                 today -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF3B2D11)).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
+                                    .background(LocketGoldBanner).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
                                     .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = LocketYellow, modifier = Modifier.size(24.dp))
                                 }
-                                future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(Color(0xFF262626)))
+                                future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(LocketJournalDayBg))
                                 holiday != null -> Text(holiday, fontSize = 20.sp)
-                                else -> Box(Modifier.size(11.dp).background(Color(0xFF303030), CircleShape))
+                                else -> Box(Modifier.size(11.dp).background(LocketSheetSurface, CircleShape))
                             }
                         }
                     }
@@ -553,13 +551,13 @@ fun MemoryDetailDialog(
                 shareOnly = onDelete == null, compact = true)
         }
         if (delete && onDelete != null) {
-            AlertDialog(onDismissRequest = { if (!deleting) delete = false },
+            AlertDialog(onDismissRequest = { if (!deleting) delete = false }, containerColor = LocketModalBg,
                 title = { Text(if (active.videoUrl.isNullOrBlank()) "Xóa ảnh?" else "Xóa video?") },
                 text = { Text("Chỉ xóa khỏi lịch sử của bạn hoặc xóa cho mọi người.") },
                 confirmButton = { TextButton(enabled = !deleting, onClick = {
                     deleting = true
                     onDelete(active, true) { deleting = false; delete = false }
-                }) { Text("Xóa cho mọi người", color = Color(0xFFFF6B6B)) } },
+                }) { Text("Xóa cho mọi người", color = LocketRed) } },
                 dismissButton = { TextButton(enabled = !deleting, onClick = {
                     deleting = true
                     onDelete(active, false) { deleting = false; delete = false }
@@ -569,21 +567,5 @@ fun MemoryDetailDialog(
 }
 
 
-/** Blur the actual image on a tiny layer before stretching it to the viewer.
- * This gives an even backdrop without extracting a palette or blurring a full-screen buffer. */
 @Composable
-private fun MemoryBackdrop(url: String) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val request = remember(url, context) {
-        ImageRequest.Builder(context).data(url).size(12).allowHardware(false).crossfade(false).build()
-    }
-    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
-        val sx = maxWidth / 48.dp
-        val sy = maxHeight / 48.dp
-        AsyncImage(request, null, Modifier.align(Alignment.Center).size(48.dp)
-            .graphicsLayer { scaleX = sx; scaleY = sy }
-            .blur(25.dp, edgeTreatment = BlurredEdgeTreatment.Rectangle),
-            contentScale = ContentScale.FillBounds)
-        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
-    }
-}
+private fun MemoryBackdrop(url: String) = MomentBackdrop(url)

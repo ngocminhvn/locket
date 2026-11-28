@@ -320,7 +320,7 @@ class LocketViewModel(
         val nearby = (-3..3).mapNotNull { moments.getOrNull(currentIndex + it) }
         val urls = nearby.map { it.thumbnailUrl }
         prefetchThumbnails(urls, sizePx)
-        prefetchThumbnails(urls, 12)
+        prefetchThumbnails(urls, 16)
         // Existing adjacent video cache, bounded to the same neighborhood.
         prefetchUpcomingMoments(moments, currentIndex, count = 3)
     }

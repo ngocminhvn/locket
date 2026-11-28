@@ -14,8 +14,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clipToBounds
 import coil.request.ImageRequest
 import androidx.compose.foundation.layout.*
@@ -203,7 +201,7 @@ fun HomeMomentScreen(
                                 translationX = pan.x; translationY = pan.y
                             } else Modifier),
                         contentScale = ContentScale.Crop,
-                        error = ColorPainter(Color(0xFF252527)),
+                        error = ColorPainter(LocketJournalDayBg),
                         onLoading = { imageLoading = true },
                         onSuccess = { imageLoading = false },
                         onError = { imageLoading = false }
@@ -264,7 +262,7 @@ fun HomeMomentScreen(
                         modifier = Modifier
                             .size(27.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF2C2C2E)),
+                            .background(LocketAvatarBg),
                         contentAlignment = Alignment.Center
                     ) {
                         if (currentMoment.userAvatarUrl.isNotBlank()) {
@@ -321,7 +319,7 @@ fun HomeMomentScreen(
             val firstName = moment.userName.trim().substringBefore(' ').ifBlank { moment.userUid }
             AlertDialog(
                 onDismissRequest = { menuAction = null },
-                containerColor = Color(0xFF1E1E22),
+                containerColor = LocketModalBg,
                 title = {
                     Text(
                         text = when (menuAction) {
@@ -396,7 +394,7 @@ fun HomeMomentScreen(
                                     }
                                 )
                             }) {
-                                Text("Xóa cho mọi người", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                                Text("Xóa cho mọi người", color = LocketRed, fontWeight = FontWeight.Bold)
                             }
                         }
                         "report" -> TextButton(onClick = {
@@ -412,7 +410,7 @@ fun HomeMomentScreen(
                                 }
                             )
                         }) {
-                            Text("Báo cáo", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                            Text("Báo cáo", color = LocketRed, fontWeight = FontWeight.Bold)
                         }
                         "hide" -> TextButton(onClick = {
                             viewModel.hideFriend(
@@ -427,7 +425,7 @@ fun HomeMomentScreen(
                                 }
                             )
                         }) {
-                            Text("Ẩn", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                            Text("Ẩn", color = LocketRed, fontWeight = FontWeight.Bold)
                         }
                         "block" -> TextButton(onClick = {
                             viewModel.blockFriend(
@@ -442,7 +440,7 @@ fun HomeMomentScreen(
                                 }
                             )
                         }) {
-                            Text("Chặn", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold)
+                            Text("Chặn", color = LocketRed, fontWeight = FontWeight.Bold)
                         }
                         else -> {}
                     }
@@ -616,31 +614,19 @@ internal fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 
-/** Actual moment pixels, not a sampled dominant color. No per-frame CPU work. */
+/** Shared real-image backdrop: tiny decoded pixels, bilinear scaling, and BLACK80.
+ * No full-screen GPU blur or color extraction. Same path on all Android versions. */
 @Composable
 internal fun MomentBackdrop(url: String) {
     val context = LocalContext.current
-    val nativeBlur = android.os.Build.VERSION.SDK_INT >= 31
-    val request = remember(url, context, nativeBlur) {
-        ImageRequest.Builder(context).data(url)
-            .size(if (nativeBlur) 160 else 12)
-            .allowHardware(nativeBlur)
-            .crossfade(false)
-            .build()
+    val request = remember(url, context) {
+        ImageRequest.Builder(context).data(url).size(16).allowHardware(false).crossfade(false).build()
     }
-    Box(Modifier.fillMaxSize().clipToBounds()) {
-        AsyncImage(
-            model = request,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize()
-                .scale(1.12f)
-                .blur(25.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
-            contentScale = ContentScale.Crop
-        )
+    Box(Modifier.fillMaxSize().clipToBounds().background(LocketMomentGround)) {
+        AsyncImage(request, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
         Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
     }
 }
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -676,7 +662,7 @@ internal fun OwnMomentActivityBar(viewModel: LocketViewModel, moment: Moment) {
     if (open && showViews) {
         ModalBottomSheet(onDismissRequest = { open = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color(0xFF262626),
+            containerColor = LocketSheetBg,
             shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp)) {
             Box(Modifier.fillMaxWidth().clipToBounds()) {
                 Box(Modifier.matchParentSize()) {
@@ -710,7 +696,7 @@ internal fun OwnMomentActivityBar(viewModel: LocketViewModel, moment: Moment) {
                                 }
                             }
                         }
-                        errors[moment.id]?.let { Text("Không làm mới được: $it", color = Color(0xFFFFAAAA), fontSize = 12.sp,
+                        errors[moment.id]?.let { Text("Không làm mới được: $it", color = LocketRed, fontSize = 12.sp,
                             modifier = Modifier.padding(12.dp)) }
                     }
                 }
@@ -721,7 +707,7 @@ internal fun OwnMomentActivityBar(viewModel: LocketViewModel, moment: Moment) {
 
 @Composable
 private fun ViewerAvatar(viewer: Friend, size: Dp) {
-    Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF414141)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).background(LocketAvatarBg), contentAlignment = Alignment.Center) {
         if (viewer.avatarUrl.isNotBlank()) {
             AsyncImage(viewer.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {

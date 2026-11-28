@@ -22,8 +22,8 @@ fun Modifier.liquidGlassEffect(
     .background(
         brush = Brush.verticalGradient(
             colors = listOf(
-                backgroundColor.copy(alpha = 0.85f),
-                backgroundColor.copy(alpha = 0.70f)
+                backgroundColor,
+                backgroundColor.copy(alpha = if (backgroundColor == LocketPillBg) backgroundColor.alpha else backgroundColor.alpha * 0.90f)
             )
         ),
         shape = shape

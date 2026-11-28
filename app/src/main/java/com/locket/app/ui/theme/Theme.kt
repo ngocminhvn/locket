@@ -15,14 +15,16 @@ import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
     primary = LocketYellow,
-    onPrimary = Color.Black,
+    onPrimary = LocketOnYellow,
     secondary = LocketYellow,
-    onSecondary = Color.Black,
+    onSecondary = LocketOnYellow,
     background = LocketBlack,
     onBackground = LocketTextWhite,
     surface = LocketDarkGray,
     onSurface = LocketTextWhite,
     surfaceVariant = LocketCardGray,
+    error = LocketRed,
+    onError = Color.Black,
     onSurfaceVariant = LocketTextDim
 )
 

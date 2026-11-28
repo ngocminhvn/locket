@@ -147,7 +147,7 @@ fun LocketTopBar(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(CircleShape)
-                    .background(Color(0xFF2C2C2E))
+                    .background(LocketAvatarBg)
             ) {
                 if (avatarUrl.isNotBlank()) {
                     AsyncImage(
@@ -226,7 +226,7 @@ fun FeedBottomBar(
     showSideActions: Boolean = true
 ) {
     if (separated) {
-        val surface = Color.White.copy(alpha = 0.10f)
+        val surface = LocketPillBg
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
@@ -239,7 +239,7 @@ fun FeedBottomBar(
                 }
             } else Spacer(Modifier.size(54.dp))
             Row(
-                Modifier.weight(1f).height(54.dp).clip(CircleShape).background(surface).padding(horizontal = 4.dp),
+                Modifier.weight(1f).height(54.dp).liquidGlassEffect(CircleShape, surface).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -349,7 +349,7 @@ fun FriendFilterSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E20),
+        containerColor = LocketSheetBg,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = {
             Box(
@@ -382,13 +382,13 @@ fun FriendFilterSheet(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(if (selectedFriend == null) LocketYellow else Color(0xFF2C2C2E)),
+                        .background(if (selectedFriend == null) LocketYellow else LocketAvatarBg),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.People,
                         contentDescription = null,
-                        tint = if (selectedFriend == null) Color.Black else Color.White,
+                        tint = if (selectedFriend == null) LocketOnYellow else Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -443,7 +443,7 @@ fun FriendFilterSheet(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF2C2C2E)),
+                                .background(LocketAvatarBg),
                             contentAlignment = Alignment.Center
                         ) {
                             if (friend.avatarUrl.isNotBlank()) {
