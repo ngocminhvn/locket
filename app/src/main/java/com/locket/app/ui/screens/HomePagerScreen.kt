@@ -28,6 +28,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.model.Friend
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlin.math.abs
@@ -203,6 +204,23 @@ fun HomePagerScreen(
                 if (target != current) viewModel.prefetchUpcomingMoments(moments, target - 1, count = 5, forward = forward)
                 previous = current
             }
+    }
+
+    LaunchedEffect(tabActive, pagerState, moments) {
+        if (!tabActive) return@LaunchedEffect
+        var previous = pagerState.settledPage
+        snapshotFlow { pagerState.currentPage to pagerState.targetPage }.collectLatest { (current, target) ->
+            if (current == 0 && target == 0) {
+                previous = 0
+                return@collectLatest
+            }
+            val direction = if (target != current) target - current else current - previous
+            val step = if (direction < 0) -1 else 1
+            previous = current
+            val anchor = if (target != current) target else current + step
+            prefetchAmbientPalettes(context.applicationContext,
+                listOf(anchor, anchor + step).mapNotNull { moments.getOrNull(it - 1)?.thumbnailUrl })
+        }
     }
 
     // Prefetch before the last cached image; a dedicated trailing page stays

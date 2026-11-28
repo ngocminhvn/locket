@@ -63,49 +63,79 @@ internal fun extractMomentColor(bitmap: Bitmap): Color {
     val height = bitmap.height
     val pixels = IntArray(width * height)
     bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-    val bins = 24
-    val weights = DoubleArray(bins)
-    val reds = DoubleArray(bins)
-    val greens = DoubleArray(bins)
-    val blues = DoubleArray(bins)
+    return sampleMomentColors(pixels, width, height, listOf(0 until height)).single()
+}
+
+/** Each pixel's hue and weight are shared by all regions that contain it. */
+internal fun sampleMomentColors(
+    pixels: IntArray, width: Int, height: Int, rows: List<IntRange>
+): List<Color> {
+    val accumulators = rows.map { MomentColorAccumulator() }
     val hsv = FloatArray(3)
-    var count = 0
-    var sumR = 0L
-    var sumG = 0L
-    var sumB = 0L
-    pixels.forEach { pixel ->
-        if (AndroidColor.alpha(pixel) < 128) return@forEach
-        val r = AndroidColor.red(pixel)
-        val g = AndroidColor.green(pixel)
-        val b = AndroidColor.blue(pixel)
+    val active = IntArray(rows.size)
+    for (y in 0 until height) {
+        var activeCount = 0
+        for (region in rows.indices) {
+            if (y in rows[region]) active[activeCount++] = region
+        }
+        for (x in 0 until width) {
+            val pixel = pixels[y * width + x]
+            if (AndroidColor.alpha(pixel) < 128) continue
+            val r = AndroidColor.red(pixel)
+            val g = AndroidColor.green(pixel)
+            val b = AndroidColor.blue(pixel)
+            val max = maxOf(r, g, b)
+            val chroma = (max - minOf(r, g, b)) / 255.0
+            val weight = if (max >= 38 && chroma >= 0.025) chroma * sqrt(chroma) else 0.0
+            val bin = if (weight > 0.0) {
+                AndroidColor.colorToHSV(pixel, hsv)
+                (hsv[0] / 15f).toInt().coerceIn(0, 23)
+            } else 0
+            for (i in 0 until activeCount) accumulators[active[i]].add(r, g, b, bin, weight)
+        }
+    }
+    return accumulators.map { it.color() }
+}
+
+private class MomentColorAccumulator {
+    private val bins = 24
+    private val weights = DoubleArray(bins)
+    private val reds = DoubleArray(bins)
+    private val greens = DoubleArray(bins)
+    private val blues = DoubleArray(bins)
+    private var count = 0
+    private var sumR = 0L
+    private var sumG = 0L
+    private var sumB = 0L
+
+    fun add(r: Int, g: Int, b: Int, bin: Int, weight: Double) {
         count++
-        sumR += r; sumG += g; sumB += b
-        val max = maxOf(r, g, b)
-        val min = minOf(r, g, b)
-        val chroma = (max - min) / 255.0
-        if (max < 38 || chroma < 0.025) return@forEach
-        AndroidColor.colorToHSV(pixel, hsv)
-        val bin = (hsv[0] / 15f).toInt().coerceIn(0, bins - 1)
-        val w = chroma * sqrt(chroma)
-        weights[bin] += w
-        reds[bin] += r * w
-        greens[bin] += g * w
-        blues[bin] += b * w
+        sumR += r
+        sumG += g
+        sumB += b
+        if (weight == 0.0) return
+        weights[bin] += weight
+        reds[bin] += r * weight
+        greens[bin] += g * weight
+        blues[bin] += b * weight
     }
-    if (count == 0) return BackdropFallbackTint
-    if (weights.sum() / count < 0.003) {
-        return Color((sumR / count).toInt(), (sumG / count).toInt(), (sumB / count).toInt())
+
+    fun color(): Color {
+        if (count == 0) return BackdropFallbackTint
+        if (weights.sum() / count < 0.003) {
+            return Color((sumR / count).toInt(), (sumG / count).toInt(), (sumB / count).toInt())
+        }
+        fun neighborhood(values: DoubleArray, bin: Int): Double =
+            values[bin] + 0.65 * (values[(bin + bins - 1) % bins] + values[(bin + 1) % bins])
+        val best = (0 until bins).maxByOrNull { neighborhood(weights, it) } ?: return BackdropFallbackTint
+        val weight = neighborhood(weights, best)
+        if (weight <= 0.0) return BackdropFallbackTint
+        return Color(
+            (neighborhood(reds, best) / weight).toInt().coerceIn(0, 255),
+            (neighborhood(greens, best) / weight).toInt().coerceIn(0, 255),
+            (neighborhood(blues, best) / weight).toInt().coerceIn(0, 255)
+        )
     }
-    fun neighborhood(values: DoubleArray, bin: Int): Double =
-        values[bin] + 0.65 * (values[(bin + bins - 1) % bins] + values[(bin + 1) % bins])
-    val best = (0 until bins).maxByOrNull { neighborhood(weights, it) } ?: return BackdropFallbackTint
-    val weight = neighborhood(weights, best)
-    if (weight <= 0.0) return BackdropFallbackTint
-    return Color(
-        (neighborhood(reds, best) / weight).toInt().coerceIn(0, 255),
-        (neighborhood(greens, best) / weight).toInt().coerceIn(0, 255),
-        (neighborhood(blues, best) / weight).toInt().coerceIn(0, 255)
-    )
 }
 
 /** The original JS interpolates RGB with gamma=1, not perceptual color space. */

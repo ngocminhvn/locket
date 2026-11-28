@@ -17,13 +17,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.locket.app.ui.theme.LocketBlack
-import com.locket.app.ui.theme.extractMomentColor
+import com.locket.app.ui.theme.sampleMomentColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal data class AmbientPalette(val top: Color, val middle: Color, val bottom: Color) {
     fun brush(): Brush = Brush.verticalGradient(0f to top, 0.48f to middle, 1f to bottom)
@@ -49,6 +52,33 @@ internal enum class AmbientMode(val strength: Float, val durationMs: Int, val ea
     ACTIVITY(0.74f, 220, ambientQuadOut)
 }
 private val paletteCache = LruCache<String, AmbientPalette>(128)
+private val paletteLoad = Mutex()
+
+private suspend fun loadAmbientPalette(context: android.content.Context, url: String, cacheOnly: Boolean): AmbientPalette? =
+    paletteCache.get(url) ?: paletteLoad.withLock {
+        paletteCache.get(url) ?: try {
+            val result = withContext(Dispatchers.IO) {
+                val request = ImageRequest.Builder(context).data(url)
+                    .size(64).allowHardware(false).crossfade(false)
+                    .networkCachePolicy(if (cacheOnly) CachePolicy.DISABLED else CachePolicy.ENABLED)
+                    .build()
+                context.imageLoader.execute(request) as? SuccessResult
+            }
+            withContext(Dispatchers.Default) {
+                result?.drawable?.toBitmap(64, 64, Bitmap.Config.ARGB_8888)?.let(::makeAmbientPalette)
+            }?.also { paletteCache.put(url, it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+internal suspend fun prefetchAmbientPalettes(context: android.content.Context, urls: List<String>) {
+    for (url in urls.filter { it.isNotBlank() }.distinct().take(2)) {
+        loadAmbientPalette(context, url, cacheOnly = true)
+    }
+}
 
 /**
  * Shared three-tone ambient gradient. Sample overlapping horizontal regions
@@ -63,19 +93,7 @@ internal fun rememberAmbientPalette(url: String?, mode: AmbientMode): AmbientPal
         if (url.isNullOrBlank()) {
             palette = neutral
         } else {
-            val next = paletteCache.get(url) ?: withContext(Dispatchers.IO) {
-                try {
-                    val request = ImageRequest.Builder(context).data(url)
-                        .size(64).allowHardware(false).crossfade(false).build()
-                    val result = context.imageLoader.execute(request) as? SuccessResult
-                    result?.drawable?.toBitmap(64, 64, Bitmap.Config.ARGB_8888)
-                        ?.let(::makeAmbientPalette)?.also { paletteCache.put(url, it) }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-            }
+            val next = loadAmbientPalette(context, url, cacheOnly = false)
             if (next != null) palette = next
         }
     }
@@ -97,17 +115,19 @@ internal fun AmbientBackground(url: String?, mode: AmbientMode) {
 }
 
 private fun makeAmbientPalette(bitmap: Bitmap): AmbientPalette {
-    // Overlap thirds to reduce abrupt hue changes and to keep the actual
-    // spatial distribution of the photograph. The shared extractor is
-    // unchanged; only the Home colors receive the following tone mapping.
-    val global = extractMomentColor(bitmap)
-    fun band(start: Int, end: Int, edge: Boolean): Color {
-        val from = start * bitmap.height / 100
-        val until = (end * bitmap.height / 100).coerceAtLeast(from + 1)
-        val crop = Bitmap.createBitmap(bitmap, 0, from, bitmap.width, until - from)
-        val local = try { extractMomentColor(crop) } finally {
-            if (crop !== bitmap) crop.recycle()
-        }
+    val width = bitmap.width
+    val height = bitmap.height
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    fun rows(start: Int, end: Int): IntRange {
+        val from = start * height / 100
+        val endExclusive = (end * height / 100).coerceAtLeast(from + 1)
+        return from until endExclusive
+    }
+    val (global, top, middle, bottom) = sampleMomentColors(
+        pixels, width, height, listOf(0 until height, rows(0, 45), rows(25, 75), rows(55, 100))
+    )
+    fun band(local: Color, edge: Boolean): Color {
         val hsl = FloatArray(3)
         fun channel(a: Float, b: Float) = ((a * 0.78f + b * 0.22f) * 255f).toInt().coerceIn(0, 255)
         ColorUtils.RGBToHSL(channel(local.red, global.red), channel(local.green, global.green),
@@ -121,5 +141,5 @@ private fun makeAmbientPalette(bitmap: Bitmap): AmbientPalette {
                   else 0.105f + 0.12f * lightness).coerceIn(0.075f, 0.225f)
         return Color(ColorUtils.HSLToColor(hsl))
     }
-    return AmbientPalette(band(0, 45, true), band(25, 75, false), band(55, 100, true))
+    return AmbientPalette(band(top, true), band(middle, false), band(bottom, true))
 }
