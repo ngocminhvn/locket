@@ -307,7 +307,7 @@ class MainActivity : ComponentActivity() {
                                 if (failure.mayHavePosted) Text("Kiểm tra lịch sử trước khi gửi lại để tránh đăng trùng.")
                                 Row(Modifier.align(Alignment.End)) {
                                     TextButton(onClick = { viewModel.discardMomentUpload(failure.id) }) { Text("Bỏ") }
-                                    TextButton(onClick = { viewModel.retryMomentUpload(failure.id) }) { Text("Gửi lại") }
+                                    TextButton(onClick = { viewModel.retryMomentUpload(failure.id) }) { Text(if (failure.mayHavePosted) "Vẫn gửi lại" else "Gửi lại") }
                                 }
                             }
                         }

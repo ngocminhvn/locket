@@ -674,6 +674,7 @@ fun CameraScreen(
         val prepared = remember(bitmap, isPhoto) {
             if (isPhoto) viewModel.prepareMomentThumbnail(bitmap) else null
         }
+        var persistingUpload by remember(bitmap) { mutableStateOf(false) }
         val transferred = remember(bitmap) { booleanArrayOf(false) }
         DisposableEffect(prepared) {
             onDispose { if (!transferred[0]) prepared?.cancel() }
@@ -720,27 +721,29 @@ fun CameraScreen(
             friends = friends,
             replyToFriend = replyToFriend,
             streak = ownStreak,
-            isPosting = false,
+            isPosting = persistingUpload,
             onCancel = {
                 clearCapture()
                 viewModel.setReplyToFriend(null)
             },
             onSend = { caption, recipients ->
-                if (viewModel.enqueueMoment(
-                        bitmap = bitmap,
-                        videoFile = capturedVideo,
-                        preparedThumbnail = prepared,
-                        caption = caption,
-                        recipients = recipients
-                    )) {
-                    // Transfer ownership before removing the review from Compose.
-                    transferred[0] = true
-                    capturedVideo = null
-                    clearCapture()
-                    viewModel.setReplyToFriend(null)
-                    Toast.makeText(context, "Đã thêm vào hàng đợi gửi", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Hàng đợi đầy hoặc chưa đăng nhập", Toast.LENGTH_SHORT).show()
+                if (!persistingUpload) {
+                    persistingUpload = true
+                    val video = capturedVideo
+                    scope.launch {
+                        try {
+                            if (viewModel.enqueueMoment(bitmap, caption, recipients, video, prepared)) {
+                                // Only dismiss after the exact upload payload is durable.
+                                transferred[0] = true
+                                clearCapture()
+                                viewModel.setReplyToFriend(null)
+                                Toast.makeText(context, "Đã thêm vào hàng đợi gửi", Toast.LENGTH_SHORT).show()
+                            } else Toast.makeText(context, "Hàng đợi đầy hoặc chưa đăng nhập", Toast.LENGTH_SHORT).show()
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) {
+                            Toast.makeText(context, e.message ?: "Không lưu được hàng đợi", Toast.LENGTH_LONG).show()
+                        } finally { persistingUpload = false }
+                    }
                 }
             }
         )

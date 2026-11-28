@@ -493,8 +493,9 @@ class LocketViewModel(
                 apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
                 cacheHydrated = true
                 prefetchUpcomingMoments(_moments.value, -1)
+                restoreMomentUploads()
                 syncAllData()
-            } else { cacheHydrated = true; if (_isLoggedIn.value) syncAllData() }
+            } else { cacheHydrated = true; if (_isLoggedIn.value) { restoreMomentUploads(); syncAllData() } }
         }
     }
 
@@ -979,23 +980,12 @@ class LocketViewModel(
     // Real pending work, independent from camera/review composables. Never
     // inject a synthetic posted moment into the feed.
     data class MomentUploadFailure(val id: Long, val message: String, val mayHavePosted: Boolean)
-    private data class QueuedMoment(
-        val id: Long,
-        val owner: String,
-        val bitmap: Bitmap,
-        val video: File?,
-        val prepared: Deferred<ByteArray>?,
-        val caption: String,
-        val recipients: List<String>,
-        var bytes: ByteArray? = null,
-        var thumbnailUrl: String? = null,
-        var md5: String? = null,
-        var videoUrl: String? = null,
-        var attemptedPost: Boolean = false
-    )
-    private val pendingUploads = ArrayDeque<QueuedMoment>()
-    private val failedUploads = linkedMapOf<Long, QueuedMoment>()
-    private var activeUpload: QueuedMoment? = null
+    private val uploadStore by lazy { MomentUploadStore(LocketApplication.instance.filesDir) }
+    private val uploadRestoreLock = Mutex()
+    private var restoredUploadOwner: String? = null
+    private val pendingUploads = ArrayDeque<StoredMomentUpload>()
+    private val failedUploads = linkedMapOf<Long, StoredMomentUpload>()
+    private var activeUpload: StoredMomentUpload? = null
     private var uploadJob: Job? = null
     private var uploadSequence = 0L
     private val _momentUploadFailures = MutableStateFlow<List<MomentUploadFailure>>(emptyList())
@@ -1004,40 +994,103 @@ class LocketViewModel(
     internal fun prepareMomentThumbnail(bitmap: Bitmap): Deferred<ByteArray> =
         viewModelScope.async(Dispatchers.Default) { encodeMomentThumbnail(bitmap) }
 
-    internal fun enqueueMoment(
+    private suspend fun restoreUploadsLocked(owner: String) {
+        if (restoredUploadOwner == owner || !activeAccount(owner)) return
+        val saved = withContext(Dispatchers.IO) { uploadStore.read(owner) }
+        if (!activeAccount(owner)) return
+        restoredUploadOwner = owner
+        for (item in saved) {
+            uploadSequence = maxOf(uploadSequence, item.id)
+            if (item.attemptedPost || item.failure != null) {
+                failedUploads[item.id] = item
+                _momentUploadFailures.update { it + MomentUploadFailure(item.id,
+                    item.failure ?: "Ứng dụng bị đóng khi đang xác nhận đăng ảnh.", item.attemptedPost) }
+            } else pendingUploads.addLast(item)
+        }
+        drainMomentUploads()
+    }
+
+    private fun restoreMomentUploads() {
+        val owner = sessionManager.currentUser.uid
+        if (owner.isBlank() || !activeAccount(owner)) return
+        viewModelScope.launch {
+            uploadRestoreLock.withLock { restoreUploadsLocked(owner) }
+        }
+    }
+
+    internal suspend fun enqueueMoment(
         bitmap: Bitmap,
         caption: String,
         recipients: List<String>,
         videoFile: File?,
         preparedThumbnail: Deferred<ByteArray>?
-    ): Boolean {
+    ): Boolean = uploadRestoreLock.withLock {
         val owner = sessionManager.currentUser.uid
-        if (owner.isBlank() || !activeAccount(owner) ||
-            pendingUploads.size + failedUploads.size + (if (activeUpload != null) 1 else 0) >= 8) return false
-        pendingUploads.addLast(QueuedMoment(++uploadSequence, owner, bitmap, videoFile,
-            preparedThumbnail, caption, recipients.toList()))
+        if (owner.isBlank() || !activeAccount(owner)) return@withLock false
+        restoreUploadsLocked(owner)
+        if (!activeAccount(owner) ||
+            pendingUploads.size + failedUploads.size + (if (activeUpload != null) 1 else 0) >= 8) return@withLock false
+        val bytes = if (videoFile == null) {
+            try { preparedThumbnail?.await() ?: withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) } }
+        } else withContext(Dispatchers.Default) {
+            ByteArrayOutputStream().use { stream ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
+                stream.toByteArray()
+            }
+        }
+        if (!activeAccount(owner)) return@withLock false
+        uploadSequence = maxOf(uploadSequence + 1, System.currentTimeMillis())
+        val item = withContext(Dispatchers.IO) {
+            uploadStore.create(uploadSequence, owner, bytes, videoFile, caption, recipients.toList())
+        }
+        if (!activeAccount(owner)) {
+            withContext(Dispatchers.IO) { uploadStore.remove(item) }
+            return@withLock false
+        }
+        pendingUploads.addLast(item)
         drainMomentUploads()
-        return true
+        true
     }
 
     fun retryMomentUpload(id: Long) {
-        val item = failedUploads[id] ?: return
-        if (!activeAccount(item.owner)) return
-        failedUploads.remove(id)
-        _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
-        pendingUploads.addLast(item)
-        drainMomentUploads()
+        viewModelScope.launch {
+            uploadRestoreLock.withLock {
+                val item = failedUploads[id] ?: return@withLock
+                if (!activeAccount(item.owner)) return@withLock
+                // A retry is explicit. Keep the attemptedPost marker until a
+                // successful server response, so a second interruption is safe.
+                try {
+                    item.failure = null
+                    withContext(Dispatchers.IO) { uploadStore.save(item) }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    item.failure = e.message ?: "Không lưu được trạng thái gửi lại"
+                    _momentUploadFailures.update { rows -> rows.map { if (it.id == id) it.copy(message = item.failure!!) else it } }
+                    return@withLock
+                }
+                if (!activeAccount(item.owner)) return@withLock
+                failedUploads.remove(id)
+                _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
+                pendingUploads.addLast(item)
+                drainMomentUploads()
+            }
+        }
     }
 
     fun discardMomentUpload(id: Long) {
-        val item = failedUploads.remove(id) ?: return
-        releaseUpload(item)
-        _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
-    }
-
-    private fun releaseUpload(item: QueuedMoment) {
-        item.prepared?.cancel()
-        item.video?.delete()
+        viewModelScope.launch {
+            uploadRestoreLock.withLock {
+                val item = failedUploads[id] ?: return@withLock
+                if (!activeAccount(item.owner)) return@withLock
+                val removed = withContext(Dispatchers.IO) { uploadStore.remove(item) }
+                if (removed) {
+                    failedUploads.remove(id)
+                    _momentUploadFailures.update { list -> list.filterNot { it.id == id } }
+                }
+            }
+        }
     }
 
     private fun drainMomentUploads() {
@@ -1049,59 +1102,58 @@ class LocketViewModel(
                 try {
                     check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
                     uploadQueuedMoment(item)
-                    releaseUpload(item)
+                    // Persist confirmed success before cleanup. Even if deletion
+                    // fails, the confirmed job will never post a second time.
+                    item.confirmed = true
+                    withContext(Dispatchers.IO) {
+                        uploadStore.save(item)
+                        uploadStore.remove(item)
+                    }
                     if (activeAccount(item.owner)) refreshFeed()
                 } catch (e: CancellationException) {
-                    releaseUpload(item)
+                    // The disk journal is intentionally retained on process exit.
                     throw e
                 } catch (e: Exception) {
                     if (activeAccount(item.owner)) {
-                        failedUploads[item.id] = item
-                        _momentUploadFailures.update { list ->
-                            list + MomentUploadFailure(item.id, e.message ?: "Không gửi được khoảnh khắc", item.attemptedPost)
-                        }
-                    } else releaseUpload(item)
-                } finally {
-                    activeUpload = null
-                }
+                        item.failure = e.message ?: "Không gửi được khoảnh khắc"
+                        if (!item.confirmed) {
+                            withContext(Dispatchers.IO) { runCatching { uploadStore.save(item) } }
+                            failedUploads[item.id] = item
+                            _momentUploadFailures.update { list ->
+                                list + MomentUploadFailure(item.id, item.failure!!, item.attemptedPost)
+                            }
+                        } else refreshFeed()
+                    }
+                } finally { activeUpload = null }
             }
         }
     }
 
-    private suspend fun uploadQueuedMoment(item: QueuedMoment) {
+    private suspend fun uploadQueuedMoment(item: StoredMomentUpload) {
         val webp = item.video == null
-        val bytes = item.bytes ?: (if (webp) {
-            try {
-                item.prepared?.await() ?: withContext(Dispatchers.Default) { encodeMomentThumbnail(item.bitmap) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                withContext(Dispatchers.Default) { encodeMomentThumbnail(item.bitmap) }
-            }
-        } else withContext(Dispatchers.Default) {
-            ByteArrayOutputStream().use { stream ->
-                check(item.bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
-                stream.toByteArray()
-            }
-        }).also { item.bytes = it }
-
+        val bytes = withContext(Dispatchers.IO) { item.thumbnail.readBytes() }
         check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         if (item.thumbnailUrl == null) {
             val upload = apiClient.uploadMomentThumbnail(bytes, webp = webp, expectedUid = item.owner)
             check(upload.success && !upload.downloadUrl.isNullOrBlank()) { upload.errorMessage ?: "Lỗi tải ảnh" }
             item.thumbnailUrl = upload.downloadUrl
             item.md5 = upload.md5 ?: apiClient.computeMd5(bytes)
+            withContext(Dispatchers.IO) { uploadStore.save(item) }
         }
         if (item.video != null && item.videoUrl == null) {
             check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
-            val upload = apiClient.uploadMomentVideo(item.video, expectedUid = item.owner)
+            val upload = apiClient.uploadMomentVideo(checkNotNull(item.video), expectedUid = item.owner)
             check(upload.success && !upload.downloadUrl.isNullOrBlank()) { upload.errorMessage ?: "Lỗi tải video" }
             item.videoUrl = upload.downloadUrl
+            withContext(Dispatchers.IO) { uploadStore.save(item) }
         }
         check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         val today = todayYyyymmdd()
         val streak = today.takeIf { sessionManager.streakLastUpdatedYyyymmdd != it }
         item.attemptedPost = true
+        // Write-ahead marker: never blindly retry an ambiguous post after restart.
+        withContext(Dispatchers.IO) { uploadStore.save(item) }
+        check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         val post = apiClient.postMoment(
             thumbnailUrl = checkNotNull(item.thumbnailUrl),
             caption = item.caption,
@@ -1117,10 +1169,9 @@ class LocketViewModel(
 
     private fun clearMomentUploads() {
         uploadJob?.cancel()
-        pendingUploads.forEach(::releaseUpload)
         pendingUploads.clear()
-        failedUploads.values.forEach(::releaseUpload)
         failedUploads.clear()
+        restoredUploadOwner = null
         _momentUploadFailures.value = emptyList()
     }
 
@@ -1635,6 +1686,7 @@ class LocketViewModel(
                 )
                 _currentUser.value = sessionManager.currentUser
                 _isLoggedIn.value = true
+                restoreMomentUploads()
                 syncAllData()
                 onSuccess()
             } else {
@@ -1669,6 +1721,7 @@ class LocketViewModel(
                 )
                 _currentUser.value = sessionManager.currentUser
                 _isLoggedIn.value = true
+                restoreMomentUploads()
                 syncAllData()
                 onSuccess()
             } else {
@@ -1682,12 +1735,22 @@ class LocketViewModel(
         sessionManager.currentUser = sessionManager.currentUser.copy(uid = uid)
         _currentUser.value = sessionManager.currentUser
         _isLoggedIn.value = true
+        restoreMomentUploads()
         syncAllData()
         onSuccess()
     }
 
     fun logout() {
+        val oldOwner = sessionManager.currentUser.uid
+        val oldUploadJob = uploadJob
         clearMomentUploads()
+        // Logout explicitly discards private unsent media for that account.
+        viewModelScope.launch {
+            oldUploadJob?.join()
+            uploadRestoreLock.withLock {
+                withContext(Dispatchers.IO) { uploadStore.clear(oldOwner) }
+            }
+        }
         syncAgain = false
         syncJob?.cancel()
         feedListenJob?.cancel(); feedListenJob = null
