@@ -212,8 +212,7 @@ fun FeedBottomBar(
     separated: Boolean = false,
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
-    unreadConversations: Int = 0,
-    feedMode: Boolean = showSideActions
+    unreadConversations: Int = 0
 ) {
     if (separated) {
         val inactive = Color.White.copy(alpha = 0.52f)
@@ -245,13 +244,7 @@ fun FeedBottomBar(
                     val tint = if (isSelected) Color.White else inactive
                     when (index) {
                         0 -> Icon(Icons.Default.Apps, "Kỷ niệm", tint = tint, modifier = Modifier.size(23.dp))
-                        1 -> if (feedMode) {
-                            Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape), contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(29.dp).background(Color.White, CircleShape))
-                            }
-                        } else {
-                            Icon(Icons.Default.Home, "Camera", tint = tint, modifier = Modifier.size(24.dp))
-                        }
+                        1 -> Icon(Icons.Default.Home, "Trang chủ", tint = tint, modifier = Modifier.size(24.dp))
                         2 -> Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ChatBubble,
                                 if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
