@@ -37,6 +37,8 @@ import com.locket.app.ui.components.FeedBottomBar
 import com.locket.app.ui.screens.*
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
+import com.locket.app.ui.theme.LocalMomentColor
+import com.locket.app.ui.theme.rememberMomentColor
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +81,8 @@ class MainActivity : ComponentActivity() {
                 var selectedGridIndex by remember { mutableStateOf(0) }
                 var activeChatFriend by remember { mutableStateOf<Friend?>(null) }
                 var homeTabSwipeEnabled by remember { mutableStateOf(true) }
+                var lastMomentUrl by remember { mutableStateOf<String?>(null) }
+                val momentColor = rememberMomentColor(lastMomentUrl)
                 val mainTab = when (currentScreen) {
                     "history" -> 0
                     "camera", "feed", "grid" -> 1
@@ -91,6 +95,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(isLoggedIn) {
                     if (!isLoggedIn) {
                         currentScreen = "welcome"
+                        lastMomentUrl = null
                         tabStateHolder.removeState("history")
                         tabStateHolder.removeState("chat")
                     }
@@ -174,6 +179,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            CompositionLocalProvider(LocalMomentColor provides momentColor) {
                             HorizontalPager(
                                 state = pager,
                                 modifier = Modifier.fillMaxSize(),
@@ -214,7 +220,8 @@ class MainActivity : ComponentActivity() {
                                                     homeNavFeed = feed
                                                 },
                                                 cameraRequest = homeCameraRequest,
-                                                shareRequest = homeShareRequest
+                                                shareRequest = homeShareRequest,
+                                                onMomentColorSource = { lastMomentUrl = it }
                                             )
                                         }
                                     }
@@ -256,10 +263,12 @@ class MainActivity : ComponentActivity() {
                                         separated = true,
                                         currentScreen = tabRoutes[pager.settledPage],
                                         showSideActions = homeSettled && homeNavFeed,
-                                        unreadConversations = unreadConversations
+                                        unreadConversations = unreadConversations,
+                                        adaptiveBackground = !homeSettled || homeNavFeed
                                     )
                                 }
                             }
+                            } // LocalMomentColor
                         }
                         else -> {
                             when (currentScreen) {
