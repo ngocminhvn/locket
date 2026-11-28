@@ -297,7 +297,8 @@ internal data class CameraPreferences(
     val lowLight: Boolean = false,
     val stabilization: Boolean = false,
     val videoHdr: Boolean = false,
-    val extension: Int = ExtensionMode.NONE
+    val extension: Int = ExtensionMode.NONE,
+    val showPhotoInfo: Boolean = false
 )
 private fun cameraPrefs(context: Context) = context.applicationContext.getSharedPreferences("camera_settings", Context.MODE_PRIVATE)
 private fun readCameraPreferences(context: Context): CameraPreferences {
@@ -308,14 +309,16 @@ private fun readCameraPreferences(context: Context): CameraPreferences {
         lowLight = p.getBoolean("low_light", false),
         stabilization = p.getBoolean("stabilization", false),
         videoHdr = p.getBoolean("video_hdr", false),
-        extension = p.getInt("extension", ExtensionMode.NONE)
+        extension = p.getInt("extension", ExtensionMode.NONE),
+        showPhotoInfo = p.getBoolean("show_photo_info", false)
     )
 }
 private fun saveCameraPreferences(context: Context, value: CameraPreferences) {
     cameraPrefs(context).edit().putBoolean("mirror", value.mirror)
         .putBoolean("selfie_flash", value.selfieFlash).remove("quality")
         .putBoolean("low_light", value.lowLight).putBoolean("stabilization", value.stabilization)
-        .putBoolean("video_hdr", value.videoHdr).putInt("extension", value.extension).apply()
+        .putBoolean("video_hdr", value.videoHdr).putInt("extension", value.extension)
+        .putBoolean("show_photo_info", value.showPhotoInfo).apply()
 }
 @Composable
 internal fun rememberCameraPreferences(): State<CameraPreferences> {
@@ -386,6 +389,9 @@ private fun CameraSettingsDialog(onClose: () -> Unit) {
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                CameraOption("Hiển thị thông tin ảnh", "Xem thông tin ảnh sau xử lý ở màn hình gửi", settings.showPhotoInfo, true) {
+                    save(settings.copy(showPhotoInfo = it))
+                }
                 CameraOption("Lật ảnh selfie", "Lưu ảnh giống khung xem trước", settings.mirror, true) {
                     save(settings.copy(mirror = it))
                 }

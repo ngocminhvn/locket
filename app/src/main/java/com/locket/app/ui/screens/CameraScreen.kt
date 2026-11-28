@@ -178,6 +178,7 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var captureDetails by remember { mutableStateOf<String?>(null) }
     val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null
     SideEffect {
         onSwipeEnabledChange(canSwipe)
@@ -186,6 +187,7 @@ fun CameraScreen(
 
     fun clearCapture() {
         capturedBitmap = null
+        captureDetails = null
         capturedVideo?.delete()
         capturedVideo = null
     }
@@ -449,6 +451,15 @@ fun CameraScreen(
         val capture = imageCapture
         if (capture == null || holdingShutter || videoSession || recording != null || processingVideo || capturingPhoto || capturedBitmap != null) return
         capturingPhoto = true
+        val captureStarted = SystemClock.elapsedRealtime()
+        val lens = if (frontCamera) "Camera trước" else "Camera sau"
+        val zoomAtCapture = zoomLimits?.zoomRatio
+        val captureMode = if (extensionActive) "CameraX Extension (${cameraPreferences.extension})" else "CameraX ImageCapture"
+        fun details(mode: String): String = buildString {
+            append("$lens · $mode")
+            zoomAtCapture?.let { append("\nZoom camera: ${String.format(java.util.Locale.US, "%.2f", it)}×") }
+            append("\nThời gian chụp/xử lý: ${SystemClock.elapsedRealtime() - captureStarted} ms")
+        }
 
         // Normal photos use the same transformed frame the user sees.
         // Never silently switch to a differently processed still photograph.
@@ -473,6 +484,7 @@ fun CameraScreen(
                             Matrix().apply { setScale(-1f, 1f) }, true)
                     } else frame
                     // Publish immediately; do not queue a second capture or JPEG encode.
+                    if (cameraPreferences.showPhotoInfo) captureDetails = details("PreviewView bitmap")
                     capturedBitmap = result
                     android.util.Log.d("LocketCamera", "preview capture ${SystemClock.elapsedRealtime() - started}ms, ${result.width}x${result.height}")
                 }
@@ -511,6 +523,7 @@ fun CameraScreen(
                 mainExecutor.execute {
                     capturingPhoto = false
                     if (screenActive && result != null && error == null) {
+                        if (cameraPreferences.showPhotoInfo) captureDetails = details(captureMode)
                         capturedBitmap = result
                     } else {
                         result?.recycle()
@@ -647,6 +660,7 @@ fun CameraScreen(
                 val bmp = context.contentResolver.openInputStream(it)?.use { stream -> BitmapFactory.decodeStream(stream) }
                 if (bmp != null) {
                     clearCapture()
+                    if (cameraPreferences.showPhotoInfo) captureDetails = "Ảnh từ thư viện"
                     capturedBitmap = bmp
                 } else Toast.makeText(context, "Không thể đọc ảnh", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -699,6 +713,9 @@ fun CameraScreen(
         rememberMomentReviewSlots(
             bitmap = bitmap,
             snapshotFile = snapshotFile,
+            showPhotoInfo = cameraPreferences.showPhotoInfo,
+            captureDetails = captureDetails,
+            preparedThumbnail = prepared,
             videoFile = capturedVideo,
             friends = friends,
             replyToFriend = replyToFriend,

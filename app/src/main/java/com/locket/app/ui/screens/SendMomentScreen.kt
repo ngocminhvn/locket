@@ -1,11 +1,17 @@
 package com.locket.app.ui.screens
 
+import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.widget.Toast
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +33,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -43,6 +53,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.locket.app.model.Friend
 import com.locket.app.ui.theme.LocketYellow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,6 +79,9 @@ internal fun rememberMomentReviewSlots(
     bitmap: Bitmap,
     previewBitmap: Bitmap = bitmap,
     snapshotFile: File? = null,
+    showPhotoInfo: Boolean = false,
+    captureDetails: String? = null,
+    preparedThumbnail: Deferred<ByteArray>? = null,
     videoFile: File?,
     friends: List<Friend>,
     replyToFriend: Friend?,
@@ -90,6 +105,16 @@ internal fun rememberMomentReviewSlots(
     var editor by remember { mutableStateOf<CaptionKind?>(null) }
     var draft by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
+    var infoOpen by remember(bitmap) { mutableStateOf(false) }
+    var zoom by remember(bitmap) { mutableFloatStateOf(1f) }
+    var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
+    var transforming by remember(bitmap) { mutableStateOf(false) }
+    val imageTransform = Modifier.graphicsLayer {
+        scaleX = zoom
+        scaleY = zoom
+        translationX = offset.x
+        translationY = offset.y
+    }
     val time = remember(bitmap) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
     val general = remember { listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME) }
     val pager = rememberPagerState(pageCount = { general.size })
@@ -149,6 +174,7 @@ internal fun rememberMomentReviewSlots(
 
     BackHandler(enabled = true) {
         when {
+            infoOpen -> infoOpen = false
             editor != null -> editor = null
             sheet -> sheet = false
             !isPosting && !saving -> onCancel()
@@ -171,7 +197,39 @@ internal fun rememberMomentReviewSlots(
         }
         },
         frame = {
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
+            val gestureModifier = if (videoFile != null) Modifier else Modifier.pointerInput(bitmap) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var drag = Offset.Zero
+                    var ownsGesture = false
+                    try {
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val fingers = event.changes.count { it.pressed }
+                            val pan = event.calculatePan()
+                            drag += pan
+                            if (fingers >= 2 || (zoom > 1f && drag.getDistance() > viewConfiguration.touchSlop)) {
+                                ownsGesture = true
+                                transforming = true
+                            }
+                            if (ownsGesture && fingers > 0) {
+                                val next = (zoom * event.calculateZoom()).coerceIn(1f, 5f)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val focal = event.calculateCentroid(useCurrent = false)
+                                val ratio = next / zoom
+                                val moved = if (focal.x.isFinite() && focal.y.isFinite())
+                                    (offset - (focal - center)) * ratio + (focal - center) + pan else offset
+                                val maxX = size.width * (next - 1f) / 2f
+                                val maxY = size.height * (next - 1f) / 2f
+                                zoom = next
+                                offset = Offset(moved.x.coerceIn(-maxX, maxX), moved.y.coerceIn(-maxY, maxY))
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    } finally { transforming = false }
+                }
+            }
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(0.dp)).background(Color.Black).then(gestureModifier)) {
                 if (videoFile != null) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
@@ -188,7 +246,7 @@ internal fun rememberMomentReviewSlots(
                 } else {
                     val painter = remember(previewBitmap) { BitmapPainter(previewBitmap.asImageBitmap()) }
                     if (snapshotFile == null) {
-                        Image(painter, "Ảnh vừa chụp", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Image(painter, "Ảnh vừa chụp", Modifier.fillMaxSize().then(imageTransform), contentScale = ContentScale.Crop)
                     } else {
                         AsyncImage(
                             model = remember(snapshotFile, context) {
@@ -198,7 +256,7 @@ internal fun rememberMomentReviewSlots(
                             contentDescription = "Ảnh vừa chụp",
                             placeholder = painter,
                             error = painter,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().then(imageTransform),
                             contentScale = ContentScale.Crop
                         )
                     }
@@ -207,7 +265,7 @@ internal fun rememberMomentReviewSlots(
                 HorizontalPager(
                     state = pager,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = !isPosting
+                    userScrollEnabled = !isPosting && !transforming && zoom <= 1f
                 ) { page ->
                     val item = special ?: general[page]
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -249,6 +307,18 @@ internal fun rememberMomentReviewSlots(
                                     color = if (item in listOf(CaptionKind.OOTD, CaptionKind.PARTY, CaptionKind.STREAK)) Color.Black else Color.White)
                             }
                         }
+                    }
+                }
+                if (videoFile == null && zoom > 1f) {
+                    Text(String.format(Locale.US, "%.1f×", zoom), color = Color.White, fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.TopStart).padding(16.dp).clip(CircleShape)
+                            .background(Color(0x99000000)).clickable { zoom = 1f; offset = Offset.Zero }
+                            .padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+                if (videoFile == null && showPhotoInfo) {
+                    IconButton(onClick = { infoOpen = true }, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(40.dp)) {
+                        Icon(Icons.Default.ErrorOutline, "Thông tin ảnh", tint = Color.White,
+                            modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0x99000000)))
                     }
                 }
         }
@@ -308,6 +378,9 @@ internal fun rememberMomentReviewSlots(
         }
     )
 
+    if (infoOpen && showPhotoInfo && videoFile == null) {
+        PhotoInfoDialog(bitmap, snapshotFile, preparedThumbnail, captureDetails) { infoOpen = false }
+    }
     if (sheet) {
         ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = Color(0xFF242424),
             shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp)) {
@@ -400,3 +473,57 @@ private fun CaptionChip(
         Text(label, color = foreground, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
+
+
+@Composable
+private fun PhotoInfoDialog(
+    bitmap: Bitmap, snapshotFile: File?, prepared: Deferred<ByteArray>?,
+    captureDetails: String?, onClose: () -> Unit
+) {
+    val webp by produceState<String>("Đang xử lý…", prepared) {
+        value = try {
+            if (prepared == null) "Không có dữ liệu" else {
+                val bytes = prepared.await()
+                withContext(Dispatchers.Default) {
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                    val md5 = java.security.MessageDigest.getInstance("MD5").digest(bytes)
+                        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                    val dimensions = if (options.outWidth > 0 && options.outHeight > 0)
+                        "${options.outWidth} × ${options.outHeight} px" else "Không đọc được kích thước"
+                    "$dimensions\n${options.outMimeType ?: "Không rõ MIME"} · ${photoByteSize(bytes.size.toLong())}\nMức nén encoder: 83/100\nMD5: $md5"
+                }
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { "Không đọc được ảnh đã mã hóa" }
+    }
+    val jpeg by produceState<String>("Đang chuẩn bị JPEG…", snapshotFile) {
+        value = if (snapshotFile == null) "Chưa có tệp JPEG lưu ảnh" else withContext(Dispatchers.IO) {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(snapshotFile.absolutePath, options)
+            if (options.outWidth <= 0 || options.outHeight <= 0) "Không đọc được tệp JPEG"
+            else "${options.outWidth} × ${options.outHeight} px\n${options.outMimeType ?: "Không rõ MIME"} · ${photoByteSize(snapshotFile.length())}\nMức nén encoder: 85/100"
+        }
+    }
+    AlertDialog(onDismissRequest = onClose, title = { Text("Thông tin ảnh") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Ảnh sau xử lý", fontWeight = FontWeight.Bold)
+                Text("${bitmap.width} × ${bitmap.height} px · ${bitmap.width.toLong() * bitmap.height} pixel")
+                Text("Bitmap: ${bitmap.config ?: "Không rõ"}\nBộ nhớ: ${photoByteSize(bitmap.byteCount.toLong())}\nAlpha: ${if (bitmap.hasAlpha()) "Có" else "Không"}")
+                if (android.os.Build.VERSION.SDK_INT >= 26) Text("Không gian màu: ${bitmap.colorSpace?.name ?: "Không rõ"}")
+                captureDetails?.let { Text(it) }
+                HorizontalDivider()
+                Text("Ảnh lưu (JPEG)", fontWeight = FontWeight.Bold)
+                Text(jpeg)
+                HorizontalDivider()
+                Text("Ảnh chuẩn bị gửi (WebP)", fontWeight = FontWeight.Bold)
+                Text(webp)
+                Text("WebP được cắt vuông, tối đa 1020 px mỗi cạnh. Zoom xem trước không thay đổi ảnh gửi. Thông số EXIF/cảm biến không có trong bitmap thì không thể khôi phục.", fontSize = 12.sp)
+            }
+        }, confirmButton = { TextButton(onClick = onClose) { Text("Đóng") } })
+}
+
+private fun photoByteSize(bytes: Long): String =
+    String.format(Locale.US, "%,d byte (%.2f KiB)", bytes, bytes / 1024.0)
