@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Friend
+import com.locket.app.model.MessageReaction
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.theme.*
 import kotlinx.coroutines.delay
@@ -259,128 +260,92 @@ fun ChatDetailScreen(
                                         modifier = Modifier.padding(bottom = 8.dp)
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(1.0f)
-                                        .clip(RoundedCornerShape(42.dp))
-                                        .background(LocketSheetSurface)
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = { reactingTo = msg }
-                                        )
+                                ReactionAnchor(
+                                    reactions = if (msg.text.isBlank()) msg.reactions else emptyList(),
+                                    badgeAtStart = false,
+                                    insetBadge = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onReactionClick = { reactingTo = msg }
                                 ) {
-                                    AsyncImage(
-                                        model = msg.thumbnailUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-
-                                    val linkedMoment = msg.replyMomentUid?.let { momentsById[it] }
-                                    // Prefer real moment metadata when available locally.
-                                    Row(
+                                    Box(
                                         modifier = Modifier
-                                            .padding(24.dp)
-                                            .clip(CircleShape).background(Color.Black.copy(alpha = 0.46f))
-                                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                                            .align(Alignment.TopStart),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            .fillMaxWidth()
+                                            .aspectRatio(1.0f)
+                                            .clip(RoundedCornerShape(42.dp))
+                                            .background(LocketSheetSurface)
+                                            .combinedClickable(
+                                                onClick = {},
+                                                onLongClick = { reactingTo = msg }
+                                            )
                                     ) {
-                                        val senderAvatar = linkedMoment?.userAvatarUrl?.takeIf { it.isNotBlank() }
-                                            ?: when (linkedMoment?.userUid) {
-                                                myUid -> currentUser.profilePictureUrl
-                                                friend.uid -> friend.avatarUrl
-                                                null -> if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
-                                                else -> ""
-                                            }
-                                        ChatAvatar(senderAvatar, 24)
-                                        Text(
-                                            text = when {
-                                                linkedMoment?.userUid == myUid -> "Bạn"
-                                                linkedMoment != null -> linkedMoment.userName.ifBlank { linkedMoment.userUid }
-                                                msg.isMe -> "Bạn"
-                                                else -> displayName
-                                            },
-                                            color = Color.White,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.weight(1f, fill = false),
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        AsyncImage(
+                                            model = msg.thumbnailUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
                                         )
-                                        Text(chatMomentAge(linkedMoment?.timestampSeconds?.times(1000L) ?: msg.createdAtMs), color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    linkedMoment?.caption?.takeIf { it.isNotBlank() }?.let { caption ->
-                                        Text(caption, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
-                                                .clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.35f))
-                                                .padding(horizontal = 12.dp, vertical = 6.dp))
+
+                                        val linkedMoment = msg.replyMomentUid?.let { momentsById[it] }
+                                        // Prefer real moment metadata when available locally.
+                                        Row(
+                                            modifier = Modifier
+                                                .padding(24.dp)
+                                                .clip(CircleShape).background(Color.Black.copy(alpha = 0.46f))
+                                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                                .align(Alignment.TopStart),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            val senderAvatar = linkedMoment?.userAvatarUrl?.takeIf { it.isNotBlank() }
+                                                ?: when (linkedMoment?.userUid) {
+                                                    myUid -> currentUser.profilePictureUrl
+                                                    friend.uid -> friend.avatarUrl
+                                                    null -> if (msg.isMe) currentUser.profilePictureUrl else friend.avatarUrl
+                                                    else -> ""
+                                                }
+                                            ChatAvatar(senderAvatar, 24)
+                                            Text(
+                                                text = when {
+                                                    linkedMoment?.userUid == myUid -> "Bạn"
+                                                    linkedMoment != null -> linkedMoment.userName.ifBlank { linkedMoment.userUid }
+                                                    msg.isMe -> "Bạn"
+                                                    else -> displayName
+                                                },
+                                                color = Color.White,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.weight(1f, fill = false),
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                            Text(chatMomentAge(linkedMoment?.timestampSeconds?.times(1000L) ?: msg.createdAtMs), color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        linkedMoment?.caption?.takeIf { it.isNotBlank() }?.let { caption ->
+                                            Text(caption, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                                                    .clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.35f))
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp))
+                                        }
                                     }
                                 }
                                 // Text kem theo moment (neu co)
                                 if (msg.text.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, onLongClick = { reactingTo = msg })
+                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor, onLongClick = { reactingTo = msg })
                                 }
-                                ReactionRow(reactions = msg.reactions)
                             }
                         } else if (msg.isMe) {
-                            // Sent message bubble: White rounded pill on the right
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.End
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(28.dp))
-                                        .background(sentColor)
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = { reactingTo = msg }
-                                        )
-                                        .padding(horizontal = 18.dp, vertical = 12.dp)
-                                ) {
-                                    Text(
-                                        text = msg.text,
-                                        color = Color.Black,
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                                ReactionRow(reactions = msg.reactions)
-                            }
+                            MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
+                                onLongClick = { reactingTo = msg })
                         } else {
-                            // Received message bubble: Avatar on left + dark gray pill
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    ChatAvatar(friend.avatarUrl, 32)
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(28.dp))
-                                            .background(bubbleColor)
-                                            .border(0.5.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(28.dp))
-                                            .combinedClickable(
-                                                onClick = {},
-                                                onLongClick = { reactingTo = msg }
-                                            )
-                                            .padding(horizontal = 18.dp, vertical = 12.dp)
-                                    ) {
-                                        Text(
-                                            text = msg.text,
-                                            color = Color.White,
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                                ReactionRow(reactions = msg.reactions)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                ChatAvatar(friend.avatarUrl, 32)
+                                MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
+                                    modifier = Modifier.weight(1f), onLongClick = { reactingTo = msg })
                             }
                         }
                     }
@@ -719,37 +684,76 @@ fun ChatDetailScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(msg: ChatMessage, bubbleColor: Color, onLongClick: () -> Unit) {
+private fun MessageBubble(
+    msg: ChatMessage,
+    bubbleColor: Color,
+    sentColor: Color,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    onLongClick: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalArrangement = if (msg.isMe) Arrangement.End else Arrangement.Start
     ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(28.dp))
-                .background(if (msg.isMe) LocketChatSent else bubbleColor)
-                .combinedClickable(onClick = {}, onLongClick = onLongClick)
-                .padding(horizontal = 18.dp, vertical = 12.dp)
+        ReactionAnchor(
+            reactions = msg.reactions,
+            badgeAtStart = msg.isMe,
+            onReactionClick = onLongClick
         ) {
+            val shape = RoundedCornerShape(28.dp)
             Text(
                 text = msg.text,
                 color = if (msg.isMe) Color.Black else Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(shape)
+                    .background(if (msg.isMe) sentColor else bubbleColor)
+                    .then(if (msg.isMe) Modifier else Modifier.border(0.5.dp, Color.White.copy(alpha = 0.06f), shape))
+                    .combinedClickable(onClick = {}, onLongClick = onLongClick)
+                    .padding(horizontal = 18.dp, vertical = 12.dp)
             )
         }
     }
 }
 
+/** Keep the real reaction attached to its message, outside the bubble's clip. */
 @Composable
-private fun ReactionRow(reactions: List<com.locket.app.model.MessageReaction>) {
-    if (reactions.isEmpty()) return
-    Row(
-        modifier = Modifier.padding(top = 4.dp, start = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        for (r in reactions) {
-            Text(text = r.emoji, fontSize = 16.sp)
+private fun ReactionAnchor(
+    reactions: List<MessageReaction>,
+    badgeAtStart: Boolean,
+    onReactionClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    insetBadge: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val visible = reactions.filter { it.emoji.isNotBlank() }
+    val hasReaction = visible.isNotEmpty()
+    val sideSpace = if (hasReaction && !insetBadge) 8.dp else 0.dp
+    Box(modifier.padding(
+        start = if (badgeAtStart) sideSpace else 0.dp,
+        end = if (badgeAtStart) 0.dp else sideSpace
+    )) {
+        Box(Modifier.padding(top = if (hasReaction) 18.dp else 0.dp)) {
+            content()
+        }
+        if (hasReaction) {
+            Row(
+                modifier = Modifier
+                    .align(if (badgeAtStart) Alignment.TopStart else Alignment.TopEnd)
+                    .offset(x = if (insetBadge) (-8).dp else if (badgeAtStart) (-8).dp else 8.dp)
+                    .defaultMinSize(minWidth = 32.dp, minHeight = 32.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF2F0EF))
+                    .clickable(onClick = onReactionClick)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally)
+            ) {
+                visible.take(3).forEach { reaction ->
+                    Text(reaction.emoji, fontSize = 17.sp, maxLines = 1)
+                }
+                if (visible.size > 3) Text("+${visible.size - 3}", color = Color.Black, fontSize = 11.sp)
+            }
         }
     }
 }
