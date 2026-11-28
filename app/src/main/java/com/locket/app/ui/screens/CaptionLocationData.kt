@@ -81,7 +81,7 @@ internal object CaptionLocationData {
         android.os.SystemClock.elapsedRealtime() - it.first < 300_000L
     }?.second
 
-    /** Open-Meteo fallback. Coordinates are rounded before requesting weather. */
+    /** Open-Meteo direct. Coordinates are rounded before requesting weather. */
     suspend fun weather(location: Location): CaptionWeather = withContext(Dispatchers.IO) {
         val lat = String.format(Locale.US, "%.2f", location.latitude)
         val lon = String.format(Locale.US, "%.2f", location.longitude)
