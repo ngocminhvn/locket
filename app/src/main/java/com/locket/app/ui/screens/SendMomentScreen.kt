@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +27,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,6 +37,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -192,7 +199,7 @@ internal fun rememberMomentReviewSlots(
                     enabled = !isPosting && !saving,
                     modifier = Modifier.align(Alignment.CenterEnd)
                 ) {
-                    Icon(Icons.Default.FileDownload, "Lưu ảnh hoặc video", tint = Color.White, modifier = Modifier.size(32.dp))
+                    ReviewActionIcon(ReviewIcon.DOWNLOAD, "Lưu ảnh hoặc video", Color(0xFFE6E6E6), Modifier.size(32.dp))
                 }
         }
         },
@@ -339,17 +346,21 @@ internal fun rememberMomentReviewSlots(
             Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onCancel, enabled = !isPosting && !saving, modifier = Modifier.size(56.dp)) {
-                    Icon(Icons.Default.Close, "Hủy", tint = Color.White, modifier = Modifier.size(34.dp))
+                    ReviewActionIcon(ReviewIcon.CLOSE, "Hủy", Color.White, Modifier.size(34.dp))
                 }
                 val canSend = !isPosting && !saving && (sendAll || selected.isNotEmpty())
                 Box(Modifier.size(98.dp).clip(CircleShape).background(Color(0xFF505050))
                     .clickable(enabled = canSend) { onSend(value(kind), if (sendAll) emptyList() else selected.toList()) },
                     contentAlignment = Alignment.Center) {
                     if (isPosting) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
-                    else Icon(Icons.AutoMirrored.Filled.Send, "Gửi", tint = if (canSend) Color.White else Color.Gray, modifier = Modifier.size(44.dp))
+                    else ReviewActionIcon(ReviewIcon.SEND, "Gửi", if (canSend) Color.White else Color.Gray, Modifier.size(44.dp))
                 }
                 IconButton(onClick = { sheet = true }, enabled = !isPosting, modifier = Modifier.size(56.dp)) {
-                    Text("Aa✦", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        ReviewActionIcon(ReviewIcon.CAPTION, "Chú thích", Color(0xFFE6E6E6), Modifier.fillMaxSize())
+                        Text("Aa", color = Color(0xFFE6E6E6), fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.offset(x = (-2).dp, y = 2.dp))
+                    }
                 }
         }
         },
@@ -527,3 +538,65 @@ private fun PhotoInfoDialog(
 
 private fun photoByteSize(bytes: Long): String =
     String.format(Locale.US, "%,d byte (%.2f KiB)", bytes, bytes / 1024.0)
+
+
+private enum class ReviewIcon { DOWNLOAD, CLOSE, SEND, CAPTION }
+
+@Composable
+private fun ReviewActionIcon(kind: ReviewIcon, description: String, tint: Color, modifier: Modifier) {
+    Canvas(modifier.semantics { contentDescription = description }) {
+        scale(size.width / 48f, size.height / 48f, pivot = Offset.Zero) {
+            val stroke = Stroke(width = 3.8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            fun line(x1: Float, y1: Float, x2: Float, y2: Float, width: Float = 3.8f) {
+                drawLine(tint, Offset(x1, y1), Offset(x2, y2), strokeWidth = width, cap = StrokeCap.Round)
+            }
+            fun sparkle(x: Float, y: Float, r: Float) {
+                val p = Path().apply {
+                    moveTo(x, y - r)
+                    quadraticTo(x + r * 0.22f, y - r * 0.22f, x + r, y)
+                    quadraticTo(x + r * 0.22f, y + r * 0.22f, x, y + r)
+                    quadraticTo(x - r * 0.22f, y + r * 0.22f, x - r, y)
+                    quadraticTo(x - r * 0.22f, y - r * 0.22f, x, y - r)
+                    close()
+                }
+                drawPath(p, tint)
+            }
+            when (kind) {
+                ReviewIcon.DOWNLOAD -> {
+                    val tray = Path().apply {
+                        moveTo(7f, 25f); lineTo(7f, 31f)
+                        quadraticTo(7f, 42f, 18f, 42f)
+                        lineTo(30f, 42f); quadraticTo(41f, 42f, 41f, 31f)
+                        lineTo(41f, 25f)
+                    }
+                    drawPath(tray, tint, style = stroke)
+                    line(24f, 7f, 24f, 29f, 5f)
+                    line(17f, 21f, 24f, 30f, 5f)
+                    line(31f, 21f, 24f, 30f, 5f)
+                }
+                ReviewIcon.CLOSE -> {
+                    line(10f, 10f, 38f, 38f, 4.5f)
+                    line(38f, 10f, 10f, 38f, 4.5f)
+                }
+                ReviewIcon.SEND -> {
+                    val plane = Path().apply {
+                        moveTo(4f, 19f); lineTo(44f, 4f); lineTo(29f, 44f)
+                        lineTo(19f, 31f); close()
+                    }
+                    drawPath(plane, tint, style = stroke)
+                    line(19f, 31f, 44f, 4f, 3.2f)
+                }
+                ReviewIcon.CAPTION -> {
+                    val ring = Path().apply {
+                        moveTo(27f, 8f)
+                        cubicTo(7f, 3f, 1f, 22f, 6f, 34f)
+                        cubicTo(11f, 47f, 36f, 46f, 41f, 30f)
+                    }
+                    drawPath(ring, tint, style = stroke)
+                    sparkle(37f, 8f, 3.7f)
+                    sparkle(43f, 18f, 5f)
+                }
+            }
+        }
+    }
+}
