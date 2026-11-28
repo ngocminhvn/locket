@@ -39,24 +39,96 @@ object CaptionOverlays {
     fun obj(obj: JsonObject?, key: String): JsonObject? =
         obj?.get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 
-    fun first(json: String?): JsonObject? {
-        if (json.isNullOrBlank()) return null
+    private val supported = setOf(
+        "standard", "review", "weather", "time", "location", "streak", "static_content",
+        "music", "star_sign", "status", "link"
+    )
+    private val cache = object : LinkedHashMap<String, CaptionOverlay?>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, CaptionOverlay?>) = size > 128
+    }
+
+    internal fun fromRaw(json: String?): CaptionOverlay? {
+        if (json.isNullOrBlank() || json == "[]" || json.length > 65536) return null
+        synchronized(cache) {
+            if (cache.containsKey(json)) return cache[json]
+        }
+        val parsed = decode(first(json))
+        synchronized(cache) { cache[json] = parsed }
+        return parsed
+    }
+
+    internal fun cacheDecoded(json: String, caption: CaptionOverlay?) {
+        if (json != "[]" && json.length <= 65536) synchronized(cache) { cache[json] = caption }
+    }
+
+    internal fun first(json: String?): JsonObject? {
+        if (json.isNullOrBlank() || json.length > 65536 || json.toByteArray(Charsets.UTF_8).size > 65536) return null
         return runCatching {
-            JsonParser.parseString(json).asJsonArray.firstOrNull { el ->
-                el.isJsonObject && string(el.asJsonObject, "overlay_type") == "caption" &&
-                    string(obj(el.asJsonObject, "data"), "type") in setOf(
-                        "standard", "review", "time", "location", "weather", "streak", "static_content", "music", "star_sign", "status", "link"
-                    )
-            }?.asJsonObject
+            JsonParser.parseString(json).asJsonArray.firstNotNullOfOrNull { element ->
+                element.takeIf { it.isJsonObject }?.asJsonObject?.takeIf {
+                    string(it, "overlay_type") == "caption" && isSupported(string(obj(it, "data"), "type"))
+                }
+            }
         }.getOrNull()
     }
 
-    fun data(moment: Moment) = obj(first(moment.overlaysJson), "data")
+    internal fun isSupported(kind: String) = kind in supported
+
+    internal fun decode(overlay: JsonObject?): CaptionOverlay? {
+        val data = obj(overlay, "data") ?: return null
+        val kind = string(data, "type")
+        if (!isSupported(kind)) return null
+        val payload = obj(data, "payload")
+        val icon = obj(data, "icon")
+        val foreground = color(string(data, "text_color"), -1)
+        val colors = obj(data, "background")?.get("colors")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.takeIf { it.size() <= 16 && it.all { entry -> entry.isJsonPrimitive && entry.asJsonPrimitive.isString } }
+            ?.map { color(it.asString, 0x99000000.toInt()) }.orEmpty()
+        return CaptionOverlay(
+            kind, boundedText(data, "text"), boundedText(overlay, "alt_text"), foreground, colors,
+            (number(data, "max_lines") ?: 4.0).coerceIn(1.0, 4.0).toInt(),
+            boundedText(icon, "type"), boundedText(icon, "data"), color(string(icon, "color"), foreground),
+            (number(payload, "rating") ?: 0.0).coerceIn(0.0, 5.0).toFloat(),
+            boundedText(payload, "comment"), boundedText(payload, "spotify_url")
+        )
+    }
+
+    private fun boundedText(value: JsonObject?, key: String): String =
+        string(value, key).takeIf { it.length <= 4096 && it.toByteArray(Charsets.UTF_8).size <= 4096 }.orEmpty()
+
+    private fun number(value: JsonObject?, key: String): Double? =
+        string(value, key).toDoubleOrNull()?.takeIf { it.isFinite() }
+
+    private fun color(raw: String, fallback: Int): Int {
+        val hex = raw.removePrefix("#")
+        if (hex.length !in listOf(6, 8) || hex.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) return fallback
+        val value = hex.toLong(16).toInt()
+        return if (hex.length == 6) value or 0xff000000.toInt() else Integer.rotateRight(value, 8)
+    }
+
     fun label(moment: Moment): String {
-        val d = data(moment) ?: return moment.caption
-        val value = string(d, "text").ifBlank { string(first(moment.overlaysJson), "alt_text") }
-        val icon = obj(d, "icon")
-        val prefix = if (string(icon, "type") == "emoji") string(icon, "data") else ""
-        return listOf(prefix, value).filter { it.isNotBlank() }.joinToString(" ").ifBlank { moment.caption }
+        val overlay = moment.overlay ?: return moment.caption
+        val text = overlay.text.ifBlank { overlay.altText }
+        val icon = overlay.iconData.takeIf { overlay.iconKind == "emoji" }.orEmpty()
+        return when {
+            icon.isBlank() -> text.ifBlank { moment.caption }
+            text.isBlank() -> icon
+            else -> "$icon $text"
+        }
     }
 }
+
+internal data class CaptionOverlay(
+    val kind: String,
+    val text: String,
+    val altText: String,
+    val foreground: Int,
+    val colors: List<Int>,
+    val maxLines: Int,
+    val iconKind: String,
+    val iconData: String,
+    val iconColor: Int,
+    val rating: Float,
+    val comment: String,
+    val spotifyUrl: String
+)

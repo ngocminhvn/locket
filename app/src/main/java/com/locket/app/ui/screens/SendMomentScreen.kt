@@ -433,7 +433,7 @@ internal fun rememberMomentReviewSlots(
                                 }
                             }
                         } else {
-                            val data = overlay(item)?.getAsJsonObject("data")
+                            val data = com.locket.app.model.CaptionOverlays.decode(overlay(item))
                             val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.MUSIC)) choose(item) else sheet = true }
                             MomentOverlayPill(data, label, Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
                                 .clickable(enabled = !isPosting, onClick = tap))
@@ -616,7 +616,9 @@ internal fun rememberMomentReviewSlots(
                     modifier = Modifier.fillMaxWidth())
             },
             confirmButton = { TextButton(onClick = {
-                if (editor == CaptionKind.REVIEW) reviewComment = draft.trim().take(36) else text = draft
+                if (editor == CaptionKind.REVIEW) reviewComment = draft.trim().let { value ->
+                    value.substring(0, value.offsetByCodePoints(0, value.codePointCount(0, value.length).coerceAtMost(36)))
+                } else text = draft
                 editor = null
             }) { Text("Xong") } },
             dismissButton = { TextButton(onClick = { editor = null }) { Text("Hủy") } }

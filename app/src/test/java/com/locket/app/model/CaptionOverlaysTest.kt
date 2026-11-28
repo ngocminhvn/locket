@@ -13,8 +13,18 @@ class CaptionOverlaysTest {
             Moment::class.java
         )
 
-        assertNull(CaptionOverlays.data(moment))
+        assertNull(moment.overlay)
         assertEquals("hello", CaptionOverlays.label(moment))
+    }
+
+    @Test
+    fun preservesHalfStarsAndCssAlpha() {
+        val overlay = CaptionOverlays.fromRaw(
+            """[null,{"overlay_type":"caption","data":{"type":"future"}},{"overlay_type":"caption","data":{"type":"review","text_color":"#11223380","payload":{"rating":4.5,"comment":"Ngon 🍜"}}}]"""
+        )!!
+        assertEquals(4.5f, overlay.rating, 0f)
+        assertEquals(0x80112233.toInt(), overlay.foreground)
+        assertEquals("Ngon 🍜", overlay.comment)
     }
 
     @Test

@@ -5,6 +5,7 @@ pub mod chat;
 pub mod feed;
 pub mod history;
 pub mod models;
+pub mod overlay;
 pub mod streak;
 pub mod update;
 pub mod wire;

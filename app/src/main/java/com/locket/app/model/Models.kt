@@ -23,7 +23,22 @@ data class Moment(
     val md5: String = "",
     val isLocal: Boolean = false,
     val overlaysJson: String = "[]"
-)
+) {
+    // Gson may allocate a legacy Moment without calling its constructor.
+    @Transient @Volatile private var decodedOverlay: OverlayResult? = null
+
+    internal val overlay: CaptionOverlay?
+        get() {
+            decodedOverlay?.let { return it.value }
+            return CaptionOverlays.fromRaw(overlaysJson).also { decodedOverlay = OverlayResult(it) }
+        }
+
+    internal fun setDecodedOverlay(caption: CaptionOverlay?) {
+        decodedOverlay = OverlayResult(caption)
+    }
+
+    private class OverlayResult(val value: CaptionOverlay?)
+}
 
 data class Friend(
     val uid: String,

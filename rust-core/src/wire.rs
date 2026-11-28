@@ -2,7 +2,7 @@ use crate::models::{ChatMessage, ChatPage, FeedDelta, HistoryPage, Moment};
 use crate::CoreError;
 
 const MAGIC: &[u8; 4] = b"LKT1";
-const SCHEMA_VERSION: u16 = 2;
+const SCHEMA_VERSION: u16 = 3;
 const FEED_RECORD: u8 = 1;
 const HISTORY_RECORD: u8 = 2;
 const CHAT_RECORD: u8 = 3;
@@ -89,7 +89,26 @@ fn encode_moment(out: &mut Vec<u8>, value: &Moment) -> Result<(), CoreError> {
     out.extend_from_slice(&value.timestamp_seconds.to_be_bytes());
     out.extend_from_slice(&value.timestamp_nanoseconds.to_be_bytes());
     put_string(out, &value.md5)?;
-    put_string(out, &value.overlays_json)
+    put_string(out, &value.overlays_json)?;
+    out.push(u8::from(value.overlay.is_some()));
+    if let Some(overlay) = &value.overlay {
+        for text in [&overlay.kind, &overlay.text, &overlay.alt_text] {
+            put_string(out, text)?;
+        }
+        out.extend_from_slice(&overlay.foreground.to_be_bytes());
+        put_count(out, overlay.colors.len())?;
+        for color in &overlay.colors {
+            out.extend_from_slice(&color.to_be_bytes());
+        }
+        out.push(overlay.max_lines);
+        put_string(out, &overlay.icon_kind)?;
+        put_string(out, &overlay.icon_data)?;
+        out.extend_from_slice(&overlay.icon_color.to_be_bytes());
+        out.extend_from_slice(&overlay.rating_bits.to_be_bytes());
+        put_string(out, &overlay.comment)?;
+        put_string(out, &overlay.spotify_url)?;
+    }
+    Ok(())
 }
 
 fn put_optional_string(out: &mut Vec<u8>, value: Option<&str>) -> Result<(), CoreError> {

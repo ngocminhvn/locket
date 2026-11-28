@@ -6,6 +6,7 @@ pub struct Moment {
     pub video_url: Option<String>,
     pub caption: String,
     pub overlays_json: String,
+    pub overlay: Option<crate::overlay::CaptionOverlay>,
     pub timestamp_seconds: i64,
     pub timestamp_nanoseconds: u32,
     pub md5: String,

@@ -125,6 +125,7 @@ fn parse_moment(value: &Value) -> Result<Moment, CoreError> {
         .ok()
         .filter(|v| *v < 1_000_000_000)
         .ok_or(CoreError::Invalid("invalid moment nanoseconds"))?;
+    let (overlays_json, overlay) = crate::overlay::decode(value.get("overlays"));
     Ok(Moment {
         id,
         user_uid,
@@ -135,7 +136,8 @@ fn parse_moment(value: &Value) -> Result<Moment, CoreError> {
             .filter(|s| !s.is_empty())
             .map(str::to_owned),
         caption: text("caption"),
-        overlays_json: value.get("overlays").filter(|v| v.is_array()).map(Value::to_string).unwrap_or_else(|| "[]".to_owned()),
+        overlays_json,
+        overlay,
         timestamp_seconds: seconds,
         timestamp_nanoseconds,
         md5: text("md5"),
@@ -198,13 +200,16 @@ pub fn parse_history_response(
         if id.is_empty() || owner.is_empty() || thumbnail_url.is_empty() {
             return Err(CoreError::Invalid("history moment is incomplete"));
         }
+        let overlays = fields.get("overlays").map(unwrap_firestore_value);
+        let (overlays_json, overlay) = crate::overlay::decode(overlays.as_ref());
         moments.push(Moment {
             id,
             user_uid: owner,
             thumbnail_url,
             video_url: nonempty(firestore_string(fields, "video_url")),
             caption: firestore_string(fields, "caption"),
-            overlays_json: fields.get("overlays").map(unwrap_firestore_value).filter(Value::is_array).map(|v| v.to_string()).unwrap_or_else(|| "[]".to_owned()),
+            overlays_json,
+            overlay,
             timestamp_seconds: timestamp.0,
             timestamp_nanoseconds: timestamp.1,
             md5: firestore_string(fields, "md5"),

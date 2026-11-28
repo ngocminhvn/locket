@@ -1,6 +1,9 @@
 package com.locket.app.rust
 
 import com.locket.app.model.Moment
+import com.locket.app.model.CaptionOverlay
+import com.locket.app.model.CaptionOverlays
+import java.nio.ByteBuffer
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.MessageReaction
 import java.io.ByteArrayInputStream
@@ -76,40 +79,13 @@ object RustLocketCore {
 internal object FeedWireDecoder {
     private const val MAX_RECORDS = 100_000
     private const val MAX_STRING_BYTES = 8 * 1024 * 1024
+    private val utf8Decoder = ThreadLocal.withInitial { Charsets.UTF_8.newDecoder() }
 
     fun decode(bytes: ByteArray, nowSeconds: Long): RustLocketCore.FeedDelta =
-        DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-            require(input.readNBytes(4).contentEquals("LKT1".toByteArray(Charsets.US_ASCII))) { "Invalid Rust wire magic" }
-            require(input.readUnsignedShort() == 2) { "Unsupported Rust wire schema" }
-            require(input.readUnsignedByte() == 1) { "Unexpected Rust record type" }
-            val notModified = input.readUnsignedByte() != 0
+        reader(bytes, 1) { input ->
+            val notModified = input.bool()
             val syncToken = input.optionalUtf8()
-            val count = input.readInt()
-            require(count in 0..MAX_RECORDS) { "Invalid Rust record count" }
-            val moments = List(count) {
-                val id = input.utf8()
-                val owner = input.utf8()
-                val thumbnail = input.utf8()
-                val video = input.optionalUtf8()
-                val caption = input.utf8()
-                val seconds = input.readLong()
-                val nanos = input.readInt()
-                require(nanos in 0..999_999_999) { "Invalid timestamp nanoseconds" }
-                val md5 = input.utf8()
-                val overlays = input.utf8()
-                Moment(
-                    id = id,
-                    userUid = owner,
-                    userName = "",
-                    thumbnailUrl = thumbnail,
-                    videoUrl = video,
-                    caption = caption,
-                    timestampSeconds = seconds,
-                    timeAgo = age(nowSeconds, seconds),
-                    md5 = md5,
-                    overlaysJson = overlays,
-                )
-            }
+            val moments = List(input.count()) { input.moment(nowSeconds) }
             require(input.read() == -1) { "Trailing Rust wire bytes" }
             RustLocketCore.FeedDelta(notModified, syncToken, moments)
         }
@@ -147,8 +123,8 @@ internal object FeedWireDecoder {
 
     private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-            require(input.readNBytes(4).contentEquals("LKT1".toByteArray(Charsets.US_ASCII)))
-            require(input.readUnsignedShort() == 2)
+            require(input.readInt() == 0x4c4b5431)
+            require(input.readUnsignedShort() == 3)
             require(input.readUnsignedByte() == recordType)
             block(input)
         }
@@ -156,9 +132,42 @@ internal object FeedWireDecoder {
     private fun DataInputStream.count(): Int = readInt().also { require(it in 0..MAX_RECORDS) }
 
     private fun DataInputStream.moment(nowSeconds: Long): Moment {
-        val id = utf8(); val owner = utf8(); val thumbnail = utf8(); val video = optionalUtf8(); val caption = utf8()
-        val seconds = readLong(); val nanos = readInt(); require(nanos in 0..999_999_999); val md5 = utf8()
-        return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds), emptyMap(), md5, overlaysJson = utf8())
+        val id = utf8()
+        val owner = utf8()
+        val thumbnail = utf8()
+        val video = optionalUtf8()
+        val caption = utf8()
+        val seconds = readLong()
+        val nanos = readInt()
+        require(nanos in 0..999_999_999)
+        val md5 = utf8()
+        val raw = utf8()
+        val overlay = if (bool()) captionOverlay() else null
+        CaptionOverlays.cacheDecoded(raw, overlay)
+        return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds),
+            md5 = md5, overlaysJson = raw).also { it.setDecodedOverlay(overlay) }
+    }
+
+    private fun DataInputStream.captionOverlay(): CaptionOverlay {
+        val kind = utf8(32)
+        require(CaptionOverlays.isSupported(kind))
+        val text = utf8(4096)
+        val altText = utf8(4096)
+        val foreground = readInt()
+        val colors = List(readInt().also { require(it in 0..16) }) { readInt() }
+        val maxLines = readUnsignedByte().also { require(it in 1..4) }
+        val iconKind = utf8(4096)
+        val iconData = utf8(4096)
+        val iconColor = readInt()
+        val rating = readFloat().also { require(it in 0f..5f) }
+        return CaptionOverlay(kind, text, altText, foreground, colors, maxLines, iconKind, iconData,
+            iconColor, rating, utf8(4096), utf8(4096))
+    }
+
+    private fun DataInputStream.bool(): Boolean = when (readUnsignedByte()) {
+        0 -> false
+        1 -> true
+        else -> throw IllegalArgumentException("Invalid Rust boolean tag")
     }
 
     private fun DataInputStream.optionalUtf8(): String? = when (readUnsignedByte()) {
@@ -167,10 +176,14 @@ internal object FeedWireDecoder {
         else -> throw IllegalArgumentException("Invalid optional string tag")
     }
 
-    private fun DataInputStream.utf8(): String {
+    private fun DataInputStream.utf8(maxBytes: Int = MAX_STRING_BYTES): String {
         val length = readInt()
-        require(length in 0..MAX_STRING_BYTES) { "Invalid Rust string length" }
-        return readNBytes(length).also { require(it.size == length) { "Truncated Rust string" } }.toString(Charsets.UTF_8)
+        require(length in 0..maxBytes) { "Invalid Rust string length" }
+        if (length == 0) return ""
+        require(length <= available()) { "Truncated Rust string" }
+        val bytes = ByteArray(length)
+        readFully(bytes)
+        return checkNotNull(utf8Decoder.get()).decode(ByteBuffer.wrap(bytes)).toString()
     }
 
     private fun age(now: Long, timestamp: Long): String {

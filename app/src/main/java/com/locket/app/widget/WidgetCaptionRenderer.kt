@@ -3,7 +3,6 @@ package com.locket.app.widget
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
@@ -11,32 +10,19 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.text.TextPaint
 import android.text.TextUtils
-import com.locket.app.model.CaptionOverlays
 import com.locket.app.model.Moment
 import kotlin.math.cos
 import kotlin.math.sin
 
 internal object WidgetCaptionRenderer {
-    private fun color(raw: String, fallback: Int): Int = runCatching {
-        val s = raw.removePrefix("#")
-        when (s.length) {
-            6 -> Color.parseColor("#" + s)
-            8 -> Color.parseColor("#" + s.takeLast(2) + s.take(6))
-            else -> fallback
-        }
-    }.getOrDefault(fallback)
-
     fun render(context: Context, moment: Moment): Bitmap? {
-        val o = CaptionOverlays
-        val data = o.data(moment) ?: return null
-        val type = o.string(data, "type")
-        val payload = o.obj(data, "payload")
-        val rating = runCatching { payload?.get("rating")?.asFloat ?: 0f }.getOrDefault(0f)
-        val review = type == "review" && rating.isFinite() && rating > 0f
-        val comment = o.string(payload, "comment")
-        val icon = o.obj(data, "icon")
-        val symbol = o.string(icon, "data")
-        val prefix = when (o.string(icon, "type")) {
+        val data = moment.overlay ?: return null
+        val type = data.kind
+        val rating = data.rating
+        val review = type == "review" && rating > 0f
+        val comment = data.comment
+        val symbol = data.iconData
+        val prefix = when (data.iconKind) {
             "emoji" -> symbol
             "sf_symbol" -> when {
                 symbol.startsWith("clock") -> "◷"
@@ -50,13 +36,13 @@ internal object WidgetCaptionRenderer {
             }
             else -> if (type == "location") "📍" else ""
         }
-        val label = if (review) comment else listOf(prefix, o.string(data, "text")).filter { it.isNotBlank() }.joinToString(" ")
+        val label = if (review) comment else listOf(prefix, data.text).filter { it.isNotBlank() }.joinToString(" ")
         if (!review && label.isBlank()) return null
         val scale = context.resources.displayMetrics.density.coerceIn(1f, 3f)
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 14f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            this.color = color(o.string(data, "text_color"), Color.WHITE)
+            this.color = data.foreground
         }
         val clipped = TextUtils.ellipsize(label, paint, 224f, TextUtils.TruncateAt.END).toString()
         val width = (if (review) maxOf(112f, paint.measureText(clipped) + 20f) else paint.measureText(clipped) + 20f).coerceIn(32f, 244f)
@@ -65,9 +51,7 @@ internal object WidgetCaptionRenderer {
         bitmap.density = context.resources.displayMetrics.densityDpi
         val canvas = Canvas(bitmap)
         canvas.scale(scale, scale)
-        val colors = runCatching {
-            o.obj(data, "background")?.getAsJsonArray("colors")?.map { color(it.asString, 0x99000000.toInt()) }.orEmpty()
-        }.getOrDefault(emptyList())
+        val colors = data.colors
         val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = colors.firstOrNull() ?: 0x99000000.toInt()
             if (colors.size >= 2) shader = LinearGradient(0f, 0f, 0f, height, colors.toIntArray(), null, Shader.TileMode.CLAMP)

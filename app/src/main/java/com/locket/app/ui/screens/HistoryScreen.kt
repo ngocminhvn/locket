@@ -491,7 +491,7 @@ fun MemoryDetailDialog(
                                     val photoTime = remember(photo.timestampSeconds) {
                                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(photo.timestampSeconds * 1000))
                                     }
-                                    if (com.locket.app.model.CaptionOverlays.data(photo) != null || photo.caption.isNotBlank()) {
+                                    if (photo.overlay != null || photo.caption.isNotBlank()) {
                                         MomentCaption(photo, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
                                     } else {
                                         Row(Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 24.dp)

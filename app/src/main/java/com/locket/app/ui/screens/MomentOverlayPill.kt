@@ -23,8 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.gson.JsonObject
-import com.locket.app.model.CaptionOverlays
+import androidx.compose.runtime.remember
+import com.locket.app.model.CaptionOverlay
 import com.locket.app.model.Moment
 import coil.compose.AsyncImage
 import kotlin.math.cos
@@ -50,21 +50,12 @@ internal fun OverlayReviewStar(fill: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// Wire colors are CSS RRGGBBAA, not Android AARRGGBB.
-private fun overlayColor(raw: String, fallback: Color): Color = runCatching {
-    val s = raw.removePrefix("#")
-    when (s.length) {
-        6 -> Color((0xFF000000L or s.toLong(16)).toInt())
-        8 -> Color(((s.takeLast(2) + s.take(6)).toLong(16)).toInt())
-        else -> fallback
-    }
-}.getOrDefault(fallback)
-
 @Composable
 internal fun MomentCaption(moment: Moment, modifier: Modifier = Modifier, fallback: String = moment.caption) {
-    val data = CaptionOverlays.data(moment)
-    val spotifyUrl = if (CaptionOverlays.string(data, "type") == "music")
-        SpotifyCaptionSource.canonicalTrack(CaptionOverlays.string(CaptionOverlays.obj(data, "payload"), "spotify_url")) else null
+    val data = moment.overlay
+    val spotifyUrl = remember(data) {
+        data?.takeIf { it.kind == "music" }?.let { SpotifyCaptionSource.canonicalTrack(it.spotifyUrl) }
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     val action = if (spotifyUrl != null) Modifier.clickable {
         runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(spotifyUrl))) }
@@ -74,19 +65,14 @@ internal fun MomentCaption(moment: Moment, modifier: Modifier = Modifier, fallba
 }
 
 @Composable
-internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Modifier = Modifier) {
-    val o = CaptionOverlays
-    val type = o.string(data, "type")
-    val label = o.string(data, "text").ifBlank { fallback }
-    val payload = o.obj(data, "payload")
-    val background = o.obj(data, "background")
-    val colors = runCatching {
-        background?.getAsJsonArray("colors")?.map { overlayColor(it.asString, Color(0x99000000)) }.orEmpty()
-    }.getOrDefault(emptyList())
-    val foreground = overlayColor(o.string(data, "text_color"), Color.White)
+internal fun MomentOverlayPill(data: CaptionOverlay?, fallback: String, modifier: Modifier = Modifier) {
+    val type = data?.kind
+    val label = data?.text.orEmpty().ifBlank { fallback }
+    val colors = remember(data) { data?.colors?.map { Color(it) }.orEmpty() }
+    val foreground = data?.let { Color(it.foreground) } ?: Color.White
     val shape = RoundedCornerShape(20.dp)
     val review = type == "review"
-    val rating = runCatching { payload?.get("rating")?.asFloat ?: 0f }.getOrDefault(0f).coerceIn(0f, 5f)
+    val rating = data?.rating ?: 0f
     if (label.isBlank() && !review) return
     val surface = modifier.clip(shape).then(
         if (colors.size >= 2) Modifier.background(Brush.verticalGradient(colors))
@@ -97,7 +83,7 @@ internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Mo
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 repeat(5) { i -> OverlayReviewStar((rating - i).coerceIn(0f, 1f), Modifier.size(21.dp)) }
             }
-            val comment = o.string(payload, "comment")
+            val comment = data?.comment.orEmpty()
             if (comment.isNotBlank()) Text("“$comment”", color = Color.White, fontSize = 17.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 8.dp))
@@ -106,10 +92,9 @@ internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Mo
     }
     Row(surface.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val icon = o.obj(data, "icon")
-        val name = o.string(icon, "data")
-        val iconColor = overlayColor(o.string(icon, "color"), foreground)
-        when (o.string(icon, "type")) {
+        val name = data?.iconData.orEmpty()
+        val iconColor = data?.let { Color(it.iconColor) } ?: foreground
+        when (data?.iconKind) {
             "emoji" -> if (name.isNotBlank()) Text(name, fontSize = 18.sp)
             "image" -> if (name.startsWith("https://")) AsyncImage(name, null, Modifier.size(22.dp))
             "sf_symbol" -> {
@@ -134,7 +119,7 @@ internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Mo
             }
         }
         Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-            maxLines = runCatching { data?.get("max_lines")?.asInt ?: 4 }.getOrDefault(4).coerceIn(1, 4),
+            maxLines = data?.maxLines ?: 4,
             overflow = TextOverflow.Ellipsis)
     }
 }
