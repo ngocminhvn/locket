@@ -21,7 +21,8 @@ data class Moment(
     val timeAgo: String = "vừa xong",
     val reactions: Map<String, Int> = emptyMap(),
     val md5: String = "",
-    val isLocal: Boolean = false
+    val isLocal: Boolean = false,
+    val overlaysJson: String = "[]"
 )
 
 data class Friend(
