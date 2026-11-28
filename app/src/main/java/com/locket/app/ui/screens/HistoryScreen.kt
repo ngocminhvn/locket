@@ -236,6 +236,7 @@ fun HistoryScreen(
         // Memory Full-Screen Viewer Dialog
         viewingMoment?.let { moment ->
             MemoryDetailDialog(
+                viewModel = viewModel,
                 moment = moment,
                 onDismiss = { viewingMoment = null },
                 onReact = { emoji ->
@@ -359,6 +360,7 @@ private fun MemoryConnector() {
 
 @Composable
 fun MemoryDetailDialog(
+    viewModel: LocketViewModel,
     moment: Moment,
     onDismiss: () -> Unit,
     onReact: (String) -> Unit,
@@ -376,6 +378,16 @@ fun MemoryDetailDialog(
     val pager = rememberPagerState(initialPage = photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0)) { photos.size }
     val scope = rememberCoroutineScope()
     val active = photos[pager.settledPage.coerceIn(0, photos.lastIndex)]
+    val showViewCount by viewModel.showViewCount.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+    val canShowActivity = showViewCount && currentUser.uid.isNotBlank() && active.userUid == currentUser.uid
+    // Request just the settled moment; the existing Home activity component
+    // reuses the same per-moment viewer cache and refreshes on opening.
+    LaunchedEffect(active.id, canShowActivity) {
+        if (canShowActivity && viewModel.momentViewers.value[active.id] == null) {
+            viewModel.refreshMomentViews(active)
+        }
+    }
     val date = remember(active.timestampSeconds) {
         Calendar.getInstance().apply { timeInMillis = active.timestampSeconds * 1000 }
     }
@@ -405,7 +417,9 @@ fun MemoryDetailDialog(
             if (active.thumbnailUrl.isNotBlank()) MemoryBackdrop(active.thumbnailUrl)
             BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 val viewportWidth = maxWidth
-                val photoSize = minOf(viewportWidth - 48.dp, maxHeight * 0.48f).coerceAtLeast(1.dp)
+                // Reserve space for the activity chip above the filmstrip on compact displays.
+                val activityLimit = if (canShowActivity) (maxHeight - 320.dp).coerceAtLeast(1.dp) else maxHeight
+                val photoSize = minOf(viewportWidth - 48.dp, maxHeight * 0.48f, activityLimit).coerceAtLeast(1.dp)
                 val imagePx = with(androidx.compose.ui.platform.LocalDensity.current) { photoSize.roundToPx().coerceAtLeast(1) }
                 val thumbnailPx = with(androidx.compose.ui.platform.LocalDensity.current) { 60.dp.roundToPx() }
                 val imageContext = androidx.compose.ui.platform.LocalContext.current
@@ -426,7 +440,7 @@ fun MemoryDetailDialog(
                     }
                 }
 
-                Column(Modifier.align(Alignment.Center).offset(y = (-31).dp),
+                Column(Modifier.align(Alignment.Center).offset(y = (if (canShowActivity) -3 else -31).dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().height(photoSize),
                         pageSize = PageSize.Fixed(photoSize),
@@ -496,10 +510,16 @@ fun MemoryDetailDialog(
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(time, color = Color.White.copy(alpha = 0.38f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    if (canShowActivity) {
+                        // Keep the slot fixed during swipes and zooms; never show another photo's viewers.
+                        if (!moving && zoom <= 1f && !share && !delete) {
+                            key(active.id) { OwnMomentActivityBar(viewModel, active) }
+                        } else Spacer(Modifier.height(56.dp))
+                    }
                 }
 
                 if (historyError != null && pager.currentPage >= (photos.size - 3).coerceAtLeast(0)) {
-                    TextButton(onClick = onLoadOlder, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 94.dp)) { Text("Thử tải ảnh cũ", color = Color.White) }
+                    TextButton(onClick = onLoadOlder, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 86.dp)) { Text("Thử tải ảnh cũ", color = Color.White) }
                 }
                 // One scroll position drives both carousels. The outline is
                 // a stationary overlay, not a border attached to a moving item.
