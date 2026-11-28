@@ -1920,7 +1920,10 @@ class LocketApiClient(
                         lastMessage = finalMsg,
                         timeAgo = timeAgo,
                         unreadCount = unread,
-                        lastMessageAtMs = lastMessageAtMs
+                        lastMessageAtMs = lastMessageAtMs,
+                        otherLastReadAtMs = fields.timestamp("other_last_read_message_created_at")?.toEpochMilli(),
+                        otherLastDeliveredAtMs = fields.timestamp("other_last_delivered_message_created_at")?.toEpochMilli(),
+                        sendReadReceipt = fields.boolean("send_read_receipt")
                     )
     }
 

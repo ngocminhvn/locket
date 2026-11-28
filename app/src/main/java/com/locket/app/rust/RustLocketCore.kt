@@ -14,6 +14,15 @@ import java.io.DataInputStream
 object RustLocketCore {
     val isAvailable: Boolean = runCatching { System.loadLibrary("locket_core") }.isSuccess
 
+    private external fun receiptStatusNative(created: Long, read: Long, delivered: Long): Int
+
+    fun receiptStatus(created: Long, read: Long?, delivered: Long?): Int {
+        if (created <= 0L) return 0
+        if (isAvailable) try { return receiptStatusNative(created, read ?: 0L, delivered ?: 0L) }
+        catch (_: UnsatisfiedLinkError) { /* older native library */ }
+        return when { (read ?: 0L) >= created -> 2; (delivered ?: 0L) >= created -> 1; else -> 0 }
+    }
+
     private external fun parseFeedNative(responseBody: ByteArray): ByteArray
     private external fun parseHistoryNative(responseBody: ByteArray, ownUid: String, ownOnly: Boolean, limit: Int): ByteArray
     private external fun parseChatNative(responseBody: ByteArray): ByteArray
@@ -166,7 +175,9 @@ internal object FeedWireDecoder {
         val md5 = utf8()
         val raw = utf8()
         val missing = readUnsignedByte().also { require(it in 0..MOMENT_MISSING_MASK) }
-        val overlay = if (bool()) captionOverlay() else null
+        val decoded = if (bool()) captionOverlay() else null
+        // Keep the existing LKT1 wire version: link payload is already in raw JSON.
+        val overlay = if (decoded?.kind == "link") CaptionOverlays.decode(CaptionOverlays.first(raw)) ?: decoded else decoded
         CaptionOverlays.cacheDecoded(raw, overlay)
         return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds),
             md5 = md5, overlaysJson = raw, missingFields = missing).also { it.setDecodedOverlay(overlay) }

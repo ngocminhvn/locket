@@ -17,6 +17,10 @@ internal class UploadCaption private constructor(val caption: String, val overla
             require(CaptionOverlays.string(overlay, "overlay_type") == "caption" && CaptionOverlays.isSupported(type)) {
                 "Loại overlay chưa được hỗ trợ"
             }
+            if (type == "link") {
+                val payload = CaptionOverlays.obj(data, "payload")
+                require(LinkCaption.create(CaptionOverlays.string(data, "text"), CaptionOverlays.string(payload, "url")) != null) { "Liên kết không hợp lệ" }
+            }
             if (type == "review") {
                 val payload = CaptionOverlays.obj(data, "payload")
                 val rating = payload?.get("rating")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }

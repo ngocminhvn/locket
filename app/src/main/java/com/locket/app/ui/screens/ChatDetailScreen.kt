@@ -162,6 +162,8 @@ fun ChatDetailScreen(
             .sortedByDescending { it.timestamp }
     }
     val lastOutgoingKey = chatRows.firstOrNull()?.takeIf { it.pending != null || it.message?.isMe == true }?.key
+    val conversations by viewModel.conversations.collectAsState()
+    val receipt = conversations.firstOrNull { it.id == activeConversationId && it.friend.uid == friend.uid }
     val repeatedMomentCards = remember(messages) { repeatedChatMomentCards(messages) }
     val currentMessages by rememberUpdatedState(messages)
     val currentRowCount by rememberUpdatedState(chatRows.size)
@@ -439,7 +441,8 @@ fun ChatDetailScreen(
                                     }
                                 }
                                 if (msg.isMe && row.key == lastOutgoingKey) {
-                                    ChatSendStatus("Đã gửi")
+                                    val state = if (receipt?.sendReadReceipt == false) 0 else com.locket.app.rust.RustLocketCore.receiptStatus(msg.createdAtMs, receipt?.otherLastReadAtMs, receipt?.otherLastDeliveredAtMs)
+                                    ChatSendStatus(when (state) { 2 -> "Đã xem"; 1 -> "Đã nhận"; else -> "Đã gửi" })
                                 }
                             }
                         }

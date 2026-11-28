@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Friend
+import com.locket.app.model.LinkCaption
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +77,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, MUSIC, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
+private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, MUSIC, LINK, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
 
 internal class MomentReviewSlots(
     val header: @Composable () -> Unit,
@@ -120,6 +121,8 @@ internal fun rememberMomentReviewSlots(
     var reviewComment by remember(bitmap) { mutableStateOf("") }
     var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
     var musicPicker by remember(bitmap) { mutableStateOf(false) }
+    var link by remember(bitmap) { mutableStateOf<LinkCaption?>(null) }
+    var linkPicker by remember(bitmap) { mutableStateOf(false) }
     var locationPicker by remember(bitmap) { mutableStateOf(false) }
     var locationPickerFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
     var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
@@ -143,7 +146,7 @@ internal fun rememberMomentReviewSlots(
     val hour = remember(captureDate) { java.util.Calendar.getInstance().apply { this.time = captureDate }.let { it.get(java.util.Calendar.HOUR_OF_DAY) + it.get(java.util.Calendar.MINUTE) / 60f } }
     val general = remember(streak, hour) {
         buildList {
-            addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME, CaptionKind.MUSIC))
+            addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME, CaptionKind.MUSIC, CaptionKind.LINK))
             if (streak > 0) add(CaptionKind.STREAK)
             add(CaptionKind.PARTY)
             if (hour >= 5f && hour < 10f) add(CaptionKind.MORNING)
@@ -161,6 +164,7 @@ internal fun rememberMomentReviewSlots(
         CaptionKind.WEATHER -> weather.trim()
         CaptionKind.TIME -> time
         CaptionKind.MUSIC -> music?.label.orEmpty()
+        CaptionKind.LINK -> link?.title.orEmpty()
         CaptionKind.STREAK -> if (streak > 0) "🔥 $streak" else ""
         CaptionKind.PARTY -> "🪩 Party Time!"
         CaptionKind.OOTD -> "🕶 OOTD"
@@ -188,6 +192,7 @@ internal fun rememberMomentReviewSlots(
             }
             CaptionKind.WEATHER -> weatherData?.overlay()
             CaptionKind.MUSIC -> music?.overlay()
+            CaptionKind.LINK -> link?.overlay()
             CaptionKind.TIME -> o.make("time", time, icon = o.icon("sf_symbol", "clock.fill", "#FFFFFFCC"),
                 payload = com.google.gson.JsonObject().apply { addProperty("date", captureDate.time / 1000) })
             CaptionKind.STREAK -> o.make("streak", streak.toString(), colors = listOf("#FFE38B", "#FFB900"),
@@ -277,6 +282,7 @@ internal fun rememberMomentReviewSlots(
             }
             CaptionKind.LOCATION, CaptionKind.WEATHER -> requestCaption(k)
             CaptionKind.MUSIC -> musicPicker = true
+            CaptionKind.LINK -> linkPicker = true
             else -> Unit
         }
     }
@@ -313,6 +319,7 @@ internal fun rememberMomentReviewSlots(
         when {
             locationPicker -> locationPicker = false
             musicPicker -> musicPicker = false
+            linkPicker -> linkPicker = false
             infoOpen -> infoOpen = false
             editor != null -> editor = null
             sheet -> sheet = false
@@ -414,6 +421,7 @@ internal fun rememberMomentReviewSlots(
                                 CaptionKind.WEATHER -> "Lấy thời tiết"
                                 CaptionKind.REVIEW -> "Chọn đánh giá"
                                 CaptionKind.MUSIC -> "Chọn bài hát"
+                                CaptionKind.LINK -> "Thêm liên kết"
                                 else -> "Thêm một tin nhắn"
                             }
                         }
@@ -432,7 +440,7 @@ internal fun rememberMomentReviewSlots(
                             }
                         } else {
                             val data = com.locket.app.model.CaptionOverlays.decode(overlay(item))
-                            val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.MUSIC)) choose(item) else sheet = true }
+                            val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.MUSIC, CaptionKind.LINK)) choose(item) else sheet = true }
                             MomentOverlayPill(data, label, Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
                                 .clickable(enabled = !isPosting, onClick = tap))
                         }
@@ -550,6 +558,7 @@ internal fun rememberMomentReviewSlots(
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Music", icon = Icons.Default.MusicNote, iconTint = Color(0xFF1ED760)) { choose(CaptionKind.MUSIC) }
+                    CaptionChip("Link", icon = Icons.Default.Link) { choose(CaptionKind.LINK) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -594,6 +603,20 @@ internal fun rememberMomentReviewSlots(
     }
 
     if (musicPicker) MusicCaptionDialog(initial = music, onDismiss = { musicPicker = false }, onSelect = { music = it; musicPicker = false })
+
+    if (linkPicker) {
+        var title by remember { mutableStateOf(link?.title.orEmpty()) }
+        var url by remember { mutableStateOf(link?.url.orEmpty()) }
+        val valid = LinkCaption.create(title, url)
+        AlertDialog(onDismissRequest = { linkPicker = false }, title = { Text("Thêm liên kết") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(title, { title = it.take(200) }, label = { Text("Tên liên kết") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(url, { url = it.take(4096) }, label = { Text("URL") }, placeholder = { Text("https://...") }, singleLine = true, modifier = Modifier.fillMaxWidth(), isError = url.isNotBlank() && LinkCaption.validUrl(url.trim()) == null)
+                }
+            }, confirmButton = { TextButton(enabled = valid != null, onClick = { link = valid; linkPicker = false }) { Text("Xong") } },
+            dismissButton = { TextButton(onClick = { linkPicker = false }) { Text("Hủy") } })
+    }
 
     if (locationPicker) {
         locationPickerFix?.let { fix ->

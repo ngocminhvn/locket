@@ -57,9 +57,10 @@ internal fun MomentCaption(moment: Moment, modifier: Modifier = Modifier, fallba
         data?.takeIf { it.kind == "music" }?.let { SpotifyCaptionSource.canonicalTrack(it.spotifyUrl) }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val action = if (spotifyUrl != null) Modifier.clickable {
-        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(spotifyUrl))) }
-            .onFailure { android.widget.Toast.makeText(context, "Không mở được Spotify", android.widget.Toast.LENGTH_SHORT).show() }
+    val targetUrl = spotifyUrl ?: data?.takeIf { it.kind == "link" }?.linkUrl?.takeIf { it.isNotBlank() }
+    val action = if (targetUrl != null) Modifier.clickable {
+        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(targetUrl))) }
+            .onFailure { android.widget.Toast.makeText(context, "Không mở được liên kết", android.widget.Toast.LENGTH_SHORT).show() }
     } else Modifier
     if (data != null || fallback.isNotBlank()) MomentOverlayPill(data, fallback, modifier.then(action))
 }

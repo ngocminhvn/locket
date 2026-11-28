@@ -135,7 +135,10 @@ data class Conversation(
     val lastMessage: String,
     val timeAgo: String,
     val unreadCount: Int = 0,
-    val lastMessageAtMs: Long? = null
+    val lastMessageAtMs: Long? = null,
+    val otherLastReadAtMs: Long? = null,
+    val otherLastDeliveredAtMs: Long? = null,
+    val sendReadReceipt: Boolean? = null
 )
 
 /**

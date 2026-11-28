@@ -95,7 +95,8 @@ object CaptionOverlays {
             (number(data, "max_lines") ?: 4.0).coerceIn(1.0, 4.0).toInt(),
             boundedText(icon, "type"), boundedText(icon, "data"), color(string(icon, "color"), foreground),
             (number(payload, "rating") ?: 0.0).coerceIn(0.0, 5.0).toFloat(),
-            boundedText(payload, "comment"), boundedText(payload, "spotify_url")
+            boundedText(payload, "comment"), boundedText(payload, "spotify_url"),
+            if (kind == "link") LinkCaption.validUrl(boundedText(payload, "url")).orEmpty() else ""
         )
     }
 
@@ -136,7 +137,8 @@ internal data class CaptionOverlay(
     val iconColor: Int,
     val rating: Float,
     val comment: String,
-    val spotifyUrl: String
+    val spotifyUrl: String,
+    val linkUrl: String = ""
 )
 
 /** Semantic location takes precedence over platform-specific icon names. */

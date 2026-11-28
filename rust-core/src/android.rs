@@ -261,3 +261,10 @@ pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_verifyUpdateManif
         }
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_receiptStatusNative(
+    _env: JNIEnv<'_>, _this: JObject<'_>, created: i64, read: i64, delivered: i64,
+) -> jni::sys::jint {
+    crate::receipt::status(created, read, delivered)
+}
