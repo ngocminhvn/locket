@@ -21,7 +21,9 @@ class MomentUploadPolicyTest {
         assertEquals("", caption.caption)
         assertEquals(review, caption.overlays.toString())
         assertEquals("hello", UploadCaption.validate("hello", """[{"overlay_type":"caption","data":{"type":"standard"}}]""").caption)
-        assertThrows(IllegalArgumentException::class.java) { UploadCaption.validate("", review.replace(":4,", ":4.5,")) }
+        val halfStar = review.replace(":4,", ":4.5,").replace("🍜", "")
+        assertEquals(halfStar, UploadCaption.validate("", halfStar).overlays.toString())
+        assertThrows(IllegalArgumentException::class.java) { UploadCaption.validate("", review.replace(":4,", ":4.25,")) }
         assertThrows(IllegalArgumentException::class.java) { UploadCaption.validate("", review.replace("review", "poll")) }
     }
 }
