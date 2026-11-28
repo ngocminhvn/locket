@@ -69,6 +69,7 @@ fun HistoryScreen(
     onOpenProfile: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val baseColor = LocalMomentColor.current
     val allMoments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val moments = remember(allMoments, currentUser.uid) {
@@ -144,7 +145,7 @@ fun HistoryScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LocketBlack)
+            .background(momentGradient(baseColor))
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -180,7 +181,7 @@ fun HistoryScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
-                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = LocketPillBg)
+                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = momentSurface(baseColor, LocketPillBg, 0.075f))
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -209,7 +210,7 @@ fun HistoryScreen(
 
         // Fixed header stays visible while the months scroll underneath.
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
-            .background(Brush.verticalGradient(listOf(LocketBlack, LocketBlack.copy(alpha = 0.88f), Color.Transparent)))
+            .background(Brush.verticalGradient(listOf(momentEdge(baseColor), momentEdge(baseColor).copy(alpha = 0.88f), Color.Transparent)))
             .statusBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp).height(48.dp)) {
             Text("Kỷ niệm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
@@ -266,6 +267,11 @@ private fun MonthCardDynamic(
     onMomentClick: (Moment) -> Unit,
     onTodayAddClick: () -> Unit
 ) {
+    val baseColor = LocalMomentColor.current
+    val cardColor = momentSurface(baseColor, LocketSheetBg, 0.055f)
+    val headerColor = momentSurface(baseColor, LocketSheetBg, 0.105f)
+    val dayColor = momentSurface(baseColor, LocketJournalDayBg, 0.065f)
+    val dotColor = momentSurface(baseColor, LocketSheetSurface, 0.15f)
     val todayCal = Calendar.getInstance()
     val isCurrentMonth = todayCal.get(Calendar.YEAR) == monthData.year &&
             (todayCal.get(Calendar.MONTH) + 1) == monthData.month
@@ -276,10 +282,10 @@ private fun MonthCardDynamic(
     val rows = (offset + monthData.daysCount + 6) / 7
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 24.dp)
-            .clip(RoundedCornerShape(24.dp)).background(LocketSheetBg)
+            .clip(RoundedCornerShape(24.dp)).background(cardColor)
     ) {
         Text(monthData.monthTitle, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.fillMaxWidth().background(LocketSheetBg).padding(horizontal = 16.dp, vertical = 12.dp))
+            modifier = Modifier.fillMaxWidth().background(headerColor).padding(horizontal = 16.dp, vertical = 12.dp))
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(rows) { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -300,23 +306,23 @@ private fun MonthCardDynamic(
                                 !valid -> Unit
                                 ownMoment != null -> AsyncImage(ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                     .data(ownMoment.thumbnailUrl).size((androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)).build(), null,
-                                    Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(LocketJournalDayBg)
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(dayColor)
                                         .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop,
-                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(LocketSheetSurface))
+                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(dotColor))
                                 isLoading && !future -> {
                                     val phase = (shimmer * 2f - (row * 7 + col) / 35f).coerceIn(0f, 1f)
                                     val intensity = (1f - kotlin.math.abs(phase * 2f - 1f)) * 0.55f
                                     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
-                                        .background(androidx.compose.ui.graphics.lerp(Color(0xFF191919), Color(0xFF343434), intensity)))
+                                        .background(androidx.compose.ui.graphics.lerp(dayColor, dotColor, intensity)))
                                 }
                                 today -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
                                     .background(LocketGoldBanner).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
                                     .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = LocketYellow, modifier = Modifier.size(24.dp))
                                 }
-                                future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(LocketJournalDayBg))
+                                future -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)).background(dayColor))
                                 holiday != null -> Text(holiday, fontSize = 20.sp)
-                                else -> Box(Modifier.size(11.dp).background(LocketSheetSurface, CircleShape))
+                                else -> Box(Modifier.size(11.dp).background(dotColor, CircleShape))
                             }
                         }
                     }
@@ -331,12 +337,13 @@ private fun monthStart(month: CalendarMonthData): Long =
 
 @Composable
 private fun MemoryConnector() {
+    val connectorColor = momentSurface(LocalMomentColor.current, Color(0xFF3A3A3A), 0.15f)
     Canvas(Modifier.padding(vertical = 8.dp).size(width = 46.dp, height = 16.dp)) {
         val line = Path().apply {
             moveTo(0f, size.height * 0.15f)
             cubicTo(size.width * 0.25f, size.height, size.width * 0.75f, 0f, size.width, size.height * 0.85f)
         }
-        drawPath(line, Color(0xFF3A3A3A), style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round,
+        drawPath(line, connectorColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 5.dp.toPx()))))
     }
 }
