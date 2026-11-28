@@ -135,9 +135,9 @@ fun HistoryScreen(
                 ?.firstOrNull()?.thumbnailUrl?.takeIf { it.isNotBlank() }
         }
     }
-    val historyTint = rememberMomentColor(historyUrl, 220)
-    val historyColor = backdropColor(historyTint, HISTORY_SCRIM)
-    val rampColor = if (historyUrl == null) backdropColor(LocketMomentGround, HISTORY_SCRIM) else historyColor
+    val ambient = rememberAmbientPalette(historyUrl, AmbientMode.HISTORY)
+    val topRampColor = ambient.top
+    val bottomRampColor = ambient.bottom
     val cellPx = (context.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)
     LaunchedEffect(oldestVisibleMonth, momentsByDate) {
         val index = calendarMonths.indexOf(oldestVisibleMonth)
@@ -156,7 +156,7 @@ fun HistoryScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(historyColor)
+            .background(ambient.brush())
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -221,7 +221,7 @@ fun HistoryScreen(
 
         // Fixed header stays visible while the months scroll underneath.
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
-            .background(Brush.verticalGradient(listOf(rampColor, rampColor.copy(alpha = 0.88f), Color.Transparent)))
+            .background(Brush.verticalGradient(listOf(topRampColor, topRampColor.copy(alpha = 0.88f), Color.Transparent)))
             .statusBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
             Text("Kỷ niệm", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
@@ -231,7 +231,7 @@ fun HistoryScreen(
 
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
             .height(88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-            .background(Brush.verticalGradient(listOf(Color.Transparent, rampColor))))
+            .background(Brush.verticalGradient(listOf(Color.Transparent, bottomRampColor))))
 
         // Memory Full-Screen Viewer Dialog
         viewingMoment?.let { moment ->
@@ -585,6 +585,5 @@ fun MemoryDetailDialog(
 
 @Composable
 private fun MemoryBackdrop(url: String) {
-    val tint = rememberMomentColor(url, 220)
-    Box(Modifier.fillMaxSize().background(backdropColor(tint, HISTORY_SCRIM)))
+    AmbientBackground(url, AmbientMode.MEMORY)
 }
