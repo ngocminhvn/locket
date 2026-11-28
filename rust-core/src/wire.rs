@@ -6,6 +6,7 @@ const SCHEMA_VERSION: u16 = 4;
 const FEED_RECORD: u8 = 1;
 const HISTORY_RECORD: u8 = 2;
 const CHAT_RECORD: u8 = 3;
+const MAX_WIRE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
 const MAX_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -23,7 +24,7 @@ pub fn encode_feed(feed: &FeedDelta) -> Result<Vec<u8>, CoreError> {
     for moment in &feed.moments {
         encode_moment(&mut out, moment)?;
     }
-    Ok(out)
+    finish(out)
 }
 
 pub fn encode_history(page: &HistoryPage) -> Result<Vec<u8>, CoreError> {
@@ -34,7 +35,7 @@ pub fn encode_history(page: &HistoryPage) -> Result<Vec<u8>, CoreError> {
     for moment in &page.moments {
         encode_moment(&mut out, moment)?;
     }
-    Ok(out)
+    finish(out)
 }
 
 pub fn encode_chat(page: &ChatPage) -> Result<Vec<u8>, CoreError> {
@@ -43,6 +44,13 @@ pub fn encode_chat(page: &ChatPage) -> Result<Vec<u8>, CoreError> {
     put_count(&mut out, page.messages.len())?;
     for message in &page.messages {
         encode_chat_message(&mut out, message)?;
+    }
+    finish(out)
+}
+
+fn finish(out: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    if out.len() > MAX_WIRE_BYTES {
+        return Err(CoreError::Limit("batch exceeds wire limit"));
     }
     Ok(out)
 }

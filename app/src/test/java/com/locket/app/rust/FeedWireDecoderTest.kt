@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class FeedWireDecoderTest {
@@ -43,13 +44,21 @@ class FeedWireDecoderTest {
             out.utf8("")
         }
 
-        val decoded = FeedWireDecoder.decode(buffer.toByteArray(), 1_700_000_060)
+        val bytes = buffer.toByteArray()
+        val decoded = FeedWireDecoder.decode(bytes, 1_700_000_060)
         assertFalse(decoded.notModified)
         assertEquals("token", decoded.syncToken)
         assertEquals("moment-a", decoded.moments.single().id)
         assertEquals("1m", decoded.moments.single().timeAgo)
         assertEquals(4.5f, decoded.moments.single().overlay!!.rating, 0f)
         assertEquals("Ngon 🍜", decoded.moments.single().overlay!!.comment)
+        assertEquals(4, decoded.moments.single().missingFields)
+        assertThrows(java.io.EOFException::class.java) {
+            FeedWireDecoder.decode(bytes.copyOf(bytes.size - 1), 1_700_000_060)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            FeedWireDecoder.decode(bytes + 0.toByte(), 1_700_000_060)
+        }
         assertEquals("""[{"overlay_type":"caption","data":{"type":"review"}}]""", decoded.moments.single().overlaysJson)
     }
 

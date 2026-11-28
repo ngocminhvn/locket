@@ -2324,8 +2324,8 @@ class LocketApiClient(
 
     internal suspend fun postMoment(
         thumbnailUrl: String,
-        caption: String = "",
-        recipients: List<String> = emptyList(),
+        caption: UploadCaption,
+        recipients: List<String>,
         md5: String,
         videoUrl: String? = null,
         // Ngay YYYYMMDD (Gregorian) can bao server cap nhat streak, chi

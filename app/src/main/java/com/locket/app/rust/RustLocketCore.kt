@@ -78,6 +78,7 @@ object RustLocketCore {
 }
 
 internal object FeedWireDecoder {
+    private const val MAX_WIRE_BYTES = 64 * 1024 * 1024
     private const val MAX_RECORDS = 100_000
     private const val MAX_STRING_BYTES = 8 * 1024 * 1024
     private val utf8Decoder = ThreadLocal.withInitial { Charsets.UTF_8.newDecoder() }
@@ -122,13 +123,15 @@ internal object FeedWireDecoder {
             RustLocketCore.ChatPage(messages, token)
         }
 
-    private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T =
-        DataInputStream(ByteArrayInputStream(bytes)).use { input ->
+    private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T {
+        require(bytes.size <= MAX_WIRE_BYTES) { "Rust batch exceeds wire limit" }
+        return DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             require(input.readInt() == 0x4c4b5431)
             require(input.readUnsignedShort() == 4)
             require(input.readUnsignedByte() == recordType)
             block(input)
         }
+    }
 
     private fun DataInputStream.count(): Int = readInt().also { require(it in 0..MAX_RECORDS) }
 

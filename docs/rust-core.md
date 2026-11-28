@@ -7,9 +7,17 @@ widgets, APK certificate checks and installation.
 ## Boundary
 
 - Callable/feed, Firestore history and chat bodies cross JNI once as raw bytes.
-- Results use big-endian `LKT1`, schema version 2 (moments now carry the raw structured overlays array), a record type, bounded counts
-  and length-prefixed UTF-8. Decoders reject invalid tags, lengths, truncation
-  and trailing bytes.
+- Results use big-endian `LKT1`, schema version 4, a record type, bounded counts
+  and length-prefixed UTF-8. Limits are 64 MiB per batch, 100,000 records and
+  8 MiB per general string. Decoders reject invalid tags, UTF-8, lengths,
+  truncation and trailing bytes.
+- Feed and History moments carry the original overlay array, an optional-field
+  presence mask and a typed caption. Typed fields use a 64 KiB input bound,
+  4 KiB per text field and 16 gradient colors. Keep raw fields in Room and
+  upload journals. Raw unknown types remain available for forward compatibility.
+- Firestore Listen keeps protobuf documents until mapping to models. Its overlay
+  subtree supplies the same Android caption DTO used by the Kotlin legacy
+  fallback. The widget renders from that DTO without Compose.
 - Feed merge, tombstones/hidden-owner filtering, timezone-aware streak, token
   refresh decisions, polling overlap and update-manifest validation are Rust
   policies invoked in batches.
@@ -33,9 +41,11 @@ It builds arm64-v8a, armeabi-v7a, x86_64 and x86 for API 26. Target linker
 configuration uses a 16 KiB maximum page size. Generated `.so` files and
 `target/` are ignored and must not be committed.
 
-The release workflow remains manual-only and builds/tests Rust before Gradle.
-It retains the existing package ID, version scheme, persistent signing secret,
-certificate continuity checks and `update.json` publication.
+The workflow remains manual-only and builds/tests Rust before Gradle. Use
+`verify_only=true` to run Rust tests, Kotlin compilation and JVM tests and
+inspect the unsigned R8 APK's native packaging without publishing. The signing
+and Pages path retains the existing package ID, version scheme, key and
+certificate continuity checks.
 
 ## Database decision
 
@@ -52,3 +62,5 @@ The old Kotlin parsers remain as a fallback when a developer build lacks the
 native library. They can be removed only after all four packaged ABIs and a
 signed update-over-install pass on real devices. No performance claim is made
 without those measurements.
+
+See [the optimization report](rust-optimization-report.md) for phase decisions and device coverage.

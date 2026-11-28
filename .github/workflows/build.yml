@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       verify_only:
-        description: 'Run tests, compile Kotlin and verify native ABIs without publishing'
+        description: 'Run tests and verify R8 and native ABIs without publishing'
         type: boolean
         default: false
       release:
@@ -23,7 +23,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: locket-pages-release
+  group: ${{ inputs.verify_only && format('locket-verify-{0}', github.ref) || 'locket-pages-release' }}
   # Cancel the preceding run only when explicitly requested.
   cancel-in-progress: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[replace build]') }}
 
@@ -82,6 +82,21 @@ jobs:
       - name: Verify Kotlin and run unit tests
         if: inputs.verify_only
         run: gradle testDebugUnitTest compileDebugKotlin --stacktrace --no-daemon
+
+      - name: Verify unpublished R8 build and native packaging
+        if: inputs.verify_only
+        run: |
+          set -euo pipefail
+          gradle assembleRelease --stacktrace --no-daemon
+          apk="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s app/build/outputs/mapping/release/mapping.txt
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
+          entries="$(unzip -Z1 "$apk")"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            grep -Fx "lib/$abi/liblocket_core.so" <<< "$entries"
+          done
+          grep -Fx 'assets/dexopt/baseline.prof' <<< "$entries"
+          echo "Unpublished release APK size: $(stat -c %s "$apk") bytes" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build, sign, verify and package APK
         if: ${{ !inputs.verify_only }}

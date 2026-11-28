@@ -35,3 +35,32 @@ fn malformed_firestore_timestamps_are_errors() {
     let row = br#"[{"document":{"name":"x/m","fields":{"user":{"stringValue":"u"},"thumbnail_url":{"stringValue":"x"},"date":{"timestampValue":"not-a-time"}}}}]"#;
     assert!(parse_history_response(row, "u", false, 24).is_err());
 }
+
+#[test]
+fn retains_nested_overlay_values_and_tracks_missing_moment_fields() {
+    let payload = serde_json::json!([{"document":{"name":"entries/a","fields":{
+        "user":{"stringValue":"owner"},
+        "thumbnail_url":{"stringValue":"https://example.invalid/a"},
+        "date":{"timestampValue":"2024-03-01T05:00:00.123456789Z"},
+        "video_url":{"nullValue":null},
+        "overlays":{"arrayValue":{"values":[{"mapValue":{"fields":{
+            "overlay_type":{"stringValue":"caption"},
+            "data":{"mapValue":{"fields":{
+                "type":{"stringValue":"review"},
+                "payload":{"mapValue":{"fields":{
+                    "rating":{"doubleValue":4.5},
+                    "future":{"arrayValue":{"values":[{"integerValue":"42"},{"nullValue":null}]}}
+                }}}
+            }}}
+        }}}]}}
+    }}}]);
+    let page = locket_core::parse_history_response(payload.to_string().as_bytes(), "owner", true, 1)
+        .unwrap();
+    let row = &page.moments[0];
+    assert_eq!(row.missing_fields, 2 | 8);
+    assert_eq!(row.timestamp_nanoseconds, 123_456_789);
+    assert_eq!(page.next_timestamp.as_deref(), Some("2024-03-01T05:00:00.123456789Z"));
+    assert!(row.overlay.is_some());
+    let raw: serde_json::Value = serde_json::from_str(&row.overlays_json).unwrap();
+    assert_eq!(raw[0]["data"]["payload"]["future"], serde_json::json!([42, null]));
+}

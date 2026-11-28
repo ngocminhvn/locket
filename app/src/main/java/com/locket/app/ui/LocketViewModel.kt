@@ -335,24 +335,28 @@ class LocketViewModel(
         prefetchUpcomingMoments(moments, currentIndex, count = 3)
     }
 
-    private fun knownMomentNames(incoming: List<Moment>): List<Moment> {
-        val friends = _friends.value.associateBy { it.uid }
+    private suspend fun knownMomentNames(incoming: List<Moment>): List<Moment> {
+        val friends = _friends.value
         val own = _currentUser.value
-        val old = _moments.value.associateBy { it.id }
-        return incoming.map { m ->
-            val friend = friends[m.userUid]
-            val prior = old[m.id]
-            val name = when {
-                m.userUid == own.uid -> own.displayName
-                friend != null && friend.displayName != friend.uid -> friend.displayName
-                else -> m.userName.takeUnless { it == m.userUid }.orEmpty()
-            }.ifBlank { prior?.userName.orEmpty() }.ifBlank { m.userUid }
-            val avatar = when {
-                m.userUid == own.uid -> own.profilePictureUrl
-                friend != null -> friend.avatarUrl
-                else -> m.userAvatarUrl
-            }.ifBlank { prior?.userAvatarUrl.orEmpty() }
-            if (m.userName == name && m.userAvatarUrl == avatar) m else m.copy(userName = name, userAvatarUrl = avatar).decodedFrom(m)
+        val current = _moments.value
+        return withContext(Dispatchers.Default) {
+            val byOwner = if (incoming.size > 1) friends.associateBy { it.uid } else null
+            val byId = if (incoming.size > 1) current.associateBy { it.id } else null
+            incoming.map { m ->
+                val friend = if (byOwner == null) friends.firstOrNull { it.uid == m.userUid } else byOwner[m.userUid]
+                val prior = if (byId == null) current.firstOrNull { it.id == m.id } else byId[m.id]
+                val name = when {
+                    m.userUid == own.uid -> own.displayName
+                    friend != null && friend.displayName != friend.uid -> friend.displayName
+                    else -> m.userName.takeUnless { it == m.userUid }.orEmpty()
+                }.ifBlank { prior?.userName.orEmpty() }.ifBlank { m.userUid }
+                val avatar = when {
+                    m.userUid == own.uid -> own.profilePictureUrl
+                    friend != null -> friend.avatarUrl
+                    else -> m.userAvatarUrl
+                }.ifBlank { prior?.userAvatarUrl.orEmpty() }
+                if (m.userName == name && m.userAvatarUrl == avatar) m else m.copy(userName = name, userAvatarUrl = avatar).decodedFrom(m)
+            }
         }
     }
 
@@ -379,9 +383,12 @@ class LocketViewModel(
     private suspend fun persistMoments(account: String, updated: List<Moment>, tombstones: Set<String> = emptySet()) {
         val before = _moments.value
         val changed = updated != before
-        if (!changed && tombstones.isEmpty() && sessionManager.hasWidgetMoment(account)) return
+        val widgetChanged = before.firstOrNull() != updated.firstOrNull() || !sessionManager.hasWidgetMoment(account)
+        if (!changed && tombstones.isEmpty() && !widgetChanged) return
         cache.saveMomentChanges(account, before, updated, tombstones)
-        if (changed && activeAccount(account)) _moments.value = updated
+        if (!activeAccount(account)) return
+        if (changed) _moments.value = updated
+        if (widgetChanged) LocketWidgetUpdater.updateAll(LocketApplication.instance)
     }
 
     private suspend fun mergeMoments(account: String, incoming: List<Moment>, tombstones: Set<String> = emptySet()) {
@@ -591,7 +598,6 @@ class LocketViewModel(
         if (!activeAccount(account)) return
         prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
         enrichMomentNames(account, resolved)
-        LocketWidgetUpdater.updateAll(LocketApplication.instance)
     }
 
     private suspend fun refreshFeedNow(account: String, force: Boolean = false) = feedSyncLock.withLock {
@@ -700,7 +706,7 @@ class LocketViewModel(
         momentWriteLock.withLock {
             if (!activeAccount(account)) return@withLock
             val updated = knownMomentNames(_moments.value)
-            if (updated != _moments.value) {
+            if (activeAccount(account) && updated != _moments.value) {
                 persistMoments(account, updated)
             }
         }
