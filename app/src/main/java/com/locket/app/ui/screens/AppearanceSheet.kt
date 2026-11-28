@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Image
+import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -103,8 +105,12 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                                     .onSuccess { icon = i }
                                     .onFailure { Toast.makeText(context, "Không đổi được icon", Toast.LENGTH_SHORT).show() }
                             }, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Image(painterResource(AppearancePrefs.icons[i]), "Biểu tượng ${i + 1}",
-                                    Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(15.dp)))
+                                val previewModifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(15.dp))
+                                if (i == 0) {
+                                    val bitmap = remember(context) { context.getDrawable(AppearancePrefs.icons[0])?.toBitmap(144, 144)?.asImageBitmap() }
+                                    if (bitmap != null) Image(bitmap, "Biểu tượng mặc định", previewModifier)
+                                    else Box(previewModifier.background(LocketYellow))
+                                } else Image(painterResource(AppearancePrefs.icons[i]), "Biểu tượng ${i + 1}", previewModifier)
                                 Spacer(Modifier.height(8.dp)); AppearanceCheck(i == icon)
                             }
                         }
