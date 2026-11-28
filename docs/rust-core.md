@@ -7,7 +7,7 @@ widgets, APK certificate checks and installation.
 ## Boundary
 
 - Callable/feed, Firestore history and chat bodies cross JNI once as raw bytes.
-- Results use big-endian `LKT1`, schema version 1, a record type, bounded counts
+- Results use big-endian `LKT1`, schema version 2 (moments now carry the raw structured overlays array), a record type, bounded counts
   and length-prefixed UTF-8. Decoders reject invalid tags, lengths, truncation
   and trailing bytes.
 - Feed merge, tombstones/hidden-owner filtering, timezone-aware streak, token
