@@ -137,11 +137,25 @@ fn parse_moment(value: &Value) -> Result<Moment, CoreError> {
             .map(str::to_owned),
         caption: text("caption"),
         overlays_json,
+        missing_fields: moment_missing_fields(value),
         overlay,
         timestamp_seconds: seconds,
         timestamp_nanoseconds,
         md5: text("md5"),
     })
+}
+
+fn moment_missing_fields(value: &Value) -> u8 {
+    ["overlays", "caption", "video_url", "md5"]
+        .iter()
+        .enumerate()
+        .fold(0, |mask, (bit, key)| {
+            if value.get(*key).is_none() {
+                mask | (1 << bit)
+            } else {
+                mask
+            }
+        })
 }
 
 // Unwrap nested Firestore values without dropping unknown overlay data.
@@ -209,6 +223,7 @@ pub fn parse_history_response(
             video_url: nonempty(firestore_string(fields, "video_url")),
             caption: firestore_string(fields, "caption"),
             overlays_json,
+            missing_fields: moment_missing_fields(fields),
             overlay,
             timestamp_seconds: timestamp.0,
             timestamp_nanoseconds: timestamp.1,

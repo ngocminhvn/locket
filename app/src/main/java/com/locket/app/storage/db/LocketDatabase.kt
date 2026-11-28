@@ -112,7 +112,7 @@ fun Moment.toEntity() = MomentEntity(
     md5 = md5,
     isLocal = isLocal,
     reactionsJson = Converters.reactionsToJson(reactions),
-    overlaysJson = overlaysJson
+    overlaysJson = overlaysJson.orEmpty().ifBlank { "[]" }
 )
 
 fun MomentEntity.toModel() = Moment(

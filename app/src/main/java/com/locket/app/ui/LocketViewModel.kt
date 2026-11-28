@@ -7,6 +7,7 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
+import com.locket.app.model.reconcileFields
 import com.locket.app.model.BlockedUser
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
@@ -350,7 +351,7 @@ class LocketViewModel(
                 friend != null -> friend.avatarUrl
                 else -> m.userAvatarUrl
             }.ifBlank { prior?.userAvatarUrl.orEmpty() }
-            m.copy(userName = name, userAvatarUrl = avatar)
+            if (m.userName == name && m.userAvatarUrl == avatar) m else m.copy(userName = name, userAvatarUrl = avatar).decodedFrom(m)
         }
     }
 
@@ -365,7 +366,7 @@ class LocketViewModel(
                 val updated = _moments.value.map { m ->
                     val name = names[m.userUid]
                     if (name != null && (m.userName.isBlank() || m.userName == m.userUid))
-                        m.copy(userName = name.first, userAvatarUrl = name.second.ifBlank { m.userAvatarUrl }) else m
+                        m.copy(userName = name.first, userAvatarUrl = name.second.ifBlank { m.userAvatarUrl }).decodedFrom(m) else m
                 }
                 if (updated != _moments.value) {
                     persistMoments(account, updated)
@@ -382,24 +383,38 @@ class LocketViewModel(
         if (changed && activeAccount(account)) _moments.value = updated
     }
 
-    private suspend fun mergeMoments(account: String, incoming: List<Moment>) {
+    private suspend fun mergeMoments(account: String, incoming: List<Moment>, tombstones: Set<String> = emptySet()) {
         cacheClearJob?.join()
         momentWriteLock.withLock {
             if (!activeAccount(account)) return
+            deletedMomentIds.addAll(tombstones)
             val current = _moments.value
             val deleted = deletedMomentIds.toSet()
             val hidden = hiddenFriendUids.toSet()
             val merged = withContext(Dispatchers.Default) {
+                val previousById = if (incoming.size > 1) current.associateByTo(HashMap()) { it.id } else null
+                val patches = incoming.map { next ->
+                    val old = if (previousById == null) current.firstOrNull { it.id == next.id } else previousById[next.id]
+                    next.reconcileFields(old).also { previousById?.put(it.id, it) }
+                }
+                val only = patches.singleOrNull()
+                if (only != null && tombstones.isEmpty() && only.id !in deleted && only.userUid !in hidden) {
+                    val index = current.indexOfFirst { it.id == only.id }
+                    if (index >= 0 && current[index].timestampSeconds == only.timestampSeconds) {
+                        if (current[index] == only) return@withContext current
+                        return@withContext current.toMutableList().apply { this[index] = only }
+                    }
+                }
                 if (RustLocketCore.isAvailable) {
-                    RustLocketCore.mergeMoments(current, incoming, deleted, hidden)
+                    RustLocketCore.mergeMoments(current, patches, deleted, hidden)
                 } else {
-                    (current + incoming)
+                    (current + patches)
                         .filter { it.id !in deleted && it.userUid !in hidden }
                         .associateBy { it.id }.values
                         .sortedByDescending { it.timestampSeconds }
                 }
             }
-            if (activeAccount(account)) persistMoments(account, merged)
+            if (activeAccount(account)) persistMoments(account, merged, tombstones)
         }
     }
 
@@ -568,13 +583,14 @@ class LocketViewModel(
         }
     }
 
-    private suspend fun applyFeed(account: String, records: List<Moment>) {
-        if (!activeAccount(account) || records.isEmpty()) return
-        val resolved = knownMomentNames(records)
-        mergeMoments(account, resolved)
+    private suspend fun applyFeed(account: String, records: List<Moment>, tombstones: Set<String> = emptySet()) {
+        if (!activeAccount(account) || (records.isEmpty() && tombstones.isEmpty())) return
+        val resolved = if (records.isEmpty()) emptyList() else knownMomentNames(records)
+        mergeMoments(account, resolved, tombstones)
+        if (!activeAccount(account)) return
         prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
         enrichMomentNames(account, resolved)
-        if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
+        LocketWidgetUpdater.updateAll(LocketApplication.instance)
     }
 
     private suspend fun refreshFeedNow(account: String, force: Boolean = false) = feedSyncLock.withLock {
@@ -615,11 +631,7 @@ class LocketViewModel(
                     if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenFeed(account).collect { delta ->
                         if (!activeAccount(account)) return@collect
-                        if (delta.deletedIds.isNotEmpty()) {
-                            deletedMomentIds.addAll(delta.deletedIds)
-                            removeMomentsFromCache(account, delta.deletedIds) { it.id in delta.deletedIds }
-                        }
-                        applyFeed(account, delta.upserts)
+                        applyFeed(account, delta.upserts, delta.deletedIds)
                         if (delta.ready) {
                             retry = 1_000L
                             _feedRealtime.value = true
@@ -652,6 +664,7 @@ class LocketViewModel(
                     apiClient.listenChat(account, convId).collect { delta ->
                         if (!activeAccount(account) || _activeConversationId.value != convId) return@collect
                         chatSyncLock.withLock {
+                            if (!activeAccount(account) || _activeConversationId.value != convId) return@withLock
                             delta.deletedIds.forEach { cache.deleteChatMessage(it) }
                             if (delta.upserts.isNotEmpty()) cache.saveChatMessages(delta.upserts)
                         }

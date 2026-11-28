@@ -2,7 +2,7 @@ use crate::models::{ChatMessage, ChatPage, FeedDelta, HistoryPage, Moment};
 use crate::CoreError;
 
 const MAGIC: &[u8; 4] = b"LKT1";
-const SCHEMA_VERSION: u16 = 3;
+const SCHEMA_VERSION: u16 = 4;
 const FEED_RECORD: u8 = 1;
 const HISTORY_RECORD: u8 = 2;
 const CHAT_RECORD: u8 = 3;
@@ -90,6 +90,7 @@ fn encode_moment(out: &mut Vec<u8>, value: &Moment) -> Result<(), CoreError> {
     out.extend_from_slice(&value.timestamp_nanoseconds.to_be_bytes());
     put_string(out, &value.md5)?;
     put_string(out, &value.overlays_json)?;
+    out.push(value.missing_fields);
     out.push(u8::from(value.overlay.is_some()));
     if let Some(overlay) = &value.overlay {
         for text in [&overlay.kind, &overlay.text, &overlay.alt_text] {

@@ -12,7 +12,7 @@ class FeedWireDecoderTest {
         val buffer = ByteArrayOutputStream()
         DataOutputStream(buffer).use { out ->
             out.writeBytes("LKT1")
-            out.writeShort(3)
+            out.writeShort(4)
             out.writeByte(1)
             out.writeByte(0)
             out.writeByte(1)
@@ -27,6 +27,7 @@ class FeedWireDecoderTest {
             out.writeInt(123_456_789)
             out.utf8("digest")
             out.utf8("""[{"overlay_type":"caption","data":{"type":"review"}}]""")
+            out.writeByte(4)
             out.writeByte(1)
             out.utf8("review")
             out.utf8("")

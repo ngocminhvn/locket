@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.locket.app.model.momentMissingFields
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
@@ -53,26 +54,47 @@ class LocketApiClient(
         check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
         val db = "projects/locket-4252a/databases/locket"
         realtime.listen(db, "$db/documents/history/$account", "entries", "date", 24, checkNotNull(getToken())).collect { event ->
-            val records = event.documents.mapNotNull { doc ->
-                val fields = doc.getAsJsonObject("fields") ?: return@mapNotNull null
-                val id = extractString(fields, "canonical_uid").ifBlank { optString(doc, "name").substringAfterLast('/') }
-                val owner = extractString(fields, "user")
-                val thumb = extractString(fields, "thumbnail_url")
-                val time = extractTimestampMs(fields, "date")?.div(1000) ?: return@mapNotNull null
-                if (id.isBlank() || owner.isBlank() || thumb.isBlank()) return@mapNotNull null
-                Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
-                    videoUrl = extractString(fields, "video_url").ifBlank { null }, caption = extractString(fields, "caption"),
-                    timestampSeconds = time, timeAgo = formatMomentAge(time), md5 = extractString(fields, "md5"), overlaysJson = firestoreOverlays(fields))
+            val records = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                event.documents.map { parseLiveMoment(it) }
             }
             emit(LiveDelta(records, event.deletedIds, event.ready))
         }
+    }
+
+    private fun parseLiveMoment(doc: com.google.firestore.v1.Document): Moment {
+        val fields = ProtoFields(doc.fieldsMap)
+        val id = fields.text("canonical_uid").ifBlank { doc.name.substringAfterLast('/') }
+        val owner = fields.text("user")
+        val thumb = fields.text("thumbnail_url")
+        val time = requireNotNull(fields.timestamp("date")) { "Missing realtime moment timestamp" }.epochSecond
+        require(id.isNotBlank() && owner.isNotBlank() && thumb.isNotBlank()) { "Incomplete realtime moment" }
+        val overlays = fields.overlays()
+        val raw = overlays?.toString() ?: "[]"
+        val decoded = com.locket.app.model.CaptionOverlays.fromPayload(raw, overlays)
+        return Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
+            videoUrl = fields.text("video_url").ifBlank { null }, caption = fields.text("caption"),
+            timestampSeconds = time, timeAgo = formatMomentAge(time), md5 = fields.text("md5"),
+            overlaysJson = raw, missingFields = momentMissingFields(fields::hasField))
+            .also { it.setDecodedOverlay(decoded) }
     }
 
     fun listenChat(account: String, conversationId: String): kotlinx.coroutines.flow.Flow<LiveDelta<ChatMessage>> = kotlinx.coroutines.flow.flow {
         check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
         val db = "projects/locket-4252a/databases/(default)"
         realtime.listen(db, "$db/documents/conversations/$conversationId", "messages", "created_at", 100, checkNotNull(getToken())).collect { event ->
-            emit(LiveDelta(event.documents.mapNotNull { parseChatMessageJson(it, conversationId, account) }, event.deletedIds, event.ready))
+            val delta = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val records = ArrayList<ChatMessage>(event.documents.size)
+                val deleted = event.deletedIds.toMutableSet()
+                for (doc in event.documents) {
+                    val id = doc.name.substringAfterLast('/')
+                    val fields = ProtoFields(doc.fieldsMap)
+                    val message = parseChatMessage(id, fields, conversationId, account, strict = true)
+                    if (message != null) records.add(message)
+                    else if (fields.hasValue("deleted_moment")) deleted.add(id)
+                }
+                LiveDelta(records, deleted, event.ready)
+            }
+            emit(delta)
         }
     }
     private data class CachedName(val value: Pair<String, String>, val expiresAt: Long)
@@ -1315,7 +1337,7 @@ class LocketApiClient(
             val names = cachedUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
                 val name = names[m.userUid]
-                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
+                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second).decodedFrom(m) else m
             }
             Result.success(FeedSync(resolved, nextToken))
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1412,12 +1434,12 @@ class LocketApiClient(
                 Moment(id = id, userUid = owner, userName = "",
                     thumbnailUrl = thumb, videoUrl = extractString(fields, "video_url").ifBlank { null },
                     caption = extractString(fields, "caption"), timestampSeconds = timestamp,
-                    timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"), overlaysJson = firestoreOverlays(fields))
+                    timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"), overlaysJson = firestoreOverlays(fields), missingFields = momentMissingFields(fields::has))
             }.orEmpty()
             val names = if (ownOnly) emptyMap() else cachedUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
                 val name = names[m.userUid]
-                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second) else m
+                if (name != null) m.copy(userName = name.first, userAvatarUrl = name.second).decodedFrom(m) else m
             }
             Result.success(HistoryPage(resolved, next))
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1469,7 +1491,8 @@ class LocketApiClient(
             videoUrl = optString(mObj, "video_url").ifBlank { null },
             caption = optString(mObj, "caption"), timestampSeconds = timestamp,
             timeAgo = formatMomentAge(timestamp), md5 = optString(mObj, "md5"),
-            overlaysJson = mObj.get("overlays")?.takeIf { it.isJsonArray }?.toString() ?: "[]")
+            overlaysJson = mObj.get("overlays")?.takeIf { it.isJsonArray }?.toString() ?: "[]",
+            missingFields = momentMissingFields(mObj::has))
     }
 
     suspend fun reactToMoment(momentUid: String, ownerUid: String, reaction: String, intensity: Int = 1): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -1842,28 +1865,26 @@ class LocketApiClient(
      * khi khong co bang chung).
      * timeAgo tinh tu latest_message.created_at that (truoc day hardcode "1d").
      */
-    private fun parseConversationDocument(doc: JsonObject, userUid: String): Conversation? {
-        val fields = doc.getAsJsonObject("fields")
-        val convId = extractString(fields, "uid")
-            .ifBlank { doc.get("name")?.asString?.substringAfterLast("/") ?: "" }
+    private fun parseConversationDocument(doc: JsonObject, userUid: String): Conversation? =
+        parseConversation(optString(doc, "name"), RestFields(asObj(doc, "fields")), userUid)
+
+    private fun parseConversation(name: String, fields: FirestoreFields, userUid: String): Conversation? {
+        val convId = fields.text("uid").ifBlank { name.substringAfterLast('/') }
         if (convId.isBlank()) return null
 
         // Nguoi doi dien: members[] tru myUid (fallback: field user_id/other_user_id cu)
-        val members = extractStringList(fields, "members")
+        val members = fields.strings("members")
         val otherUid = members.firstOrNull { it != userUid }
-            ?: extractString(fields, "user_id").ifBlank { extractString(fields, "other_user_id") }
+            ?: fields.text("user_id").ifBlank { fields.text("other_user_id") }
 
         // Tin cuoi: latest_message that; fallback field cu neu server con ghi
-        val latestMsg = fields?.getAsJsonObject("latest_message")
-            ?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
-        val lastMsg = if (latestMsg != null) extractString(latestMsg, "body") else ""
-        val lastMsgAtMs = if (latestMsg != null) {
-            extractTimestampMs(latestMsg, "created_at")
-        } else null
-        val latestSender = if (latestMsg != null) extractString(latestMsg, "sender") else ""
-        val latestThumb = if (latestMsg != null) extractString(latestMsg, "thumbnail_url") else ""
-        val fallbackMsg = extractString(fields, "last_message")
-        val fallbackAtMs = extractTimestampMs(fields, "last_message_date")
+        val latestMsg = fields.map("latest_message")
+        val lastMsg = latestMsg?.text("body").orEmpty()
+        val lastMsgAtMs = latestMsg?.timestamp("created_at")?.toEpochMilli()
+        val latestSender = latestMsg?.text("sender").orEmpty()
+        val latestThumb = latestMsg?.text("thumbnail_url").orEmpty()
+        val fallbackMsg = fields.text("last_message")
+        val fallbackAtMs = fields.timestamp("last_message_date")?.toEpochMilli()
 
         // Preview that, theo thu tu uu tien:
         // 1. body that cua tin cuoi; 2. "Da gui khoanh khac" CHI khi tin cuoi
@@ -1880,7 +1901,7 @@ class LocketApiClient(
         val timeAgo = lastMessageAtMs?.let { formatTimeAgo(it / 1000) } ?: ""
 
         // Chua doc: chi khi is_read == false ro rang
-        val isRead = extractBool(fields, "is_read")
+        val isRead = fields.boolean("is_read")
         val unread = if (isRead == false) 1 else 0
 
 
@@ -1898,7 +1919,12 @@ class LocketApiClient(
         check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
         val db = "projects/locket-4252a/databases/(default)"
         realtime.listen(db, "$db/documents/users/$account", "conversations", "__name__", null, checkNotNull(getToken())).collect { event ->
-            emit(LiveDelta(event.documents.mapNotNull { parseConversationDocument(it, account) }, event.deletedIds, event.ready))
+            val records = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                event.documents.map {
+                    requireNotNull(parseConversation(it.name, ProtoFields(it.fieldsMap), account)) { "Missing realtime conversation id" }
+                }
+            }
+            emit(LiveDelta(records, event.deletedIds, event.ready))
         }
     }
 
@@ -1907,7 +1933,7 @@ class LocketApiClient(
         val db = "projects/locket-4252a/databases/(default)"
         realtime.listen(db, "$db/documents/users/$account", "incoming_friend_requests", "__name__", null, checkNotNull(getToken())).collect { event ->
             emit(LiveDelta(event.documents.map { doc ->
-                extractString(doc.getAsJsonObject("fields"), "requesting_user").ifBlank { optString(doc, "name").substringAfterLast('/') }
+                ProtoFields(doc.fieldsMap).text("requesting_user").ifBlank { doc.name.substringAfterLast('/') }
             }.filter { it.isNotBlank() }, event.deletedIds, event.ready))
         }
     }
@@ -1916,7 +1942,7 @@ class LocketApiClient(
         check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
         val db = "projects/locket-4252a/databases/(default)"
         realtime.listen(db, "$db/documents/users/$account", "friends", "__name__", null, checkNotNull(getToken())).collect { event ->
-            emit(LiveDelta(event.documents.map { optString(it, "name").substringAfterLast('/') }.filter { it.isNotBlank() }, event.deletedIds, event.ready))
+            emit(LiveDelta(event.documents.map { it.name.substringAfterLast('/') }.filter { it.isNotBlank() }, event.deletedIds, event.ready))
         }
     }
 
@@ -2473,12 +2499,6 @@ class LocketApiClient(
         return if (el.isJsonNull) "" else try { el.asString } catch (e: Exception) { "" }
     }
 
-    /** Doc boolean that cua Firestore REST: fields.<name>.booleanValue (co the vang mat). */
-    private fun extractBool(fields: JsonObject?, fieldName: String): Boolean? {
-        val el = fields?.getAsJsonObject(fieldName)?.get("booleanValue") ?: return null
-        return try { el.asBoolean } catch (e: Exception) { null }
-    }
-
     /**
      * Doc timestamp that cua Firestore REST.
      * Dang chuan: fields.<name>.timestampValue = chuoi RFC3339.
@@ -2501,13 +2521,6 @@ class LocketApiClient(
         return seconds?.let { it * 1000 }
     }
 
-    /** Doc mang string that cua Firestore REST: fields.<name>.arrayValue.values[].stringValue. */
-    private fun extractStringList(fields: JsonObject?, fieldName: String): List<String> {
-        val values = fields?.getAsJsonObject(fieldName)
-            ?.getAsJsonObject("arrayValue")?.getAsJsonArray("values") ?: return emptyList()
-        return values.mapNotNull { it.asJsonObject?.get("stringValue")?.takeIf { v -> !v.isJsonNull }?.asString }
-    }
-
     /** Cung cong thuc timeAgo dung o parseMomentJson: vua xong / Xm / Xh / Xd. */
     private fun formatTimeAgo(epochSeconds: Long): String {
         val diff = (System.currentTimeMillis() / 1000) - epochSeconds
@@ -2525,47 +2538,34 @@ class LocketApiClient(
      * Tra ve null neu doc khong co body/sender/created_at hop le.
      */
     private fun parseChatMessageJson(doc: JsonObject, conversationId: String, myUid: String): ChatMessage? {
-        val fields = doc.getAsJsonObject("fields") ?: return null
-        val id = doc.get("name")?.asString?.substringAfterLast("/") ?: return null
-        val body = extractString(fields, "body")
-        val sender = extractString(fields, "sender")
-        val createdAtMs = extractTimestampMs(fields, "created_at") ?: return null
-        // Moment dinh kem da bi xoa (deleted_moment co gia tri that, khong phai null):
-        // bo thumbnail, chi giu text that neu co. Tin khong con noi dung hien thi
-        // duoc (khong body, khong thumbnail) thi bo qua.
-        val deletedMomentObj = fields.getAsJsonObject("deleted_moment")
-        val hasDeletedMoment = deletedMomentObj != null && !deletedMomentObj.has("nullValue")
-        val thumbnailUrl = if (hasDeletedMoment) null else extractString(fields, "thumbnail_url").ifBlank { null }
-        if (body.isBlank() && thumbnailUrl.isNullOrBlank()) return null
+        val fields = asObj(doc, "fields") ?: return null
+        val id = optString(doc, "name").substringAfterLast('/')
+        return parseChatMessage(id, RestFields(fields), conversationId, myUid)
+    }
 
-        val reactions = mutableListOf<MessageReaction>()
-        val reactionValues = fields.getAsJsonObject("reactions")
-            ?.getAsJsonObject("arrayValue")?.getAsJsonArray("values")
-        if (reactionValues != null) {
-            for (rElem in reactionValues) {
-                val rFields = rElem.asJsonObject?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
-                    ?: continue
-                val rSender = extractString(rFields, "sender")
-                val rEmoji = extractString(rFields, "emoji")
-                val rCreated = extractTimestampMs(rFields, "created_at") ?: 0L
-                if (rSender.isNotBlank() && rEmoji.isNotBlank()) {
-                    reactions.add(MessageReaction(rSender, rEmoji, rCreated))
-                }
-            }
+    private fun parseChatMessage(
+        id: String, fields: FirestoreFields, conversationId: String, myUid: String, strict: Boolean = false
+    ): ChatMessage? {
+        val body = fields.text("body")
+        val sender = fields.text("sender")
+        val createdAtMs = fields.timestamp("created_at")?.toEpochMilli()
+        if (id.isBlank() || createdAtMs == null) {
+            require(!strict) { "Incomplete realtime chat message" }
+            return null
+        }
+        val thumbnailUrl = fields.text("thumbnail_url").takeIf { it.isNotBlank() && !fields.hasValue("deleted_moment") }
+        if (body.isBlank() && thumbnailUrl == null) return null
+
+        val reactions = fields.maps("reactions").mapNotNull { reaction ->
+            val who = reaction.text("sender")
+            val emoji = reaction.text("emoji")
+            if (who.isBlank() || emoji.isBlank()) null
+            else MessageReaction(who, emoji, reaction.timestamp("created_at")?.toEpochMilli() ?: 0L)
         }
 
-        return ChatMessage(
-            id = id,
-            conversationId = conversationId,
-            senderUid = sender,
-            isMe = sender.isNotBlank() && sender == myUid,
-            text = body,
-            createdAtMs = createdAtMs,
-            clientToken = extractString(fields, "client_token").ifBlank { null },
-            replyMomentUid = extractString(fields, "reply_moment").ifBlank { null },
-            thumbnailUrl = thumbnailUrl,
-            reactions = reactions
-        )
+        return ChatMessage(id, conversationId, sender, sender.isNotBlank() && sender == myUid, body,
+            createdAtMs, fields.text("client_token").ifBlank { null }, fields.text("reply_moment").ifBlank { null },
+            thumbnailUrl, reactions)
     }
 
     private fun parseFirebaseError(respStr: String): String {

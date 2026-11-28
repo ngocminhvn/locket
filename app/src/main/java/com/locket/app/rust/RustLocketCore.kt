@@ -1,6 +1,7 @@
 package com.locket.app.rust
 
 import com.locket.app.model.Moment
+import com.locket.app.model.MOMENT_MISSING_MASK
 import com.locket.app.model.CaptionOverlay
 import com.locket.app.model.CaptionOverlays
 import java.nio.ByteBuffer
@@ -124,7 +125,7 @@ internal object FeedWireDecoder {
     private fun <T> reader(bytes: ByteArray, recordType: Int, block: (DataInputStream) -> T): T =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             require(input.readInt() == 0x4c4b5431)
-            require(input.readUnsignedShort() == 3)
+            require(input.readUnsignedShort() == 4)
             require(input.readUnsignedByte() == recordType)
             block(input)
         }
@@ -142,10 +143,11 @@ internal object FeedWireDecoder {
         require(nanos in 0..999_999_999)
         val md5 = utf8()
         val raw = utf8()
+        val missing = readUnsignedByte().also { require(it in 0..MOMENT_MISSING_MASK) }
         val overlay = if (bool()) captionOverlay() else null
         CaptionOverlays.cacheDecoded(raw, overlay)
         return Moment(id, owner, "", "", thumbnail, video, caption, seconds, age(nowSeconds, seconds),
-            md5 = md5, overlaysJson = raw).also { it.setDecodedOverlay(overlay) }
+            md5 = md5, overlaysJson = raw, missingFields = missing).also { it.setDecodedOverlay(overlay) }
     }
 
     private fun DataInputStream.captionOverlay(): CaptionOverlay {

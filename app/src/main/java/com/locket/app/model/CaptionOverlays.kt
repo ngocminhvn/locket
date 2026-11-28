@@ -63,14 +63,20 @@ object CaptionOverlays {
 
     internal fun first(json: String?): JsonObject? {
         if (json.isNullOrBlank() || json.length > 65536 || json.toByteArray(Charsets.UTF_8).size > 65536) return null
-        return runCatching {
-            JsonParser.parseString(json).asJsonArray.firstNotNullOfOrNull { element ->
-                element.takeIf { it.isJsonObject }?.asJsonObject?.takeIf {
-                    string(it, "overlay_type") == "caption" && isSupported(string(obj(it, "data"), "type"))
-                }
-            }
-        }.getOrNull()
+        return runCatching { firstCaption(JsonParser.parseString(json).asJsonArray) }.getOrNull()
     }
+
+    internal fun fromPayload(raw: String, overlays: JsonArray?): CaptionOverlay? {
+        if (overlays == null || raw.length > 65536 || raw.toByteArray(Charsets.UTF_8).size > 65536) return null
+        return decode(firstCaption(overlays)).also { cacheDecoded(raw, it) }
+    }
+
+    private fun firstCaption(overlays: JsonArray): JsonObject? =
+        overlays.firstNotNullOfOrNull { element ->
+            element.takeIf { it.isJsonObject }?.asJsonObject?.takeIf {
+                string(it, "overlay_type") == "caption" && isSupported(string(obj(it, "data"), "type"))
+            }
+        }
 
     internal fun isSupported(kind: String) = kind in supported
 

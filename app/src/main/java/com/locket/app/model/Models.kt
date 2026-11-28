@@ -22,7 +22,8 @@ data class Moment(
     val reactions: Map<String, Int> = emptyMap(),
     val md5: String = "",
     val isLocal: Boolean = false,
-    val overlaysJson: String = "[]"
+    val overlaysJson: String = "[]",
+    @Transient internal val missingFields: Int = 0
 ) {
     // Gson may allocate a legacy Moment without calling its constructor.
     @Transient @Volatile private var decodedOverlay: OverlayResult? = null
@@ -37,7 +38,43 @@ data class Moment(
         decodedOverlay = OverlayResult(caption)
     }
 
+    internal fun decodedFrom(other: Moment): Moment = apply {
+        if (overlaysJson == other.overlaysJson) decodedOverlay = other.decodedOverlay
+    }
+
     private class OverlayResult(val value: CaptionOverlay?)
+}
+
+internal const val MOMENT_OVERLAYS_MISSING = 1
+internal const val MOMENT_CAPTION_MISSING = 2
+internal const val MOMENT_VIDEO_MISSING = 4
+internal const val MOMENT_MD5_MISSING = 8
+internal const val MOMENT_MISSING_MASK = 15
+
+internal fun momentMissingFields(has: (String) -> Boolean): Int {
+    var flags = 0
+    if (!has("overlays")) flags = flags or MOMENT_OVERLAYS_MISSING
+    if (!has("caption")) flags = flags or MOMENT_CAPTION_MISSING
+    if (!has("video_url")) flags = flags or MOMENT_VIDEO_MISSING
+    if (!has("md5")) flags = flags or MOMENT_MD5_MISSING
+    return flags
+}
+
+internal fun Moment.reconcileFields(previous: Moment?): Moment {
+    val old = previous?.takeIf { it.userUid == userUid }
+    if (missingFields == 0 && (old == null || reactions.isNotEmpty() || old.reactions.isEmpty())) return this
+    fun missing(flag: Int): Boolean = old != null && missingFields and flag != 0
+    val result = copy(
+        overlaysJson = if (missing(MOMENT_OVERLAYS_MISSING)) old!!.overlaysJson else overlaysJson,
+        caption = if (missing(MOMENT_CAPTION_MISSING)) old!!.caption else caption,
+        videoUrl = if (missing(MOMENT_VIDEO_MISSING)) old!!.videoUrl else videoUrl,
+        md5 = if (missing(MOMENT_MD5_MISSING)) old!!.md5 else md5,
+        reactions = if (reactions.isEmpty() && old != null) old.reactions else reactions,
+        missingFields = 0
+    )
+    val source = if (missing(MOMENT_OVERLAYS_MISSING)) old!! else this
+    result.decodedFrom(source)
+    return result
 }
 
 data class Friend(
