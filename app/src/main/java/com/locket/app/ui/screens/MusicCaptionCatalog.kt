@@ -108,7 +108,7 @@ internal object MusicCaptionCatalog {
     /**
      * MetaBrainz's public Labs dataset maps recording MBIDs to actual Spotify
      * track IDs, including tracks without a direct MusicBrainz URL relationship.
-     * The documented POST contract returns one result per input in order.
+     * The service can omit unmatched inputs. Match each response by its MBID.
      */
     private suspend fun spotifyBatch(ids: List<String>): Map<String, String> {
         if (ids.isEmpty()) return emptyMap()
@@ -125,20 +125,18 @@ internal object MusicCaptionCatalog {
             client.newCall(request).execute().use { response ->
                 check(response.isSuccessful) { "Dịch vụ ánh xạ Spotify tạm thời không khả dụng." }
                 val rows = JSONArray(response.body?.string() ?: error("Thiếu dữ liệu Spotify"))
-                check(rows.length() == ids.size) { "Phản hồi ánh xạ Spotify không hợp lệ." }
+                val requested = ids.associateBy { it.lowercase(Locale.ROOT) }
                 buildMap {
-                    ids.forEachIndexed { index, id ->
-                        val row = rows.optJSONObject(index) ?: return@forEachIndexed
-                        val echoed = row.optString("recording_mbid")
-                        if (echoed.isNotBlank() && !echoed.equals(id, ignoreCase = true)) return@forEachIndexed
-                        val tracks = row.optJSONArray("spotify_track_ids") ?: return@forEachIndexed
+                    for (index in 0 until rows.length()) {
+                        val row = rows.optJSONObject(index) ?: continue
+                        val id = requested[row.optString("recording_mbid").lowercase(Locale.ROOT)] ?: continue
+                        val tracks = row.optJSONArray("spotify_track_ids") ?: continue
                         for (i in 0 until tracks.length()) {
                             val raw = tracks.optString(i)
                             val url = SpotifyCaptionSource.canonicalTrack(raw)
-                                ?: raw.takeIf { it.matches(Regex("^[A-Za-z0-9]{22}$")) }
-                                    ?.let { SpotifyCaptionSource.canonicalTrack("spotify:track:$it") }
+                                ?: SpotifyCaptionSource.canonicalTrack("spotify:track:$raw")
                             if (url != null) {
-                                put(id, url)
+                                putIfAbsent(id, url)
                                 break
                             }
                         }
