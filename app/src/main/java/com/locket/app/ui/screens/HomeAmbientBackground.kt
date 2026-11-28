@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -29,9 +30,23 @@ internal data class AmbientPalette(val top: Color, val middle: Color, val bottom
 }
 private val neutral = AmbientPalette(LocketBlack, Color(0xFF19191B), LocketBlack)
 
-/** Each screen shares the extracted palette but chooses its own darkness. */
-internal enum class AmbientMode(val strength: Float, val durationMs: Int) {
-    HOME(1f, 160), HISTORY(0.74f, 140), MEMORY(1f, 160), CONVERSATION(0.68f, 180), ACTIVITY(0.74f, 160)
+private val ambientCubicOut = Easing { t ->
+    val remaining = 1f - t
+    1f - remaining * remaining * remaining
+}
+private val ambientQuadOut = Easing { t ->
+    val remaining = 1f - t
+    1f - remaining * remaining
+}
+
+/** Reference-derived timing; keep Locket's custom three-tone tint architecture. */
+internal enum class AmbientMode(val strength: Float, val durationMs: Int, val easing: Easing) {
+    // Home has no equivalent tint transition in the original; retain our custom timing.
+    HOME(1f, 160, FastOutSlowInEasing),
+    HISTORY(0.74f, 150, ambientCubicOut),
+    MEMORY(1f, 150, ambientCubicOut),
+    CONVERSATION(0.68f, 300, ambientQuadOut),
+    ACTIVITY(0.74f, 220, ambientQuadOut)
 }
 private val paletteCache = LruCache<String, AmbientPalette>(128)
 
@@ -69,9 +84,9 @@ internal fun rememberAmbientPalette(url: String?, mode: AmbientMode): AmbientPal
         green = LocketBlack.green + (color.green - LocketBlack.green) * mode.strength,
         blue = LocketBlack.blue + (color.blue - LocketBlack.blue) * mode.strength
     )
-    val top by animateColorAsState(tone(palette.top), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-top")
-    val middle by animateColorAsState(tone(palette.middle), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-middle")
-    val bottom by animateColorAsState(tone(palette.bottom), tween(mode.durationMs, easing = FastOutSlowInEasing), label = "ambient-bottom")
+    val top by animateColorAsState(tone(palette.top), tween(mode.durationMs, easing = mode.easing), label = "ambient-top")
+    val middle by animateColorAsState(tone(palette.middle), tween(mode.durationMs, easing = mode.easing), label = "ambient-middle")
+    val bottom by animateColorAsState(tone(palette.bottom), tween(mode.durationMs, easing = mode.easing), label = "ambient-bottom")
     return AmbientPalette(top, middle, bottom)
 }
 
