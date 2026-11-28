@@ -72,7 +72,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
+private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, MUSIC, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
 
 internal class MomentReviewSlots(
     val header: @Composable () -> Unit,
@@ -96,7 +96,6 @@ internal fun rememberMomentReviewSlots(
     friends: List<Friend>,
     replyToFriend: Friend?,
     streak: Int,
-    fetchNativeWeather: suspend (Double, Double) -> com.google.gson.JsonObject?,
     isPosting: Boolean,
     onCancel: () -> Unit,
     onSend: (String, List<String>, String) -> Unit
@@ -115,6 +114,8 @@ internal fun rememberMomentReviewSlots(
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableIntStateOf(0) }
     var reviewComment by remember(bitmap) { mutableStateOf("") }
+    var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
+    var musicPicker by remember(bitmap) { mutableStateOf(false) }
     var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
     var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(CaptionLocationData.recentWeather()) }
     var sheet by remember { mutableStateOf(false) }
@@ -136,7 +137,7 @@ internal fun rememberMomentReviewSlots(
     val hour = remember(captureDate) { java.util.Calendar.getInstance().apply { this.time = captureDate }.let { it.get(java.util.Calendar.HOUR_OF_DAY) + it.get(java.util.Calendar.MINUTE) / 60f } }
     val general = remember(streak, hour) {
         buildList {
-            addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME))
+            addAll(listOf(CaptionKind.TEXT, CaptionKind.REVIEW, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.TIME, CaptionKind.MUSIC))
             if (streak > 0) add(CaptionKind.STREAK)
             add(CaptionKind.PARTY)
             if (hour >= 5f && hour < 10f) add(CaptionKind.MORNING)
@@ -153,6 +154,7 @@ internal fun rememberMomentReviewSlots(
         CaptionKind.LOCATION -> location.trim().let { if (it.isBlank()) "" else "📍 $it" }
         CaptionKind.WEATHER -> weather.trim()
         CaptionKind.TIME -> time
+        CaptionKind.MUSIC -> music?.label.orEmpty()
         CaptionKind.STREAK -> if (streak > 0) "🔥 $streak" else ""
         CaptionKind.PARTY -> "🪩 Party Time!"
         CaptionKind.OOTD -> "🕶 OOTD"
@@ -179,6 +181,7 @@ internal fun rememberMomentReviewSlots(
                 })
             }
             CaptionKind.WEATHER -> weatherData?.overlay()
+            CaptionKind.MUSIC -> music?.overlay()
             CaptionKind.TIME -> o.make("time", time, icon = o.icon("sf_symbol", "clock.fill", "#FFFFFFCC"),
                 payload = com.google.gson.JsonObject().apply { addProperty("date", captureDate.time / 1000) })
             CaptionKind.STREAK -> o.make("streak", streak.toString(), colors = listOf("#FFE38B", "#FFB900"),
@@ -203,17 +206,7 @@ internal fun rememberMomentReviewSlots(
                         locationFix = fix
                     }
                     CaptionKind.WEATHER -> {
-                        val data = try {
-                            fetchNativeWeather(fix.latitude, fix.longitude)?.let { raw ->
-                                val temp = raw.get("temperature").asDouble
-                                val condition = raw.get("condition_code").asString.replaceFirstChar { it.lowercaseChar() }
-                                val cover = raw.get("cloud_cover").asDouble
-                                require(temp.isFinite() && cover.isFinite() && condition.isNotBlank())
-                                CaptionWeather(temp, condition, raw.get("daylight").asBoolean, cover.coerceIn(0.0, 1.0))
-                            }
-                        } catch (e: CancellationException) { throw e }
-                        catch (_: Exception) { null } ?: CaptionLocationData.weather(fix)
-                        CaptionLocationData.rememberWeather(data)
+                        val data = CaptionLocationData.weather(fix)
                         weatherData = data
                         weather = data.label
                     }
@@ -256,6 +249,7 @@ internal fun rememberMomentReviewSlots(
                 editor = k
             }
             CaptionKind.LOCATION, CaptionKind.WEATHER -> requestCaption(k)
+            CaptionKind.MUSIC -> musicPicker = true
             else -> Unit
         }
     }
@@ -290,6 +284,7 @@ internal fun rememberMomentReviewSlots(
 
     BackHandler(enabled = true) {
         when {
+            musicPicker -> musicPicker = false
             infoOpen -> infoOpen = false
             editor != null -> editor = null
             sheet -> sheet = false
@@ -390,6 +385,7 @@ internal fun rememberMomentReviewSlots(
                                 CaptionKind.LOCATION -> "Lấy vị trí"
                                 CaptionKind.WEATHER -> "Lấy thời tiết"
                                 CaptionKind.REVIEW -> "Chọn đánh giá"
+                                CaptionKind.MUSIC -> "Chọn bài hát"
                                 else -> "Thêm một tin nhắn"
                             }
                         }
@@ -414,7 +410,7 @@ internal fun rememberMomentReviewSlots(
                             }
                         } else {
                             val data = overlay(item)?.getAsJsonObject("data")
-                            val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER)) choose(item) else sheet = true }
+                            val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.MUSIC)) choose(item) else sheet = true }
                             MomentOverlayPill(data, label, Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
                                 .clickable(enabled = !isPosting, onClick = tap))
                         }
@@ -527,6 +523,10 @@ internal fun rememberMomentReviewSlots(
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CaptionChip("Music", icon = Icons.Default.MusicNote, iconTint = Color(0xFF1ED760)) { choose(CaptionKind.MUSIC) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Location", icon = Icons.Default.LocationOn) { choose(CaptionKind.LOCATION) }
                     CaptionChip("Weather", icon = Icons.Default.Cloud) { choose(CaptionKind.WEATHER) }
                 }
@@ -560,12 +560,14 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("🌙 Goodnight", gradient = Brush.verticalGradient(listOf(Color(0xFF370C6F), Color(0xFF575CD4)))) { choose(CaptionKind.NIGHT) }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text("Thời tiết: Locket / Open-Meteo dự phòng · vị trí chỉ lấy khi bạn chọn.",
+                Text("Thời tiết: Open-Meteo · vị trí chỉ lấy khi bạn chọn.",
                     color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
                 Spacer(Modifier.height(20.dp))
             }
         }
     }
+
+    if (musicPicker) MusicCaptionDialog(initial = music, onDismiss = { musicPicker = false }, onSelect = { music = it; musicPicker = false })
 
     editor?.let {
         AlertDialog(
