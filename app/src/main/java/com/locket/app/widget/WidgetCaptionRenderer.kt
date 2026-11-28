@@ -11,6 +11,8 @@ import android.graphics.Typeface
 import android.text.TextPaint
 import android.text.TextUtils
 import com.locket.app.model.Moment
+import com.locket.app.model.CaptionSymbol
+import com.locket.app.model.captionSymbol
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -22,19 +24,18 @@ internal object WidgetCaptionRenderer {
         val review = type == "review" && rating > 0f
         val comment = data.comment
         val symbol = data.iconData
-        val prefix = when (data.iconKind) {
-            "emoji" -> symbol
-            "sf_symbol" -> when {
-                symbol.startsWith("clock") -> "◷"
-                symbol.startsWith("flame") -> "🔥"
-                symbol.startsWith("sun.max") -> "☀"
-                symbol.startsWith("moon") || symbol.startsWith("cloud.moon") -> "☾"
-                symbol.startsWith("snow") -> "❄"
-                symbol.startsWith("cloud.rain") -> "☂"
-                symbol.startsWith("cloud") -> "☁"
-                else -> ""
-            }
-            else -> if (type == "location") "📍" else ""
+        val prefix = when (captionSymbol(type, data.iconKind, symbol)) {
+            CaptionSymbol.LOCATION -> "📍"
+            CaptionSymbol.CLOCK -> "◷"
+            CaptionSymbol.FLAME -> "🔥"
+            CaptionSymbol.SUN -> "☀"
+            CaptionSymbol.MOON -> "☾"
+            CaptionSymbol.PARTLY_CLOUDY -> "🌤"
+            CaptionSymbol.SNOW -> "❄"
+            CaptionSymbol.RAIN -> "☂"
+            CaptionSymbol.THUNDER -> "⛈"
+            CaptionSymbol.CLOUD -> "☁"
+            null -> if (data.iconKind == "emoji") symbol else ""
         }
         val label = if (review) comment else listOf(prefix, data.text).filter { it.isNotBlank() }.joinToString(" ")
         if (!review && label.isBlank()) return null

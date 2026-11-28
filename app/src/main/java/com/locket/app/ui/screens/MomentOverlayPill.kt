@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.remember
 import com.locket.app.model.CaptionOverlay
+import com.locket.app.model.CaptionSymbol
+import com.locket.app.model.captionSymbol
 import com.locket.app.model.Moment
 import coil.compose.AsyncImage
 import kotlin.math.cos
@@ -94,29 +96,30 @@ internal fun MomentOverlayPill(data: CaptionOverlay?, fallback: String, modifier
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val name = data?.iconData.orEmpty()
         val iconColor = data?.let { Color(it.iconColor) } ?: foreground
-        when (data?.iconKind) {
+        val symbol = captionSymbol(type.orEmpty(), data?.iconKind.orEmpty(), name)
+        if (symbol != null) {
+            val vector = when (symbol) {
+                CaptionSymbol.LOCATION -> Icons.Default.LocationOn
+                CaptionSymbol.CLOCK -> Icons.Default.AccessTime
+                CaptionSymbol.FLAME -> Icons.Default.LocalFireDepartment
+                CaptionSymbol.SUN -> Icons.Default.WbSunny
+                CaptionSymbol.MOON -> Icons.Default.NightsStay
+                CaptionSymbol.PARTLY_CLOUDY -> Icons.Default.WbCloudy
+                CaptionSymbol.SNOW -> Icons.Default.AcUnit
+                CaptionSymbol.RAIN -> Icons.Default.Grain
+                CaptionSymbol.THUNDER -> Icons.Default.Thunderstorm
+                CaptionSymbol.CLOUD -> Icons.Default.Cloud
+            }
+            val tint = when (symbol) {
+                CaptionSymbol.LOCATION -> foreground
+                CaptionSymbol.SUN -> Color(0xFFFFC107)
+                else -> iconColor
+            }
+            Icon(vector, null, modifier = Modifier.size(22.dp), tint = tint)
+        } else when (data?.iconKind) {
             "emoji" -> if (name.isNotBlank()) Text(name, fontSize = 18.sp)
             "image" -> if (name.startsWith("https://")) AsyncImage(name, null, Modifier.size(22.dp))
-            "sf_symbol" -> {
-                val vector = when {
-                    name.startsWith("clock") -> Icons.Default.AccessTime
-                    name.startsWith("flame") -> Icons.Default.LocalFireDepartment
-                    name.startsWith("sun.max") -> Icons.Default.WbSunny
-                    name.startsWith("moon") -> Icons.Default.NightsStay
-                    name.startsWith("cloud.sun") -> Icons.Default.WbCloudy
-                    name.startsWith("cloud.moon") -> Icons.Default.NightsStay
-                    name.startsWith("snow") -> Icons.Default.AcUnit
-                    name.startsWith("cloud.rain") -> Icons.Default.Grain
-                    name.startsWith("cloud.bolt") -> Icons.Default.Thunderstorm
-                    else -> Icons.Default.Cloud
-                }
-                Icon(vector, null, modifier = Modifier.size(22.dp), tint = if (name.startsWith("sun.max")) Color(0xFFFFC107) else iconColor)
-            }
-            else -> when (type) {
-                "location" -> Icon(Icons.Default.LocationOn, null, tint = iconColor, modifier = Modifier.size(20.dp))
-                "music" -> Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(20.dp))
-                else -> Unit
-            }
+            else -> if (type == "music") Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(20.dp))
         }
         Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold,
             maxLines = data?.maxLines ?: 4,

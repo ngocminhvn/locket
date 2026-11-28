@@ -138,3 +138,26 @@ internal data class CaptionOverlay(
     val comment: String,
     val spotifyUrl: String
 )
+
+/** Semantic location takes precedence over platform-specific icon names. */
+internal enum class CaptionSymbol {
+    LOCATION, CLOCK, FLAME, SUN, MOON, PARTLY_CLOUDY, SNOW, RAIN, THUNDER, CLOUD
+}
+
+internal fun captionSymbol(kind: String, iconKind: String, iconData: String): CaptionSymbol? {
+    if (kind == "location") return CaptionSymbol.LOCATION
+    if (iconKind != "sf_symbol") return null
+    return when {
+        iconData.startsWith("location") || iconData.startsWith("mappin") -> CaptionSymbol.LOCATION
+        iconData.startsWith("clock") -> CaptionSymbol.CLOCK
+        iconData.startsWith("flame") -> CaptionSymbol.FLAME
+        iconData.startsWith("sun.max") -> CaptionSymbol.SUN
+        iconData.startsWith("moon") || iconData.startsWith("cloud.moon") -> CaptionSymbol.MOON
+        iconData.startsWith("cloud.sun") -> CaptionSymbol.PARTLY_CLOUDY
+        iconData.startsWith("snow") -> CaptionSymbol.SNOW
+        iconData.startsWith("cloud.rain") || iconData.startsWith("cloud.drizzle") -> CaptionSymbol.RAIN
+        iconData.startsWith("cloud.bolt") -> CaptionSymbol.THUNDER
+        iconData.startsWith("cloud") -> CaptionSymbol.CLOUD
+        else -> null
+    }
+}
