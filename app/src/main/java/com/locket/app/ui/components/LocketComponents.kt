@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -75,7 +76,8 @@ fun LocketTopBar(
     onTitleClick: () -> Unit = {},
     onAvatarClick: () -> Unit = {},
     dropdownExpanded: Boolean = false,
-    adaptiveBackground: Boolean = false
+    adaptiveBackground: Boolean = false,
+    showAvatar: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -102,7 +104,8 @@ fun LocketTopBar(
             )
         }
 
-        // Center Pill (Friends count or filter)
+        // Equal side slots keep the center title stable, including long names.
+        Box(Modifier.weight(1f).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
                 .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
@@ -124,7 +127,10 @@ fun LocketTopBar(
                 text = title,
                 color = Color.White,
                 fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
             if (showDropdownArrow) {
                 Icon(
@@ -136,41 +142,20 @@ fun LocketTopBar(
             }
         }
 
-        // Avatar with yellow heart badge
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clickable(onClick = onAvatarClick),
-            contentAlignment = Alignment.BottomEnd
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                    .background(LocketAvatarBg)
-            ) {
-                if (avatarUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = avatarUrl,
-                        contentDescription = "Avatar",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-            }
+        }
+        if (showAvatar) LocketProfileAvatar(avatarUrl, onAvatarClick)
+        else Spacer(Modifier.size(46.dp))
+    }
+}
 
+@Composable
+fun LocketProfileAvatar(avatarUrl: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.size(46.dp).clip(CircleShape).background(LocketAvatarBg)
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        if (avatarUrl.isNotBlank()) {
+            AsyncImage(avatarUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Icon(Icons.Default.Person, "Hồ sơ", tint = Color.White, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -225,7 +210,9 @@ fun FeedBottomBar(
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
     unreadConversations: Int = 0,
-    adaptiveBackground: Boolean = false
+    adaptiveBackground: Boolean = false,
+    pagePosition: Float? = null,
+    feedMode: Boolean = showSideActions
 ) {
     if (separated) {
         val base = if (adaptiveBackground) LocalMomentColor.current else null
@@ -241,35 +228,46 @@ fun FeedBottomBar(
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
-            Row(
+            BoxWithConstraints(
                 Modifier.weight(1f).height(54.dp)
                     .then(if (base != null) Modifier.clip(CircleShape).background(surface)
                         else Modifier.liquidGlassEffect(CircleShape, surface)).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                contentAlignment = Alignment.CenterStart
             ) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    IconButton(onClick = onHistoryClick, modifier = Modifier.size(38.dp)
-                        .clip(CircleShape).background(if (currentScreen == "history") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
-                        Icon(Icons.Default.Apps, "Kỷ niệm", tint = if (currentScreen == "history") Color.White else inactive, modifier = Modifier.size(25.dp))
-                    }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(38.dp).clip(CircleShape)
-                        .then(if (currentScreen == "camera") Modifier.border(3.dp, LocketYellow, CircleShape) else Modifier)
-                        .clickable(onClick = onShutterClick), contentAlignment = Alignment.Center) {
-                        if (currentScreen == "camera") Box(Modifier.size(29.dp).background(Color.White, CircleShape))
-                        else Icon(Icons.Default.PhotoCamera, "Camera", tint = inactive, modifier = Modifier.size(25.dp))
-                    }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
-                        IconButton(onClick = onChatClick, modifier = Modifier.fillMaxSize()
-                            .clip(CircleShape).background(if (currentScreen == "chat") Color.White.copy(alpha = 0.16f) else Color.Transparent)) {
-                            Icon(Icons.Default.ChatBubble,
-                                if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
-                                tint = if (currentScreen == "chat") Color.White else inactive, modifier = Modifier.size(24.dp))
+                val selected = when (currentScreen) { "history" -> 0; "chat" -> 2; else -> 1 }
+                val position = (pagePosition ?: selected.toFloat()).coerceIn(0f, 2f)
+                val cell = maxWidth / 3
+                val highlightWidth = (cell - 4.dp).coerceAtLeast(1.dp)
+                val highlightAlpha = if (feedMode) kotlin.math.abs(position - 1f).coerceIn(0f, 1f) else 1f
+                Box(Modifier.offset(x = cell * position + (cell - highlightWidth) / 2)
+                    .width(highlightWidth).height(46.dp).clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.16f * highlightAlpha)))
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        IconButton(onClick = onHistoryClick, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.Apps, "Kỷ niệm", tint = if (selected == 0) Color.White else inactive, modifier = Modifier.size(23.dp))
                         }
-                        UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
+                    }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        IconButton(onClick = onShutterClick, modifier = Modifier.size(44.dp)) {
+                            if (feedMode) {
+                                Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(29.dp).background(Color.White, CircleShape))
+                                }
+                            } else {
+                                Icon(Icons.Default.Home, "Camera", tint = if (selected == 1) Color.White else inactive, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                            IconButton(onClick = onChatClick, modifier = Modifier.fillMaxSize()) {
+                                Icon(Icons.Default.ChatBubble,
+                                    if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
+                                    tint = if (selected == 2) Color.White else inactive, modifier = Modifier.size(24.dp))
+                            }
+                            UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
+                        }
                     }
                 }
             }
