@@ -39,8 +39,6 @@ import com.locket.app.ui.screens.*
 import com.wexpa.liquidglass.LiquidGlassTheme
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
-import com.locket.app.ui.theme.LocalMomentColor
-import com.locket.app.ui.theme.rememberMomentColor
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,8 +81,6 @@ class MainActivity : ComponentActivity() {
                 var selectedGridIndex by remember { mutableStateOf(0) }
                 var activeChatFriend by remember { mutableStateOf<Friend?>(null) }
                 var homeTabSwipeEnabled by remember { mutableStateOf(true) }
-                var lastMomentUrl by remember { mutableStateOf<String?>(null) }
-                val momentColor = rememberMomentColor(lastMomentUrl)
                 val mainTab = when (currentScreen) {
                     "history" -> 0
                     "camera", "feed", "grid" -> 1
@@ -97,7 +93,6 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(isLoggedIn) {
                     if (!isLoggedIn) {
                         currentScreen = "welcome"
-                        lastMomentUrl = null
                         tabStateHolder.removeState("history")
                         tabStateHolder.removeState("chat")
                     }
@@ -184,7 +179,6 @@ class MainActivity : ComponentActivity() {
                             // One shared backdrop recording for the main navigation only.
                             // Keep the existing pager, chrome bounds and touch handling.
                             LiquidGlassTheme(dark = true, background = LocketBlack, renderScale = 0.75f) {
-                            CompositionLocalProvider(LocalMomentColor provides momentColor) {
                             HorizontalPager(
                                 state = pager,
                                 modifier = Modifier.fillMaxSize(),
@@ -226,7 +220,6 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 cameraRequest = homeCameraRequest,
                                                 shareRequest = homeShareRequest,
-                                                onMomentColorSource = { lastMomentUrl = it },
                                                 sharedProfileAvatar = true
                                             )
                                         }
@@ -275,13 +268,11 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = tabRoutes[pager.currentPage],
                                         showSideActions = homeSettled && homeNavFeed,
                                         unreadConversations = unreadConversations,
-                                        adaptiveBackground = !homeSettled || homeNavFeed,
                                         pagePosition = pager.currentPage + pager.currentPageOffsetFraction,
                                         feedMode = homeSettled && homeNavFeed
                                     )
                                 }
                             }
-                            } // LocalMomentColor
                             } // LiquidGlassTheme
                         }
                         else -> {
