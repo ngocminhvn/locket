@@ -75,7 +75,7 @@ fun ConversationsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(momentGradient(LocalMomentColor.current))
+            .background(backdropColor(BackdropFallbackTint, CONVERSATION_SCRIM))
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
