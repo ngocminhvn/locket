@@ -2308,28 +2308,6 @@ class LocketApiClient(
         }
     }
 
-    /** Normal authenticated callable only; do not fabricate App Check or CAPTCHA tokens. */
-    suspend fun getMomentWeather(latitude: Double, longitude: Double): JsonObject? {
-        val payload = JsonObject().apply {
-            add("data", JsonObject().apply {
-                addProperty("request_type", "weather")
-                add("user_location", JsonObject().apply {
-                    addProperty("latitude", latitude)
-                    addProperty("longitude", longitude)
-                })
-            })
-        }
-        val bytes = kotlinx.coroutines.withTimeoutOrNull(4500L) {
-            callEndpointBytes("getMomentOverlayData", payload, cancellable = true)
-        } ?: return null
-        return runCatching {
-            val root = gson.fromJson(bytes.toString(Charsets.UTF_8), JsonObject::class.java)
-            val result = root.getAsJsonObject("result") ?: root
-            if (result.has("status") && result.get("status").asInt !in 200..299) return@runCatching null
-            result.getAsJsonObject("data")?.getAsJsonObject("weather")
-        }.getOrNull()
-    }
-
     suspend fun postMoment(
         thumbnailUrl: String,
         caption: String = "",
