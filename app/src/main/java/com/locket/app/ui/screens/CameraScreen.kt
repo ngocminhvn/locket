@@ -37,6 +37,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
@@ -691,20 +692,63 @@ fun CameraScreen(
         else restorePhotoSession()
     })
 
-    // Gallery Picker launcher
+    // Import through the system picker: no broad media permission or new upload path.
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let {
-            try {
-                val bmp = context.contentResolver.openInputStream(it)?.use { stream -> BitmapFactory.decodeStream(stream) }
-                if (bmp != null) {
-                    clearCapture()
-                    if (cameraPreferences.showPhotoInfo) captureDetails = "Ảnh từ thư viện"
-                    capturedBitmap = bmp
-                } else Toast.makeText(context, "Không thể đọc ảnh", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "Không thể đọc ảnh: ${e.message}", Toast.LENGTH_SHORT).show()
+        if (uri != null && screenActive && !processingVideo && capturedBitmap == null) {
+            processingVideo = true
+            scope.launch {
+                var imported: File? = null
+                try {
+                    val mime = context.contentResolver.getType(uri).orEmpty()
+                    val bitmap = withContext(Dispatchers.IO) {
+                        if (mime.startsWith("video/")) {
+                            val file = File.createTempFile("locket-import-", ".mp4", context.cacheDir)
+                            imported = file
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                file.outputStream().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    var total = 0L
+                                    while (true) {
+                                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                        val count = input.read(buffer)
+                                        if (count < 0) break
+                                        total += count
+                                        check(total <= 50L * 1024 * 1024) { "Video quá lớn (tối đa 50 MB)" }
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
+                            } ?: error("Không đọc được video")
+                            val retriever = MediaMetadataRetriever()
+                            try {
+                                retriever.setDataSource(file.absolutePath)
+                                check(mime == "video/mp4" && retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes") {
+                                    "Chỉ hỗ trợ video MP4"
+                                }
+                                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                                check(duration != null && duration in 1L..2500L) { "Video tối đa 2,5 giây. Hãy cắt video trước khi chọn." }
+                                retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                            } finally { retriever.release() }
+                        } else {
+                            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        }
+                    } ?: error("Không đọc được ảnh hoặc video")
+                    if (screenActive) {
+                        clearCapture()
+                        if (cameraPreferences.showPhotoInfo) captureDetails = if (imported != null) "Video từ thư viện" else "Ảnh từ thư viện"
+                        capturedVideo = imported
+                        imported = null
+                        capturedBitmap = bitmap
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (screenActive) Toast.makeText(context, e.message ?: "Không đọc được tệp", Toast.LENGTH_LONG).show()
+                } finally {
+                    imported?.delete()
+                    processingVideo = false
+                }
             }
         }
     }
@@ -1104,7 +1148,7 @@ fun CameraScreen(
                     modifier = Modifier
                         .size(56.dp)
                         .locketHeaderTransition { chromeProgress }
-                        .clickable(enabled = chromeProgress >= 0.999f && !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
+                        .clickable(enabled = chromeProgress >= 0.999f && !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch(arrayOf("image/*", "video/*")) },
                     contentAlignment = Alignment.Center
                 ) {
                     ReferenceIcon(ReferenceGlyph.Gallery, "Thư viện", Color.White, Modifier.size(48.dp))

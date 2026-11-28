@@ -133,10 +133,11 @@ internal object CaptionLocationData {
     suspend fun weather(location: Location): CaptionWeather = withContext(Dispatchers.IO) {
         val lat = String.format(Locale.US, "%.2f", location.latitude)
         val lon = String.format(Locale.US, "%.2f", location.longitude)
-        val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day,cloud_cover&temperature_unit=celsius"
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code,is_day,cloud_cover&daily=sunrise,sunset&timezone=auto&timeformat=unixtime&temperature_unit=celsius"
         client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             check(response.isSuccessful) { "Không lấy được thời tiết (HTTP ${response.code})" }
-            val current = JSONObject(response.body?.string() ?: error("Thiếu dữ liệu thời tiết")).getJSONObject("current")
+            val document = JSONObject(response.body?.string() ?: error("Thiếu dữ liệu thời tiết"))
+            val current = document.getJSONObject("current")
             val temperature = current.getDouble("temperature_2m")
             val cloudCover = current.getDouble("cloud_cover") / 100.0
             check(temperature.isFinite() && cloudCover.isFinite())
@@ -151,12 +152,21 @@ internal object CaptionLocationData {
                 61, 63, 80, 81 -> "rain"
                 65, 82 -> "heavyRain"
                 66, 67 -> "freezingRain"
-                71, 73, 77, 85 -> "snow"
+                71, 77, 85 -> "flurries"
+                73 -> "snow"
                 75, 86 -> "heavySnow"
-                95, 96, 99 -> "thunderstorms"
+                95 -> "thunderstorms"
+                96, 99 -> "strongStorms"
                 else -> error("Mã thời tiết không hỗ trợ")
             }
-            CaptionWeather(temperature, condition, current.getInt("is_day") == 1, cloudCover.coerceIn(0.0, 1.0))
+            val now = current.optLong("time", 0L)
+            val daily = document.optJSONObject("daily")
+            fun near(key: String): Boolean {
+                val event = daily?.optJSONArray(key)?.optLong(0, 0L) ?: 0L
+                return event > 0L && now > 0L && kotlin.math.abs(now - event) <= 1200L
+            }
+            val twilight = when { near("sunrise") -> "sunrise"; near("sunset") -> "sunset"; else -> null }
+            CaptionWeather(temperature, condition, current.getInt("is_day") == 1, cloudCover.coerceIn(0.0, 1.0), twilight)
                 .also { rememberWeather(it) }
         }
     }
@@ -166,22 +176,32 @@ internal object CaptionLocationData {
 }
 
 internal data class CaptionWeather(
-    val celsius: Double, val condition: String, val daylight: Boolean, val cloudCover: Double
+    val celsius: Double, val condition: String, val daylight: Boolean, val cloudCover: Double,
+    val twilight: String? = null
 ) {
     private val fahrenheit = celsius * 9 / 5 + 32
     private val useFahrenheit get() = Locale.getDefault().country in setOf("US", "BS", "KY", "LR", "PW", "FM", "MH")
     val label get() = if (useFahrenheit) "${fahrenheit.roundToInt()}°F" else "${celsius.roundToInt()}°C"
     val symbol: String get() = when (condition) {
         "clear", "mostlyClear", "hot" -> if (daylight) "sun.max.fill" else "moon.stars.fill"
-        "partlyCloudy" -> if (daylight) "cloud.sun.fill" else "cloud.moon.fill"
-        "foggy", "haze" -> "cloud.fog.fill"
+        "clearNight", "mostlyClearNight", "hotNight" -> "moon.stars.fill"
+        "partlyCloudy", "mostlyCloudy" -> if (daylight) "cloud.sun.fill" else "cloud.moon.fill"
+        "partlyCloudyNight" -> "cloud.moon.fill"
+        "foggy", "haze", "smoky", "blowingDust" -> "cloud.fog.fill"
+        "breezy", "windy" -> "wind"
         "drizzle", "rain", "heavyRain", "freezingRain", "freezingDrizzle", "sunShowers" -> "cloud.rain.fill"
-        "snow", "heavySnow", "flurries", "blizzard" -> "snowflake"
+        "snow", "heavySnow", "flurries", "blizzard", "blowingSnow", "sunFlurries", "wintryMix", "frigid" -> "snowflake"
+        "sleet", "hail" -> "cloud.sleet.fill"
         "thunderstorms", "strongStorms", "isolatedThunderstorms", "scatteredThunderstorms" -> "cloud.bolt.rain.fill"
+        "hurricane", "tropicalStorm" -> "wind"
         else -> "cloud.fill"
     }
-    val colors: List<String> get() = when (condition) {
-        "clear", "mostlyClear", "partlyCloudy", "hot" -> if (daylight) listOf("#2D9AFF", "#6BDCFF") else listOf("#370C6F", "#575CD4")
+    val colors: List<String> get() = when {
+        twilight == "sunrise" -> listOf("#AE88FF", "#FFC1AD")
+        twilight == "sunset" -> listOf("#6C77DA", "#FFC896")
+        condition in setOf("clearNight", "mostlyClearNight", "hotNight", "partlyCloudyNight") -> listOf("#370C6F", "#575CD4")
+        condition in setOf("clear", "mostlyClear", "partlyCloudy", "hot") ->
+            if (daylight) listOf("#2D9AFF", "#6BDCFF") else listOf("#370C6F", "#575CD4")
         else -> listOf("#7790A6", "#AAAAAA")
     }
     fun overlay() = com.locket.app.model.CaptionOverlays.make("weather", label, colors = colors,

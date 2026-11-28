@@ -91,7 +91,6 @@ fun ChatDetailScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    var inputMessage by remember(friend.uid) { mutableStateOf("") }
     var showQuickEmojis by remember { mutableStateOf(false) }
     var sending by remember(friend.uid) { mutableStateOf(false) }
     var reactingTo by remember(friend.uid) { mutableStateOf<ChatMessage?>(null) }
@@ -115,6 +114,15 @@ fun ChatDetailScreen(
     val activeConversationId by viewModel.activeConversationId.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val myUid = currentUser.uid
+    val draftSession = remember(context) { com.locket.app.storage.SessionManager(context.applicationContext) }
+    val draftKey = "chat_draft:" + friend.uid
+    var inputMessage by remember(myUid, friend.uid) {
+        mutableStateOf(draftSession.readAux(myUid, draftKey).orEmpty())
+    }
+    fun updateDraft(value: String) {
+        inputMessage = value
+        draftSession.writeAux(myUid, draftKey, value.takeIf { it.isNotEmpty() })
+    }
     fun openMessageMenu(msg: ChatMessage) {
         if (menuBusy) return
         focusManager.clearFocus()
@@ -197,14 +205,14 @@ fun ChatDetailScreen(
     fun sendText(text: String, clearInput: Boolean = false) {
         if (text.isBlank() || sending) return
         sending = true
-        if (clearInput && inputMessage == text) inputMessage = ""
+        if (clearInput && inputMessage == text) updateDraft("")
         viewModel.sendChatMessage(friend.uid, text,
             onSuccess = {
                 sending = false
             },
             onError = { err ->
                 sending = false
-                if (inputMessage.isBlank()) inputMessage = text
+                if (clearInput && inputMessage.isBlank()) updateDraft(text)
                 Toast.makeText(context, "Không gửi được: $err", Toast.LENGTH_LONG).show()
             })
     }
@@ -450,7 +458,7 @@ fun ChatDetailScreen(
             ) {
                 BasicTextField(
                     value = inputMessage,
-                    onValueChange = { inputMessage = it },
+                    onValueChange = { updateDraft(it) },
                     modifier = Modifier.weight(1f),
                     textStyle = androidx.compose.ui.text.TextStyle(
                         color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,

@@ -141,7 +141,7 @@ internal data class CaptionOverlay(
 
 /** Semantic location takes precedence over platform-specific icon names. */
 internal enum class CaptionSymbol {
-    LOCATION, CLOCK, FLAME, SUN, MOON, PARTLY_CLOUDY, SNOW, RAIN, THUNDER, CLOUD
+    LOCATION, CLOCK, FLAME, SUN, MOON, PARTLY_CLOUDY, SNOW, RAIN, THUNDER, CLOUD, WIND, FOG, SLEET
 }
 
 internal fun captionSymbol(kind: String, iconKind: String, iconData: String): CaptionSymbol? {
@@ -155,6 +155,10 @@ internal fun captionSymbol(kind: String, iconKind: String, iconData: String): Ca
         iconData.startsWith("moon") || iconData.startsWith("cloud.moon") -> CaptionSymbol.MOON
         iconData.startsWith("cloud.sun") -> CaptionSymbol.PARTLY_CLOUDY
         iconData.startsWith("snow") -> CaptionSymbol.SNOW
+        iconData.startsWith("wind") || iconData.startsWith("hurricane") -> CaptionSymbol.WIND
+        iconData.startsWith("cloud.fog") || iconData.startsWith("cloud.haze") -> CaptionSymbol.FOG
+        iconData.startsWith("cloud.sleet") || iconData.startsWith("cloud.hail") -> CaptionSymbol.SLEET
+        iconData.startsWith("cloud.snow") -> CaptionSymbol.SNOW
         iconData.startsWith("cloud.rain") || iconData.startsWith("cloud.drizzle") -> CaptionSymbol.RAIN
         iconData.startsWith("cloud.bolt") -> CaptionSymbol.THUNDER
         iconData.startsWith("cloud") -> CaptionSymbol.CLOUD

@@ -107,6 +107,9 @@ internal fun MomentOverlayPill(data: CaptionOverlay?, fallback: String, modifier
                 CaptionSymbol.RAIN -> Icons.Default.Grain
                 CaptionSymbol.THUNDER -> Icons.Default.Thunderstorm
                 CaptionSymbol.CLOUD -> Icons.Default.Cloud
+                CaptionSymbol.WIND -> Icons.Default.Air
+                CaptionSymbol.FOG -> Icons.Default.Cloud
+                CaptionSymbol.SLEET -> Icons.Default.Grain
             }
             val tint = when (symbol) {
                 CaptionSymbol.LOCATION -> foreground

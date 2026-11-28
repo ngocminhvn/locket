@@ -35,6 +35,9 @@ internal object WidgetCaptionRenderer {
             CaptionSymbol.RAIN -> "☂"
             CaptionSymbol.THUNDER -> "⛈"
             CaptionSymbol.CLOUD -> "☁"
+            CaptionSymbol.WIND -> "💨"
+            CaptionSymbol.FOG -> "🌫"
+            CaptionSymbol.SLEET -> "🌨"
             null -> if (data.iconKind == "emoji") symbol else ""
         }
         val label = if (review) comment else listOf(prefix, data.text).filter { it.isNotBlank() }.joinToString(" ")
