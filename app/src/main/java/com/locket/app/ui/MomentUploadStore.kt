@@ -78,7 +78,10 @@ internal class MomentUploadStore(private val filesDir: File) {
                 check(json.getString("owner") == owner)
                 val id = json.getLong("id")
                 check(dir.name == id.toString())
-                if (json.optBoolean("confirmed")) { dir.deleteRecursively(); return@mapNotNull null }
+                if (uploadRecovery(json.optBoolean("confirmed"), json.optBoolean("attemptedPost"), false) == MomentUploadRecovery.CLEANUP) {
+                    dir.deleteRecursively()
+                    return@mapNotNull null
+                }
                 val recipients = json.getJSONArray("recipients")
                 val item = StoredMomentUpload(id, owner, dir, json.getString("caption"),
                     List(recipients.length()) { recipients.getString(it) }, json.getBoolean("video"),

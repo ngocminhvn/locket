@@ -7,6 +7,7 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import com.locket.app.LocketApplication
 import com.locket.app.api.LocketApiClient
+import com.locket.app.model.UploadCaption
 import com.locket.app.model.reconcileFields
 import com.locket.app.model.BlockedUser
 import com.locket.app.model.ChatMessage
@@ -1066,7 +1067,7 @@ class LocketViewModel(
         restoredUploadOwner = owner
         for (item in saved) {
             uploadSequence = maxOf(uploadSequence, item.id)
-            if (item.attemptedPost || item.failure != null) {
+            if (uploadRecovery(item.confirmed, item.attemptedPost, item.failure != null) == MomentUploadRecovery.REQUIRE_USER) {
                 failedUploads[item.id] = item
                 _momentUploadFailures.update { it + MomentUploadFailure(item.id,
                     item.failure ?: "Ứng dụng bị đóng khi đang xác nhận đăng ảnh.", item.attemptedPost) }
@@ -1096,6 +1097,7 @@ class LocketViewModel(
         restoreUploadsLocked(owner)
         if (!activeAccount(owner) ||
             pendingUploads.size + failedUploads.size + (if (activeUpload != null) 1 else 0) >= 8) return@withLock false
+        UploadCaption.validate(caption, overlaysJson)
         val bytes = if (videoFile == null) {
             try { preparedThumbnail?.await() ?: withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) } }
             catch (e: CancellationException) { throw e }
@@ -1177,7 +1179,7 @@ class LocketViewModel(
                     // Persist confirmed success before cleanup. Even if deletion
                     // fails, the confirmed job will never post a second time.
                     item.confirmed = true
-                    withContext(Dispatchers.IO) {
+                    withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                         uploadStore.save(item)
                         uploadStore.remove(item)
                     }
@@ -1203,6 +1205,7 @@ class LocketViewModel(
 
     private suspend fun uploadQueuedMoment(item: StoredMomentUpload) {
         val webp = item.video == null
+        val caption = UploadCaption.validate(item.caption, item.overlaysJson)
         check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         if (item.thumbnailUrl == null) {
             val upload = apiClient.uploadMomentThumbnail(item.thumbnail, webp = webp, expectedUid = item.owner)
@@ -1227,8 +1230,7 @@ class LocketViewModel(
         check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         val post = apiClient.postMoment(
             thumbnailUrl = checkNotNull(item.thumbnailUrl),
-            caption = item.caption,
-            overlaysJson = item.overlaysJson,
+            caption = caption,
             recipients = item.recipients,
             md5 = checkNotNull(item.md5),
             videoUrl = item.videoUrl,

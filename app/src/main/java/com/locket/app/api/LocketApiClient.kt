@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.locket.app.model.UploadCaption
 import com.locket.app.model.momentMissingFields
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Conversation
@@ -2321,7 +2322,7 @@ class LocketApiClient(
         }
     }
 
-    suspend fun postMoment(
+    internal suspend fun postMoment(
         thumbnailUrl: String,
         caption: String = "",
         recipients: List<String> = emptyList(),
@@ -2333,11 +2334,10 @@ class LocketApiClient(
         // {update_streak_for_yyyymmdd: today}, nguoc lai khong co field).
         // null = hom nay da ghi nhan roi, khong gui field.
         updateStreakForYyyymmdd: String? = null,
-        expectedUid: String? = null,
-        overlaysJson: String = "[]"
+        expectedUid: String
     ): PostResult = withContext(Dispatchers.IO) {
         val token = getToken()
-        if (expectedUid != null && getUid() != expectedUid)
+        if (getUid() != expectedUid)
             return@withContext PostResult(success = false, errorMessage = "Phiên đăng nhập đã thay đổi")
         if (token.isNullOrBlank()) {
             return@withContext PostResult(
@@ -2350,11 +2350,9 @@ class LocketApiClient(
             val url = "$FUNCTIONS_BASE_URL/postMomentV2"
             val innerData = JsonObject().apply {
                 addProperty("thumbnail_url", thumbnailUrl)
-                if (caption.isNotBlank()) addProperty("caption", caption)
+                if (caption.caption.isNotBlank()) addProperty("caption", caption.caption)
                 add("recipients", gson.toJsonTree(recipients))
-                val overlays = com.google.gson.JsonParser.parseString(overlaysJson).asJsonArray
-                require(overlays.size() <= 1) { "Mỗi khoảnh khắc chỉ gửi một overlay" }
-                if (overlays.size() > 0) add("overlays", overlays)
+                if (caption.overlays.size() > 0) add("overlays", caption.overlays)
                 addProperty("md5", md5)
                 if (!videoUrl.isNullOrBlank()) addProperty("video_url", videoUrl)
                 if (!updateStreakForYyyymmdd.isNullOrBlank()) {
@@ -2365,7 +2363,13 @@ class LocketApiClient(
                 add("data", innerData)
             }
 
-            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val jsonBody = payload.toString().toRequestBody("application/json".toMediaType())
+            val body = object : okhttp3.RequestBody() {
+                override fun contentType() = jsonBody.contentType()
+                override fun contentLength() = jsonBody.contentLength()
+                override fun writeTo(sink: okio.BufferedSink) = jsonBody.writeTo(sink)
+                override fun isOneShot() = true
+            }
             val request = Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer $token")
@@ -2373,29 +2377,29 @@ class LocketApiClient(
                 .post(body)
                 .build()
 
-            val response = client.newCall(request).execute()
-            val respStr = response.body?.string() ?: ""
-
-            if (response.isSuccessful) {
-                val root = gson.fromJson(respStr, JsonObject::class.java)
-                val json = root.getAsJsonObject("result")
-                    ?: return@withContext PostResult(false, errorMessage = "Phản hồi đăng khoảnh khắc không hợp lệ")
-                val status = json.get("status")?.asInt ?: 0
-                if (status in 200..299 && json.getAsJsonArray("errors")?.size().let { it == null || it == 0 }) {
-                    val data = json.get("data")
-                    val item = when {
-                        data?.isJsonObject == true -> data.asJsonObject
-                        data?.isJsonArray == true -> data.asJsonArray.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject
-                        else -> null
+            client.newCall(request).execute().use { response ->
+                val respStr = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val root = gson.fromJson(respStr, JsonObject::class.java)
+                    val json = root.getAsJsonObject("result")
+                        ?: return@withContext PostResult(false, errorMessage = "Phản hồi đăng khoảnh khắc không hợp lệ")
+                    val status = json.get("status")?.asInt ?: 0
+                    if (status in 200..299 && json.getAsJsonArray("errors")?.size().let { it == null || it == 0 }) {
+                        val data = json.get("data")
+                        val item = when {
+                            data?.isJsonObject == true -> data.asJsonObject
+                            data?.isJsonArray == true -> data.asJsonArray.firstOrNull()?.takeIf { it.isJsonObject }?.asJsonObject
+                            else -> null
+                        }
+                        val id = optString(item, "canonical_uid").ifBlank { optString(item, "moment_uid") }.ifBlank { optString(item, "id") }
+                        PostResult(success = true, momentId = id.ifBlank { null })
+                    } else {
+                        val err = json.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi máy chủ ($status)"
+                        PostResult(success = false, errorMessage = err)
                     }
-                    val id = optString(item, "canonical_uid").ifBlank { optString(item, "moment_uid") }.ifBlank { optString(item, "id") }
-                    PostResult(success = true, momentId = id.ifBlank { null })
                 } else {
-                    val err = json.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi máy chủ ($status)"
-                    PostResult(success = false, errorMessage = err)
+                    PostResult(success = false, errorMessage = "HTTP ${response.code}: $respStr")
                 }
-            } else {
-                PostResult(success = false, errorMessage = "HTTP ${response.code}: $respStr")
             }
         } catch (e: Exception) {
             PostResult(success = false, errorMessage = e.localizedMessage ?: "Lỗi gửi moment")
