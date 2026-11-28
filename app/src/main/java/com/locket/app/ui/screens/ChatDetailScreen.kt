@@ -161,7 +161,7 @@ fun ChatDetailScreen(
             pendingHere.asReversed().map { ChatDisplayRow(pending = it) })
             .sortedByDescending { it.timestamp }
     }
-    val lastOutgoingKey = chatRows.firstOrNull { it.pending != null || it.message?.isMe == true }?.key
+    val lastOutgoingKey = chatRows.firstOrNull()?.takeIf { it.pending != null || it.message?.isMe == true }?.key
     val repeatedMomentCards = remember(messages) { repeatedChatMomentCards(messages) }
     val currentMessages by rememberUpdatedState(messages)
     val currentRowCount by rememberUpdatedState(chatRows.size)
