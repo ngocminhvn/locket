@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material.icons.filled.AddReaction
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -100,7 +102,18 @@ fun ChatDetailScreen(
     val ambient = key(friend.uid) { rememberAmbientPalette(conversationUrl, AmbientMode.CONVERSATION) }
     val chatColor = LocketBlack
     val bubbleColor = LocketChatReceived
-    val composerColor = LocketSearchBg
+    // One continuous, softly tinted surface; reuse the animated conversation
+    // palette rather than a fixed gray or another image extraction/render pass.
+    val composerBrush = remember(ambient.middle, ambient.bottom) {
+        val tint = lerp(ambient.bottom, ambient.middle, 0.55f)
+        Brush.verticalGradient(
+            colors = listOf(
+                lerp(tint, Color.White, 0.135f).copy(alpha = 0.82f),
+                lerp(tint, Color.White, 0.085f).copy(alpha = 0.82f)
+            )
+        )
+    }
+    val composerShape = RoundedCornerShape(34.dp)
     val chromeStops = floatArrayOf(0f, 0.2667f, 0.4667f, 0.6667f, 0.8667f, 1f)
     val topChrome = remember(ambient.top) {
         val alpha = floatArrayOf(1f, 0.823f, 0.676f, 0.52f, 0.18f, 0f)
@@ -422,7 +435,9 @@ fun ChatDetailScreen(
                 modifier = Modifier.fillMaxWidth()
                     .background(bottomChrome)
                     .padding(horizontal = 16.dp, vertical = 10.dp)
-                    .clip(RoundedCornerShape(34.dp)).background(composerColor)
+                    .clip(composerShape)
+                    .background(composerBrush)
+                    .border(0.5.dp, Color.White.copy(alpha = 0.055f), composerShape)
                     .heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
