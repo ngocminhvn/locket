@@ -1,3 +1,3 @@
-Build requested: Replace prior Dev build with latest fixed home navigation and camera transition.
-Source: 0d15767e4ee4c5908bf17499bcbee3bdae23d0c5
-Previous marker: 5ceec64eb77d2238920f3719d5c10403e5bcdb82
+Build requested: Dev with reference-style translucent Home top navigation.
+Source: 365c73618a6beae7d8f9fa80dab1fde6bb2b4ec5
+Previous marker: 74fb8a07eca7f4c4e2025c8ef6fc4219b2242b41
