@@ -178,6 +178,8 @@ fun CameraScreen(
 
     // State for captured or selected photo review
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    // Keep original camera JPEG bytes separate from the cropped review/upload bitmap.
+    var capturedOriginalJpeg by remember { mutableStateOf<ByteArray?>(null) }
     var captureDetails by remember { mutableStateOf<String?>(null) }
     val canSwipe = !pinchingCamera && !exposureDragging && !holdingShutter && recording == null && !processingVideo && !capturingPhoto && capturedBitmap == null
     SideEffect {
@@ -187,6 +189,7 @@ fun CameraScreen(
 
     fun clearCapture() {
         capturedBitmap = null
+        capturedOriginalJpeg = null
         captureDetails = null
         capturedVideo?.delete()
         capturedVideo = null
@@ -485,6 +488,7 @@ fun CameraScreen(
                     } else frame
                     // Publish immediately; do not queue a second capture or JPEG encode.
                     if (cameraPreferences.showPhotoInfo) captureDetails = details("PreviewView bitmap")
+                    capturedOriginalJpeg = null
                     capturedBitmap = result
                     android.util.Log.d("LocketCamera", "preview capture ${SystemClock.elapsedRealtime() - started}ms, ${result.width}x${result.height}")
                 }
@@ -505,9 +509,13 @@ fun CameraScreen(
         capture.takePicture(Dispatchers.Default.asExecutor(), object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureSuccess(image: ImageProxy) {
                 var photo: Bitmap? = null
+                var originalJpeg: ByteArray? = null
                 var failure: Exception? = null
                 try {
-                    val full = imageProxyToBitmap(image, mirrorPhoto)
+                    val buffer = image.planes[0].buffer.duplicate()
+                    val bytes = ByteArray(buffer.remaining()).also { buffer.get(it) }
+                    val full = imageProxyToBitmap(image, mirrorPhoto, bytes)
+                    originalJpeg = bytes
                     try {
                         photo = full
                     } finally {
@@ -519,11 +527,13 @@ fun CameraScreen(
                     image.close()
                 }
                 val result = photo
+                val sourceJpeg = originalJpeg
                 val error = failure
                 mainExecutor.execute {
                     capturingPhoto = false
                     if (screenActive && result != null && error == null) {
                         if (cameraPreferences.showPhotoInfo) captureDetails = details(captureMode)
+                        capturedOriginalJpeg = sourceJpeg
                         capturedBitmap = result
                     } else {
                         result?.recycle()
@@ -714,6 +724,7 @@ fun CameraScreen(
         rememberMomentReviewSlots(
             bitmap = bitmap,
             snapshotFile = snapshotFile,
+            originalJpeg = capturedOriginalJpeg,
             showPhotoInfo = cameraPreferences.showPhotoInfo,
             captureDetails = captureDetails,
             preparedThumbnail = prepared,
@@ -1146,10 +1157,7 @@ private fun cameraQuickZoomRatios(min: Float, max: Float): List<Float> {
 private fun formatCameraZoom(ratio: Float): String =
     String.format(java.util.Locale.US, "%.1f", ratio).removeSuffix(".0") + "×"
 
-private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean): Bitmap {
-    val buffer = image.planes[0].buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
+private fun imageProxyToBitmap(image: ImageProxy, mirror: Boolean, bytes: ByteArray): Bitmap {
     val source = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         ?: error("Không giải mã được ảnh JPEG")
 
