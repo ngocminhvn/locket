@@ -89,7 +89,7 @@ fun LocketTopBar(
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
                     else Modifier.liquidGlassEffect(CircleShape))
                 .clickable(onClick = onSpeakerClick),
             contentAlignment = Alignment.Center
@@ -105,7 +105,7 @@ fun LocketTopBar(
         // Center Pill (Friends count or filter)
         Row(
             modifier = Modifier
-                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
                     else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
                 .clickable(onClick = onTitleClick)
                 .padding(horizontal = if (adaptiveBackground) 20.dp else 18.dp, vertical = if (adaptiveBackground) 12.dp else 10.dp),
@@ -224,10 +224,12 @@ fun FeedBottomBar(
     separated: Boolean = false,
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
-    unreadConversations: Int = 0
+    unreadConversations: Int = 0,
+    adaptiveBackground: Boolean = false
 ) {
     if (separated) {
-        val surface = LocketPillBg
+        val base = if (adaptiveBackground) LocalMomentColor.current else null
+        val surface = momentSurface(base, LocketPillBg, 0.075f)
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
@@ -240,7 +242,9 @@ fun FeedBottomBar(
                 }
             } else Spacer(Modifier.size(54.dp))
             Row(
-                Modifier.weight(1f).height(54.dp).liquidGlassEffect(CircleShape, surface).padding(horizontal = 4.dp),
+                Modifier.weight(1f).height(54.dp)
+                    .then(if (base != null) Modifier.clip(CircleShape).background(surface)
+                        else Modifier.liquidGlassEffect(CircleShape, surface)).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
