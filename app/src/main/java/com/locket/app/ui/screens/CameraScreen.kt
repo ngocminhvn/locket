@@ -62,6 +62,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -109,6 +110,16 @@ fun CameraScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
+    val cameraMoments by viewModel.moments.collectAsState()
+    val ownHistoryHasMore by viewModel.ownHistoryHasMore.collectAsState()
+    val ownHistoryCoveredThrough by viewModel.ownHistoryCoveredThrough.collectAsState()
+    val cameraStreak = remember(cameraMoments, currentUser.uid) {
+        viewModel.calculateStreak(cameraMoments.filter { it.userUid == currentUser.uid })
+    }
+    val streakBoundary = java.time.LocalDate.now().minusDays(cameraStreak.toLong() + 1)
+        .atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
+    val showCameraStreak = cameraStreak > 0 && (!ownHistoryHasMore ||
+        (ownHistoryCoveredThrough?.let { it < streakBoundary } == true))
     // Ban dang duoc tra loi rieng (dat khi bam vao moment cua ban do o Home)
     val replyToFriend by viewModel.replyToFriend.collectAsState()
 
@@ -965,7 +976,7 @@ fun CameraScreen(
                                 presets.forEach { ratio ->
                                     val selected = abs(cameraZoomRatio - ratio) < 0.04f
                                     Box(Modifier.size(40.dp, 34.dp).clip(CircleShape)
-                                        .background(if (selected) LocketYellow else Color.Transparent)
+                                        .background(if (selected) Color(0xFFFFD77C) else Color.Transparent)
                                         .clickable { requestZoom(camera, ratio) }
                                         .semantics { this.selected = selected },
                                         contentAlignment = Alignment.Center) {
@@ -1018,10 +1029,9 @@ fun CameraScreen(
                 // Flash Icon Toggle in Top-Left of Viewfinder
                 Box(
                     modifier = Modifier
-                        .padding(16.dp)
-                        .size(40.dp)
+                        .padding(start = 20.dp, top = 22.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0x66000000))
                         .clickable(enabled = (hasFlash || (frontCamera && cameraPreferences.selfieFlash && !extensionActive && activity != null)) &&
                             !holdingShutter && recording == null && !capturingPhoto) {
                             flashMode = if (frontCamera && cameraPreferences.selfieFlash) {
@@ -1035,17 +1045,22 @@ fun CameraScreen(
                         .align(Alignment.TopStart),
                     contentAlignment = Alignment.Center
                 ) {
-                    val flashIcon = when (flashMode) {
-                        ImageCapture.FLASH_MODE_ON -> Icons.Outlined.FlashOn
-                        ImageCapture.FLASH_MODE_AUTO -> Icons.Outlined.FlashAuto
-                        else -> Icons.Outlined.FlashOff
-                    }
-                    Icon(
-                        imageVector = flashIcon,
-                        contentDescription = "Flash",
-                        tint = if (flashMode != ImageCapture.FLASH_MODE_OFF) LocketYellow else Color.White,
-                        modifier = Modifier.size(22.dp)
+                    // The plain bolt matches the original; keep the real off/auto state accessible.
+                    ReferenceIcon(
+                        ReferenceGlyph.Flash,
+                        when (flashMode) {
+                            ImageCapture.FLASH_MODE_ON -> "Flash bật"
+                            ImageCapture.FLASH_MODE_AUTO -> "Flash tự động"
+                            else -> "Flash tắt"
+                        },
+                        if (flashMode == ImageCapture.FLASH_MODE_ON) Color(0xFFFFDD83)
+                        else if (flashMode == ImageCapture.FLASH_MODE_AUTO) Color.White else Color.White.copy(alpha = 0.8f),
+                        Modifier.size(23.dp)
                     )
+                    if (flashMode == ImageCapture.FLASH_MODE_AUTO) {
+                        Text("A", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 5.dp, bottom = 5.dp))
+                    }
                 }
 
                 // Keep zoom at the bottom; move the recording status out of its way.
@@ -1069,7 +1084,7 @@ fun CameraScreen(
                 }
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.weight(if (review == null) 1.25f else 1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 review?.indicators?.invoke()
             }
 
@@ -1080,7 +1095,7 @@ fun CameraScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer { translationY = chromeOffsetPx }
-                    .padding(horizontal = 32.dp),
+                    .padding(horizontal = 40.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1092,12 +1107,7 @@ fun CameraScreen(
                         .clickable(enabled = chromeProgress >= 0.999f && !holdingShutter && recording == null && !processingVideo && !capturingPhoto) { galleryLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Collections,
-                        contentDescription = "Thư viện",
-                        tint = Color.White,
-                        modifier = Modifier.size(44.dp)
-                    )
+                    ReferenceIcon(ReferenceGlyph.Gallery, "Thư viện", Color.White, Modifier.size(48.dp))
                 }
 
                 // Center: Shutter Button
@@ -1105,7 +1115,8 @@ fun CameraScreen(
                     modifier = Modifier
                         .size(98.dp)
                         .locketHeaderTransition { chromeProgress }
-                        .border(4.dp, if (recording != null) Color.Red else LocketYellow, CircleShape)
+                        .border(3.5.dp, Brush.linearGradient(if (recording != null || holdingShutter) listOf(Color.Red, Color.Red)
+                            else listOf(Color(0xFFFFE49B), Color(0xFFFFD66B), Color(0xFFFFB928))), CircleShape)
                         .semantics {
                             contentDescription = "Chụp ảnh, giữ để quay video"
                             onClick { if (chromeProgress >= 0.999f) { tapShutter(); true } else false }
@@ -1139,29 +1150,31 @@ fun CameraScreen(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Sync,
-                        contentDescription = "Đổi camera",
-                        tint = Color.White,
-                        modifier = Modifier.size(38.dp)
-                    )
+                    ReferenceIcon(ReferenceGlyph.Flip, "Đổi camera", Color.White, Modifier.size(42.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(if (review == null) 1.05f else 1f))
             Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
                 if (review == null) Row(
                     modifier = Modifier.graphicsLayer { translationY = chromeOffsetPx }
                         .locketHeaderTransition { chromeProgress }
                         .clickable(enabled = chromeProgress >= 0.999f) { openLatest() }.padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
+                    if (showCameraStreak) {
+                        Box(Modifier.size(30.dp).background(Color(0xFFFFD77C), RoundedCornerShape(9.dp))
+                            .semantics { contentDescription = "$cameraStreak ngày chuỗi" }, contentAlignment = Alignment.Center) {
+                            Text(cameraStreak.toString(), color = Color(0xFF21190A), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Text("Lịch sử", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                     Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
-            Spacer(modifier = Modifier.weight(0.55f))
+            Spacer(modifier = Modifier.weight(if (review == null) 0.3f else 0.55f))
 
             // Bottom Navigation Bar
             if (sharedFooterHeight != null || review != null) {

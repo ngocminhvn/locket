@@ -64,7 +64,7 @@ internal object AppearancePrefs {
     fun setFrame(c: Context, v: Int) { prefs(c).edit().putInt("frame", v).apply(); LocketWidgetUpdater.updateAll(c) }
     fun setCameraTheme(c: Context, v: Int) { prefs(c).edit().putInt("camera", v).apply() }
     fun cameraColors(index: Int): List<Color> = when(index) {
-        1 -> listOf(Color(0xFF100E05), Color(0xFF594300))
+        1 -> listOf(Color(0xFF0B0904), Color(0xFF302300))
         2 -> listOf(Color(0xFFDA075C), Color(0xFFFF491F))
         3 -> listOf(Color(0xFF061C3F), Color(0xFF167DC5))
         4 -> listOf(Color(0xFF25113C), Color(0xFF781BB0))

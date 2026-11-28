@@ -106,16 +106,11 @@ fun LocketTopBar(
                 .size(46.dp)
                 .locketHeaderTransition(transitionProgress)
                 .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
-                    else Modifier.liquidGlassEffect(CircleShape))
+                    else Modifier.clip(CircleShape).background(Color(0xFF292823)).border(0.8.dp, Color(0xFF45433D), CircleShape))
                 .clickable(onClick = onSpeakerClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = if (adaptiveBackground) Icons.Filled.Campaign else Icons.Outlined.Campaign,
-                contentDescription = "Thông báo",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
+            ReferenceIcon(ReferenceGlyph.Horn, "Thông báo", Color.White, Modifier.size(26.dp))
         }
 
         // Equal side slots keep the center title stable, including long names.
@@ -124,19 +119,14 @@ fun LocketTopBar(
             modifier = Modifier
                 .locketHeaderTransition(transitionProgress)
                 .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
-                    else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
+                    else Modifier.height(46.dp).clip(CircleShape).background(Color(0xFF292823)).border(0.8.dp, Color(0xFF45433D), CircleShape))
                 .clickable(onClick = onTitleClick)
-                .padding(horizontal = if (adaptiveBackground) 20.dp else 18.dp, vertical = if (adaptiveBackground) 12.dp else 10.dp),
+                .padding(horizontal = if (adaptiveBackground) 20.dp else 19.dp, vertical = if (adaptiveBackground) 12.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (!showDropdownArrow) {
-                Icon(
-                    imageVector = Icons.Default.People,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+                ReferenceIcon(ReferenceGlyph.People, null, Color.White, Modifier.size(24.dp))
             }
             Text(
                 text = title,
@@ -193,9 +183,9 @@ fun LocketBottomBar(
             // All three slots have the same fixed dimensions regardless of
             // selection. Only the background and icon tint change.
             listOf(
-                Triple("history", Icons.Default.Apps, "Kỷ niệm"),
-                Triple("camera", Icons.Default.Home, "Camera"),
-                Triple("chat", Icons.Default.ChatBubble, "Trò chuyện")
+                Triple("history", ReferenceGlyph.Calendar, "Kỷ niệm"),
+                Triple("camera", ReferenceGlyph.Home, "Camera"),
+                Triple("chat", ReferenceGlyph.Chat, "Trò chuyện")
             ).forEach { (screen, icon, label) ->
                 val active = currentScreen == screen
                 Box(
@@ -205,9 +195,7 @@ fun LocketBottomBar(
                         .clickable { onNavigate(screen) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(icon, contentDescription = label,
-                        tint = if (active) Color.White else LocketTextDim,
-                        modifier = Modifier.size(26.dp))
+                    ReferenceIcon(icon, label, if (active) Color.White else LocketTextDim, Modifier.size(26.dp))
                 }
             }
         }
@@ -260,12 +248,12 @@ fun FeedBottomBar(
                 ) { index, isSelected ->
                     val tint = if (isSelected) Color.White else inactive
                     when (index) {
-                        0 -> Icon(Icons.Default.Apps, "Kỷ niệm", tint = tint, modifier = Modifier.size(23.dp))
-                        1 -> Icon(Icons.Default.Home, "Trang chủ", tint = tint, modifier = Modifier.size(24.dp))
+                        0 -> ReferenceIcon(ReferenceGlyph.Calendar, "Kỷ niệm", tint, Modifier.size(24.dp))
+                        1 -> ReferenceIcon(ReferenceGlyph.Home, "Trang chủ", tint, Modifier.size(25.dp))
                         2 -> Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ChatBubble,
+                            ReferenceIcon(ReferenceGlyph.Chat,
                                 if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
-                                tint = tint, modifier = Modifier.size(24.dp))
+                                tint, Modifier.size(25.dp))
                             UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
                         }
                     }
