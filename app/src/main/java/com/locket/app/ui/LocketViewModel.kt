@@ -1064,7 +1064,8 @@ class LocketViewModel(
         caption: String,
         recipients: List<String>,
         videoFile: File?,
-        preparedThumbnail: Deferred<ByteArray>?
+        preparedThumbnail: Deferred<ByteArray>?,
+        overlaysJson: String = "[]"
     ): Boolean = uploadRestoreLock.withLock {
         val owner = sessionManager.currentUser.uid
         if (owner.isBlank() || !activeAccount(owner)) return@withLock false
@@ -1088,7 +1089,7 @@ class LocketViewModel(
         // composable is disposed. An accepted job must not get stranded.
         withContext(kotlinx.coroutines.NonCancellable) {
             val item = withContext(Dispatchers.IO) {
-                uploadStore.create(id, owner, bytes, videoFile, caption, recipients.toList())
+                uploadStore.create(id, owner, bytes, videoFile, caption, recipients.toList(), overlaysJson)
             }
             if (!activeAccount(owner)) {
                 withContext(Dispatchers.IO) { uploadStore.remove(item) }
@@ -1204,6 +1205,7 @@ class LocketViewModel(
         val post = apiClient.postMoment(
             thumbnailUrl = checkNotNull(item.thumbnailUrl),
             caption = item.caption,
+            overlaysJson = item.overlaysJson,
             recipients = item.recipients,
             md5 = checkNotNull(item.md5),
             videoUrl = item.videoUrl,
