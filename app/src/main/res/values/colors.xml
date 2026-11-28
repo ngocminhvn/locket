@@ -2,8 +2,8 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="locket_yellow">#FFFFC800</color>
-    <color name="dark_bg">#FF000000</color>
-    <color name="surface_dark">#FF161616</color>
-    <color name="pill_dark">#E6262626</color>
+    <color name="locket_yellow">#FFFFB703</color>
+    <color name="dark_bg">#FF060505</color>
+    <color name="surface_dark">#FF171717</color>
+    <color name="pill_dark">#EB201F1F</color>
 </resources>
