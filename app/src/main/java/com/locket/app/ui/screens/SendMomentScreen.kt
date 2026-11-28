@@ -403,36 +403,53 @@ internal fun rememberMomentReviewSlots(
         PhotoInfoDialog(bitmap, snapshotFile, preparedThumbnail, captureDetails) { infoOpen = false }
     }
     if (sheet) {
-        ModalBottomSheet(onDismissRequest = { sheet = false }, containerColor = LocketSheetBg,
-            shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp)) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp)) {
-                Text("Chú thích", Modifier.align(Alignment.CenterHorizontally), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(24.dp))
-                Text("General", color = Color.Gray, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
+        ModalBottomSheet(
+            onDismissRequest = { sheet = false },
+            containerColor = Color(0xFF222222),
+            shape = RoundedCornerShape(topStart = 42.dp, topEnd = 42.dp),
+            dragHandle = {
+                Box(Modifier.padding(top = 13.dp, bottom = 12.dp)
+                    .size(width = 34.dp, height = 4.dp)
+                    .background(Color.White.copy(alpha = 0.20f), CircleShape))
+            }
+        ) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 4.dp)) {
+                Text("Chú thích", Modifier.align(Alignment.CenterHorizontally), color = Color.White,
+                    fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
+                Text("General", color = Color.White.copy(alpha = 0.45f), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Aa Văn bản") { choose(CaptionKind.TEXT) }
-                    CaptionChip("⭐ Review") { choose(CaptionKind.REVIEW) }
+                    CaptionChip("Review", icon = Icons.Default.Star, iconTint = LocketYellow) { choose(CaptionKind.REVIEW) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CaptionChip("📍 Location") { choose(CaptionKind.LOCATION) }
-                    CaptionChip("☁ Weather") { choose(CaptionKind.WEATHER) }
+                    CaptionChip("Location", icon = Icons.Default.LocationOn) { choose(CaptionKind.LOCATION) }
+                    CaptionChip("Weather", icon = Icons.Default.Cloud) { choose(CaptionKind.WEATHER) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CaptionChip("◷ $time") { choose(CaptionKind.TIME) }
-                    if (streak > 0) CaptionChip("🔥 $streak", LocketYellow, Color.Black) { choose(CaptionKind.STREAK) }
+                    CaptionChip(time, icon = Icons.Default.AccessTime) { choose(CaptionKind.TIME) }
+                    if (streak > 0) CaptionChip(
+                        streak.toString(), foreground = Color(0xFF191919),
+                        icon = Icons.Default.LocalFireDepartment, iconTint = Color(0xFF191919),
+                        gradient = Brush.verticalGradient(listOf(Color(0xFFFFE38B), Color(0xFFFFB900)))
+                    ) { choose(CaptionKind.STREAK) }
                 }
-                Spacer(Modifier.height(24.dp))
-                Text("Decorative", color = Color.Gray, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(20.dp))
+                Text("Decorative", color = Color.White.copy(alpha = 0.45f), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CaptionChip("🪩 Party Time!", Color(0xFF8FF8B5), Color.Black) { choose(CaptionKind.PARTY) }
-                    CaptionChip("🕶 OOTD", Color.White, Color.Black) { choose(CaptionKind.OOTD) }
+                    CaptionChip("🪩 Party Time!", foreground = Color.Black,
+                        gradient = Brush.verticalGradient(listOf(Color(0xFF65F6E0), Color(0xFFEFFF72)))) { choose(CaptionKind.PARTY) }
+                    CaptionChip("🕶 OOTD", foreground = Color(0xFF222222),
+                        gradient = Brush.verticalGradient(listOf(Color.White, Color(0xFFDDDDDD)))) { choose(CaptionKind.OOTD) }
                 }
                 Spacer(Modifier.height(8.dp))
-                CaptionChip("🥰 Miss you", LocketRed) { choose(CaptionKind.MISS) }
+                CaptionChip("🥰 Miss you", gradient = Brush.verticalGradient(
+                    listOf(Color(0xFFFF1308), Color(0xFFFF4848)))) { choose(CaptionKind.MISS) }
                 Spacer(Modifier.height(30.dp))
             }
         }
@@ -497,11 +514,24 @@ private fun RecipientAvatar(
 
 @Composable
 private fun CaptionChip(
-    label: String, background: Color = LocketSheetSurface, foreground: Color = Color.White, onClick: () -> Unit
+    label: String,
+    background: Color = Color(0xFF2E2E2E),
+    foreground: Color = Color.White,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    iconTint: Color = Color.White.copy(alpha = 0.80f),
+    gradient: Brush? = null,
+    onClick: () -> Unit
 ) {
-    Box(Modifier.clip(RoundedCornerShape(28.dp)).background(background).clickable(onClick = onClick)
-        .padding(horizontal = 12.dp, vertical = 11.dp)) {
-        Text(label, color = foreground, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    Row(
+        modifier = Modifier.clip(CircleShape)
+            .then(if (gradient != null) Modifier.background(gradient) else Modifier.background(background))
+            .clickable(onClick = onClick)
+            .heightIn(min = 42.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (icon != null) Icon(icon, null, tint = iconTint, modifier = Modifier.size(23.dp))
+        Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
