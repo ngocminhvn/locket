@@ -242,6 +242,7 @@ fun HomePagerScreen(
         ) {
             LocketTopBar(
                 title = if (cameraSelected) "${friends.size} Bạn bè"
+                    else if (selectedFriend?.uid == currentUser.uid) "Bạn"
                     else selectedFriend?.displayName?.trim()?.substringAfterLast(' ')?.ifBlank { "Tất cả bạn bè" } ?: "Tất cả bạn bè",
                 showDropdownArrow = !cameraSelected,
                 avatarUrl = currentUser.profilePictureUrl,
@@ -266,10 +267,14 @@ fun HomePagerScreen(
                     .onSizeChanged { measuredFeedFooter = with(density) { it.height.toDp() } },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                MomentReactionBar(viewModel, activeMoment) { emoji ->
-                    activeMoment?.let {
-                        reactionEvent = it.id to emoji
-                        reactionSerial++
+                if (activeMoment != null && activeMoment.userUid == currentUser.uid) {
+                    OwnMomentActivityBar(viewModel, activeMoment)
+                } else {
+                    MomentReactionBar(viewModel, activeMoment) { emoji ->
+                        activeMoment?.let {
+                            reactionEvent = it.id to emoji
+                            reactionSerial++
+                        }
                     }
                 }
                 Spacer(Modifier.height(28.dp))

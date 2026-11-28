@@ -21,6 +21,9 @@ import coil.request.ImageRequest
 import android.widget.VideoView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -71,7 +74,6 @@ fun HomeMomentScreen(
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val momentViewCounts by viewModel.momentViewCounts.collectAsState()
-    val showViewCount by viewModel.showViewCount.collectAsState()
     var floatingReaction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(reactionSerial) {
         if (reactionSerial > 0 && currentMoment?.id == reactionEvent?.first) {
@@ -268,7 +270,7 @@ fun HomeMomentScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
+                    if (currentMoment.userUid != currentUser.uid) Box(
                         modifier = Modifier
                             .size(27.dp)
                             .clip(CircleShape)
@@ -293,35 +295,20 @@ fun HomeMomentScreen(
                     }
 
                     Text(
-                        text = currentMoment.userName.trim().substringBefore(' ').ifBlank { currentMoment.userUid },
+                        text = if (currentMoment.userUid == currentUser.uid) "Bạn" else currentMoment.userName.trim().substringBefore(' ').ifBlank { currentMoment.userUid },
                         color = Color.White,
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Bold
                     )
 
                     Text(
-                        text = momentAge(currentMoment.timestampSeconds),
+                        text = if (currentMoment.userUid == currentUser.uid) java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(currentMoment.timestampSeconds * 1000)) else momentAge(currentMoment.timestampSeconds),
                         color = Color.White.copy(alpha = 0.44f),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    // Luot xem (Batch 7a): chi moment CUA MINH, chi hien
-                    // khi server tra 200 (co so lieu that). Loi/401 -> an.
-                    val ownViewCount = momentViewCounts[currentMoment.id]
-                    if (showViewCount && currentMoment.userUid == currentUser.uid && ownViewCount != null) {
-                        Icon(
-                            Icons.Default.Visibility,
-                            contentDescription = null,
-                            tint = LocketTextDim,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "$ownViewCount lượt xem",
-                            color = LocketTextDim,
-                            fontSize = 16.sp
-                        )
-                    }
+
                 }
 
 
@@ -661,5 +648,97 @@ internal fun MomentBackdrop(url: String) {
             contentScale = ContentScale.Crop
         )
         Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun OwnMomentActivityBar(viewModel: LocketViewModel, moment: Moment) {
+    val viewersByMoment by viewModel.momentViewers.collectAsState()
+    val errors by viewModel.momentViewErrors.collectAsState()
+    val loading by viewModel.momentViewsLoading.collectAsState()
+    val showViews by viewModel.showViewCount.collectAsState()
+    var open by remember(moment.id) { mutableStateOf(false) }
+    val viewers = viewersByMoment[moment.id]
+    if (showViews) {
+        Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+            Row(Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+                .clickable { open = true; viewModel.refreshMomentViews(moment) }
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("✦", color = Color.White.copy(alpha = 0.65f), fontSize = 18.sp)
+                Text("Hoạt động", color = Color.White.copy(alpha = 0.78f), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (!viewers.isNullOrEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy((-7).dp), verticalAlignment = Alignment.CenterVertically) {
+                        viewers.take(3).forEach { ViewerAvatar(it, 32.dp) }
+                        if (viewers.size > 3) Box(Modifier.size(32.dp).clip(CircleShape)
+                            .background(Color(0xFF595350)), contentAlignment = Alignment.Center) {
+                            Text("+${viewers.size - 3}", color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Spacer(Modifier.height(56.dp))
+    }
+    if (open && showViews) {
+        ModalBottomSheet(onDismissRequest = { open = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF262626),
+            shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp)) {
+            Box(Modifier.fillMaxWidth().clipToBounds()) {
+                Box(Modifier.matchParentSize()) {
+                    if (moment.thumbnailUrl.isNotBlank()) MomentBackdrop(moment.thumbnailUrl)
+                    Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.055f)))
+                }
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Hoạt động", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
+                    if (viewers == null && moment.id in loading) {
+                        CircularProgressIndicator(Modifier.padding(24.dp), color = LocketYellow)
+                    } else if (viewers == null) {
+                        Text(errors[moment.id] ?: "Chưa tải được hoạt động", color = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(16.dp))
+                        TextButton(onClick = { viewModel.refreshMomentViews(moment) }) { Text("Thử lại", color = LocketYellow) }
+                    } else if (viewers.isEmpty()) {
+                        Text("Chưa có lượt xem", color = Color.White.copy(alpha = 0.65f), modifier = Modifier.padding(24.dp))
+                    } else {
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 550.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                            items(viewers, key = { it.uid }) { viewer ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    ViewerAvatar(viewer, 44.dp)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(viewer.displayName.trim().substringBefore(' ').ifBlank { viewer.username.ifBlank { viewer.uid } },
+                                            color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                        Text("Đã xem! ✨", color = Color.White.copy(alpha = 0.65f), fontSize = 14.sp)
+                                    }
+                                }
+                            }
+                        }
+                        errors[moment.id]?.let { Text("Không làm mới được: $it", color = Color(0xFFFFAAAA), fontSize = 12.sp,
+                            modifier = Modifier.padding(12.dp)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewerAvatar(viewer: Friend, size: Dp) {
+    Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF414141)), contentAlignment = Alignment.Center) {
+        if (viewer.avatarUrl.isNotBlank()) {
+            AsyncImage(viewer.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            val initials = viewer.displayName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                .take(2).joinToString("") { it.take(1).uppercase() }
+            if (initials.isNotBlank()) Text(initials, color = Color.LightGray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            else Icon(Icons.Default.Person, null, tint = Color.LightGray, modifier = Modifier.size(size * 0.55f))
+        }
     }
 }

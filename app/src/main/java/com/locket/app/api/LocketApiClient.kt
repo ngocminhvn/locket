@@ -1475,7 +1475,7 @@ class LocketApiClient(
      * Loi/401 -> Result.failure de UI an chip, khong hien so gia.
      * Chua live-verify cho moment cua minh.
      */
-    suspend fun getMomentViews(momentUid: String): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun getMomentViews(momentUid: String): Result<List<Friend>> = withContext(Dispatchers.IO) {
         try {
             if (!ensureFreshToken()) error("Chưa đăng nhập")
             val payload = JsonObject().apply {
@@ -1492,7 +1492,22 @@ class LocketApiClient(
                 else -> null
             }
             if (viewsArr == null) error("Máy chủ trả thiếu moment_views")
-            Result.success(viewsArr.size())
+            val viewers = viewsArr.map { entry ->
+                check(entry.isJsonObject) { "Dữ liệu lượt xem không hợp lệ" }
+                val row = entry.asJsonObject
+                val user = row.get("user")
+                val profile = user?.takeIf { it.isJsonObject }?.asJsonObject
+                val uid = (user?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                    ?: optString(profile, "uid").ifBlank { optString(profile, "user_uid") }
+                        .ifBlank { optString(profile, "id") }
+                        .ifBlank { optString(row, "user_uid") }).trim()
+                check(uid.isNotBlank()) { "Máy chủ trả lượt xem thiếu UID" }
+                val name = listOf(optString(profile, "first_name"), optString(profile, "last_name"))
+                    .filter { it.isNotBlank() }.joinToString(" ").ifBlank { optString(profile, "display_name") }
+                Friend(uid = uid, username = optString(profile, "username"), displayName = name,
+                    avatarUrl = optString(profile, "profile_picture_url"))
+            }.distinctBy { it.uid }
+            Result.success(viewers)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1524,6 +1539,8 @@ class LocketApiClient(
      */
     suspend fun deleteMoment(ownerUid: String, momentUid: String, deleteGlobally: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            check(ownerUid.isNotBlank() && ownerUid == getUid() && momentUid.isNotBlank()) { "Chỉ được xóa ảnh của chính bạn" }
+            check(ensureFreshToken()) { "Chưa đăng nhập" }
             val payload = JsonObject().apply {
                 add("data", JsonObject().apply {
                     addProperty("owner_uid", ownerUid)
@@ -1532,11 +1549,13 @@ class LocketApiClient(
                 })
             }
             val resp = callEndpoint("deleteMomentV2", payload)
-            if (resp != null && resp.get("status")?.asInt in 200..299) {
+            val status = resp?.get("status")?.takeUnless { it.isJsonNull }?.asInt
+            val errors = resp?.get("errors")?.takeIf { it.isJsonArray }?.asJsonArray
+            if (status != null && status in 200..299 && (errors == null || errors.size() == 0) &&
+                resp?.has("error") != true && resp?.get("success")?.takeUnless { it.isJsonNull }?.asBoolean != false) {
                 Result.success(true)
             } else {
-                val err = resp?.getAsJsonArray("errors")?.firstOrNull()?.asString ?: "Lỗi xóa khoảnh khắc"
-                Result.failure(Exception(err))
+                Result.failure(Exception(callableError(resp, "Máy chủ chưa xác nhận xóa khoảnh khắc")))
             }
         } catch (e: Exception) {
             Result.failure(e)

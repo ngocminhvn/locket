@@ -172,6 +172,12 @@ class LocketViewModel(
     // UI an chip, khong hien so gia.
     private val _momentViewCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val momentViewCounts: StateFlow<Map<String, Int>> = _momentViewCounts.asStateFlow()
+    private val _momentViewers = MutableStateFlow<Map<String, List<Friend>>>(emptyMap())
+    val momentViewers = _momentViewers.asStateFlow()
+    private val _momentViewErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val momentViewErrors = _momentViewErrors.asStateFlow()
+    private val _momentViewsLoading = MutableStateFlow<Set<String>>(emptySet())
+    val momentViewsLoading = _momentViewsLoading.asStateFlow()
 
     // Nut tat "Hien luot xem" o Mod Center. Mac dinh bat; tat thi an
     // chip luot xem du server co tra so lieu.
@@ -189,10 +195,39 @@ class LocketViewModel(
      * this moment"). Loi thi giu gia tri cu (hoac rong -> an chip).
      */
     fun refreshMomentViews(moment: Moment) {
-        if (moment.userUid != sessionManager.currentUser.uid) return
+        val owner = sessionManager.currentUser.uid
+        if (owner.isBlank() || moment.userUid != owner || !activeAccount(owner) || moment.id in _momentViewsLoading.value) return
+        _momentViewsLoading.update { it + moment.id }
+        _momentViewErrors.update { it - moment.id }
         viewModelScope.launch {
-            apiClient.getMomentViews(moment.id).onSuccess { count ->
-                _momentViewCounts.value = _momentViewCounts.value + (moment.id to count)
+            try {
+                apiClient.getMomentViews(moment.id).onSuccess { viewers ->
+                    if (!activeAccount(owner)) return@onSuccess
+                    val friendsByUid = _friends.value.associateBy { it.uid }
+                    val resolved = viewers.map { viewer ->
+                        val cached = friendsByUid[viewer.uid]
+                        if (cached != null) cached else viewer
+                    }
+                    _momentViewers.update { it + (moment.id to resolved) }
+                    _momentViewCounts.update { it + (moment.id to resolved.size) }
+                    // Resolve unknown users from the same authenticated profile API.
+                    for (viewer in resolved.filter { it.displayName.isBlank() && it.username.isBlank() }) {
+                        if (!activeAccount(owner)) break
+                        val profile = apiClient.fetchUserProfile(viewer.uid).getOrNull() ?: continue
+                        if (!activeAccount(owner)) break
+                        _momentViewers.update { map ->
+                            val current = map[moment.id] ?: return@update map
+                            map + (moment.id to current.map {
+                                if (it.uid == viewer.uid) it.copy(displayName = profile.displayName,
+                                    username = profile.username, avatarUrl = profile.profilePictureUrl) else it
+                            })
+                        }
+                    }
+                }.onFailure { error ->
+                    if (activeAccount(owner)) _momentViewErrors.update { it + (moment.id to (error.message ?: "Không tải được hoạt động")) }
+                }
+            } finally {
+                if (activeAccount(owner)) _momentViewsLoading.update { it - moment.id }
             }
         }
     }
@@ -1130,9 +1165,18 @@ class LocketViewModel(
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        val owner = sessionManager.currentUser.uid
+        if (owner.isBlank() || moment.userUid != owner || !activeAccount(owner)) {
+            onError("Chỉ được xóa ảnh của chính bạn")
+            return
+        }
         viewModelScope.launch {
             val res = apiClient.deleteMoment(moment.userUid, moment.id, deleteGlobally)
-            if (res.isSuccess) {
+            if (!activeAccount(owner)) return@launch
+            if (res.getOrNull() == true) {
+                _momentViewCounts.update { it - moment.id }
+                _momentViewers.update { it - moment.id }
+                _momentViewErrors.update { it - moment.id }
                 deletedMomentIds.add(moment.id)
                 removeMomentsFromCache { it.id == moment.id }
                 syncAllData()
@@ -1402,6 +1446,10 @@ class LocketViewModel(
         apiClient.clearUserNameCache()
         prefetchedThumbnails.clear()
         viewedMomentUids.clear()
+        _momentViewCounts.value = emptyMap()
+        _momentViewers.value = emptyMap()
+        _momentViewErrors.value = emptyMap()
+        _momentViewsLoading.value = emptySet()
         lastConversationSync = 0L
         chatRefreshedAt.clear()
         chatPagination.clear()
