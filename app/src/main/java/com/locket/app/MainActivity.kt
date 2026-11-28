@@ -36,6 +36,7 @@ import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.FeedBottomBar
 import com.locket.app.ui.components.LocketProfileAvatar
 import com.locket.app.ui.screens.*
+import com.wexpa.liquidglass.LiquidGlassTheme
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
 import com.locket.app.ui.theme.LocalMomentColor
@@ -180,6 +181,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            // One shared backdrop recording for the main navigation only.
+                            // Keep the existing pager, chrome bounds and touch handling.
+                            LiquidGlassTheme(dark = true, background = LocketBlack, renderScale = 0.75f) {
                             CompositionLocalProvider(LocalMomentColor provides momentColor) {
                             HorizontalPager(
                                 state = pager,
@@ -278,6 +282,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             } // LocalMomentColor
+                            } // LiquidGlassTheme
                         }
                         else -> {
                             when (currentScreen) {
