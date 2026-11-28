@@ -83,7 +83,7 @@ fun ConversationsScreen(
         ) {
             Box(Modifier.fillMaxWidth().statusBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
-                Text("Trò chuyện", color = Color.White, fontSize = 21.sp,
+                if (!sharedProfileAvatar) Text("Trò chuyện", color = Color.White, fontSize = 21.sp,
                     fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
                 if (!sharedProfileAvatar) LocketProfileAvatar(currentUser.profilePictureUrl, onOpenProfile,
                     Modifier.align(Alignment.CenterEnd))
