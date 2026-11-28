@@ -111,10 +111,8 @@ fun HomeMomentScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(LocketBlack)
             .clipToBounds()
     ) {
-        currentMoment?.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { MomentBackdrop(it) }
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -503,7 +501,7 @@ internal fun MomentReactionBar(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .clip(RoundedCornerShape(32.dp))
-                    .background(Color.White.copy(alpha = 0.10f))
+                    .background(Color.White.copy(alpha = 0.075f))
                     .padding(horizontal = 8.dp, vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -614,18 +612,11 @@ internal fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 
-/** Shared real-image backdrop: tiny decoded pixels, bilinear scaling, and BLACK80.
- * No full-screen GPU blur or color extraction. Same path on all Android versions. */
+/** Photo-derived ambient gradient for memory viewers and activity sheets. */
 @Composable
 internal fun MomentBackdrop(url: String) {
-    val context = LocalContext.current
-    val request = remember(url, context) {
-        ImageRequest.Builder(context).data(url).size(16).allowHardware(false).crossfade(false).build()
-    }
-    Box(Modifier.fillMaxSize().clipToBounds().background(LocketMomentGround)) {
-        AsyncImage(request, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
-        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
-    }
+    val color = rememberMomentColor(url)
+    Box(Modifier.fillMaxSize().background(momentGradient(color)))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
