@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -155,10 +156,15 @@ fun ChatDetailScreen(
         )
     }
     val listState = rememberLazyListState()
-    val newestFirst = remember(messages) { messages.asReversed() }
-    val lastSentId = remember(newestFirst) { newestFirst.firstOrNull { it.isMe }?.id }
+    val chatRows = remember(messages, pendingHere) {
+        (messages.asReversed().map { ChatDisplayRow(message = it) } +
+            pendingHere.asReversed().map { ChatDisplayRow(pending = it) })
+            .sortedByDescending { it.timestamp }
+    }
+    val lastOutgoingKey = chatRows.firstOrNull { it.pending != null || it.message?.isMe == true }?.key
     val repeatedMomentCards = remember(messages) { repeatedChatMomentCards(messages) }
     val currentMessages by rememberUpdatedState(messages)
+    val currentRowCount by rememberUpdatedState(chatRows.size)
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
     val headerName = displayName.trim().substringBefore(' ').ifBlank { displayName }
@@ -213,8 +219,11 @@ fun ChatDetailScreen(
             },
             onError = { err ->
                 sending = false
-                if (clearInput && inputMessage.isBlank()) updateDraft(text)
-                Toast.makeText(context, "Không gửi được: $err", Toast.LENGTH_LONG).show()
+                // The failed outbox row owns its text; do not duplicate it in the composer.
+                if (!viewModel.sessionManager.isLoggedIn) {
+                    if (clearInput && inputMessage.isBlank()) updateDraft(text)
+                    Toast.makeText(context, "Không gửi được: $err", Toast.LENGTH_LONG).show()
+                }
             })
     }
 
@@ -241,8 +250,8 @@ fun ChatDetailScreen(
         if (!chatSettled) return@LaunchedEffect
         snapshotFlow {
             val info = listState.layoutInfo
-            val count = currentMessages.size
-            count > 0 && info.visibleItemsInfo.any { it.index >= count - 2 } &&
+            val count = currentRowCount
+            currentMessages.isNotEmpty() && count > 0 && info.visibleItemsInfo.any { it.index >= count - 2 } &&
                 info.visibleItemsInfo.size < count
         }.collect { nearOldest ->
             val convId = viewModel.activeConversationId.value ?: return@collect
@@ -298,16 +307,21 @@ fun ChatDetailScreen(
                     contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(pendingHere.asReversed(), key = { "pending:" + it.token }) { draft ->
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                            Text(draft.text, color = Color.Black, fontSize = 17.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(28.dp)).background(sentColor)
-                                    .padding(horizontal = 18.dp, vertical = 12.dp))
-                            Text(if (draft.acknowledged) "Đã gửi · Đang đồng bộ" else "Đang gửi…",
-                                color = LocketTextDim, fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp, top = 3.dp))
-                        }
-                    }
-                    items(newestFirst, key = { it.id }) { msg ->
+                    items(chatRows, key = { it.key }) { row ->
+                        val draft = row.pending
+                        if (draft != null) {
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                                Text(draft.text, color = Color.Black, fontSize = 17.sp,
+                                    modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(28.dp)).background(sentColor)
+                                        .padding(horizontal = 18.dp, vertical = 12.dp))
+                                when {
+                                    draft.failed -> ChatSendStatus("Lỗi", failed = true, onRetry = { viewModel.retryChatMessage(draft.token) })
+                                    !draft.acknowledged -> ChatSendStatus("Đang gửi…")
+                                    row.key == lastOutgoingKey -> ChatSendStatus("Đã gửi")
+                                }
+                            }
+                        } else {
+                        val msg = requireNotNull(row.message)
                         Column(Modifier.fillMaxWidth()) {
                             val timeStr = formatTime(msg.createdAtMs)
                             if (!msg.thumbnailUrl.isNullOrBlank() && msg.id !in repeatedMomentCards) {
@@ -423,11 +437,10 @@ fun ChatDetailScreen(
                                         modifier = Modifier.weight(1f), onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                                 }
                             }
-                            if (msg.isMe && msg.id == lastSentId && pendingHere.isEmpty()) {
-                                Text("Đã gửi", color = LocketTextDim, fontSize = 11.sp,
-                                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp, top = 3.dp),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                            if (msg.isMe && row.key == lastOutgoingKey) {
+                                ChatSendStatus("Đã gửi")
                             }
+                        }
                         }
                     }
                     // Dang tai them tin cu: vong loading nho o dau danh sach
@@ -735,6 +748,30 @@ private fun ReceivedMessageMenu(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.Block, null, tint = LocketRed, modifier = Modifier.size(20.dp))
                 Text("Báo cáo tin nhắn", color = LocketRed, fontSize = 15.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+private data class ChatDisplayRow(
+    val message: ChatMessage? = null,
+    val pending: LocketViewModel.PendingChat? = null
+) {
+    val timestamp: Long get() = pending?.createdAt ?: message?.createdAtMs ?: 0L
+    val key: String get() = pending?.let { "pending:" + it.token } ?: "message:" + requireNotNull(message).id
+}
+
+@Composable
+private fun ChatSendStatus(text: String, failed: Boolean = false, onRetry: () -> Unit = {}) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(end = 8.dp, top = 3.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, color = if (failed) LocketRed else LocketTextDim, fontSize = 11.sp)
+        if (failed) {
+            IconButton(onClick = onRetry, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Refresh, contentDescription = "Gửi lại", tint = LocketRed, modifier = Modifier.size(16.dp))
             }
         }
     }

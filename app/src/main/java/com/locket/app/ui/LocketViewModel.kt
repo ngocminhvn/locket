@@ -508,7 +508,7 @@ class LocketViewModel(
     // Tin nhan that cua cuoc tro chuyen dang mo (Room cache-first + sync tu Firestore).
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
-    data class PendingChat(val token: String, val receiver: String, val text: String, val createdAt: Long, val acknowledged: Boolean = false)
+    data class PendingChat(val token: String, val receiver: String, val text: String, val createdAt: Long, val acknowledged: Boolean = false, val failed: Boolean = false)
     private val _pendingChat = MutableStateFlow<List<PendingChat>>(emptyList())
     val pendingChat = _pendingChat.asStateFlow()
     // Lock per account and moment, across Home recomposition/navigation.
@@ -1341,12 +1341,40 @@ class LocketViewModel(
         val token = java.util.UUID.randomUUID().toString()
         val pending = PendingChat(token, receiverUid, message, System.currentTimeMillis())
         if (activeFriendUid == receiverUid && momentUid == null && activeAccount(account)) _pendingChat.update { it + pending }
+        submitChat(account, pending, momentUid, replyKey, onSuccess, onError)
+    }
+
+    // Reuse the original client token on retry and claim the failed row atomically.
+    fun retryChatMessage(token: String) {
+        val account = sessionManager.currentUser.uid
+        if (!activeAccount(account)) return
+        while (true) {
+            val rows = _pendingChat.value
+            val failed = rows.firstOrNull { it.token == token && it.failed && it.receiver == activeFriendUid } ?: return
+            val retry = failed.copy(failed = false, acknowledged = false)
+            if (_pendingChat.compareAndSet(rows, rows.map { if (it.token == token) retry else it })) {
+                submitChat(account, retry, null, null, {}, {})
+                return
+            }
+        }
+    }
+
+    private fun submitChat(
+        account: String,
+        pending: PendingChat,
+        momentUid: String?,
+        replyKey: Pair<String, String>?,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val token = pending.token
+        val receiverUid = pending.receiver
         viewModelScope.launch {
             try {
-                val res = apiClient.sendChatMessage(receiverUid, message, momentUid, token)
+                val res = apiClient.sendChatMessage(receiverUid, pending.text, momentUid, token)
                 if (!activeAccount(account)) return@launch
                 if (res.isSuccess) {
-                    _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(acknowledged = true) else it } }
+                    _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(acknowledged = true, failed = false) else it } }
                     onSuccess()
                     val current = _activeConversationId.value
                     if (activeFriendUid == receiverUid && current != null) {
@@ -1362,7 +1390,7 @@ class LocketViewModel(
                         openChat(receiverUid)
                     } else refreshConversations()
                 } else {
-                    _pendingChat.update { rows -> rows.filterNot { it.token == token } }
+                    _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(failed = true, acknowledged = false) else it } }
                     onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
                 }
             } finally {
