@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -62,6 +63,7 @@ internal fun LocationCaptionDialog(
     onSelect: (CaptionPlace) -> Unit
 ) {
     val yellow = Color(0xFFFFC943)
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var nearby by remember { mutableStateOf(emptyList<CaptionPlace>()) }
     var results by remember { mutableStateOf(emptyList<CaptionPlace>()) }
@@ -79,7 +81,7 @@ internal fun LocationCaptionDialog(
         try {
             coroutineScope {
                 val areaTask = async {
-                    try { CaptionLocationData.placeName(androidx.compose.ui.platform.LocalContext.current, currentLocation) }
+                    try { CaptionLocationData.placeName(context, currentLocation) }
                     catch (e: CancellationException) { throw e }
                     catch (_: Exception) { null }
                 }
