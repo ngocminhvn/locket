@@ -19,7 +19,8 @@ internal data class StoredMomentUpload(
     var videoUrl: String? = null,
     var attemptedPost: Boolean = false,
     var confirmed: Boolean = false,
-    var failure: String? = null
+    var failure: String? = null,
+    val overlaysJson: String = "[]"
 ) {
     val thumbnail: File get() = File(directory, "thumbnail")
     val video: File? get() = if (hasVideo) File(directory, "video.mp4") else null
@@ -34,10 +35,10 @@ internal class MomentUploadStore(private val filesDir: File) {
         return File(File(filesDir, "moment_uploads"), hash)
     }
 
-    fun create(id: Long, owner: String, bytes: ByteArray, video: File?, caption: String, recipients: List<String>): StoredMomentUpload {
+    fun create(id: Long, owner: String, bytes: ByteArray, video: File?, caption: String, recipients: List<String>, overlaysJson: String = "[]"): StoredMomentUpload {
         val dir = File(folder(owner), id.toString())
         check(dir.mkdirs()) { "Không tạo được hàng đợi gửi" }
-        val item = StoredMomentUpload(id, owner, dir, caption, recipients, video != null)
+        val item = StoredMomentUpload(id, owner, dir, caption, recipients, video != null, overlaysJson = overlaysJson)
         try {
             FileOutputStream(item.thumbnail).use { it.write(bytes); it.fd.sync() }
             if (video != null) {
@@ -55,6 +56,7 @@ internal class MomentUploadStore(private val filesDir: File) {
         val json = JSONObject().apply {
             put("id", item.id); put("owner", item.owner); put("caption", item.caption)
             put("recipients", JSONArray(item.recipients)); put("video", item.hasVideo)
+            put("overlays", JSONArray(item.overlaysJson))
             put("thumbnailUrl", item.thumbnailUrl ?: JSONObject.NULL)
             put("md5", item.md5 ?: JSONObject.NULL)
             put("videoUrl", item.videoUrl ?: JSONObject.NULL)
@@ -81,7 +83,8 @@ internal class MomentUploadStore(private val filesDir: File) {
                 val item = StoredMomentUpload(id, owner, dir, json.getString("caption"),
                     List(recipients.length()) { recipients.getString(it) }, json.getBoolean("video"),
                     optional(json, "thumbnailUrl"), optional(json, "md5"), optional(json, "videoUrl"),
-                    json.optBoolean("attemptedPost"), false, optional(json, "failure"))
+                    json.optBoolean("attemptedPost"), false, optional(json, "failure"),
+                    json.optJSONArray("overlays")?.toString() ?: "[]")
                 if (!item.thumbnail.isFile || (item.hasVideo && item.video?.isFile != true)) {
                     item.failure = "Thiếu tệp của khoảnh khắc đã lưu; hãy bỏ mục này và chọn lại ảnh."
                 }
