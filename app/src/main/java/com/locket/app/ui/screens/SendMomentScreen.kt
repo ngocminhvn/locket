@@ -365,27 +365,29 @@ internal fun rememberMomentReviewSlots(
         }
         },
         recipients = {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val itemWidth = maxWidth * 0.208f
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(start = maxWidth * 0.118f, end = maxWidth * 0.05f),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
                 item(key = "all-recipients") {
-                    RecipientAvatar("Tất cả", "", sendAll, true, !isPosting) {
+                    RecipientAvatar("Tất cả", "", sendAll, true, !isPosting, itemWidth) {
                         sendAll = true
                         selected = emptySet()
                     }
                 }
                 items(recipientFriends, key = { it.uid }) { friend ->
                     RecipientAvatar(friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } },
-                        friend.avatarUrl, !sendAll && friend.uid in selected, false, !isPosting) {
+                        friend.avatarUrl, !sendAll && friend.uid in selected, false, !isPosting, itemWidth) {
                         if (sendAll) {
                             sendAll = false
                             selected = setOf(friend.uid)
                         } else selected = if (friend.uid in selected) selected - friend.uid else selected + friend.uid
                     }
                 }
-        }
+                }
+            }
         }
     )
 
@@ -459,19 +461,27 @@ internal fun rememberMomentReviewSlots(
 
 @Composable
 private fun RecipientAvatar(
-    name: String, avatar: String, selected: Boolean, all: Boolean, enabled: Boolean, onClick: () -> Unit
+    name: String, avatar: String, selected: Boolean, all: Boolean, enabled: Boolean,
+    itemWidth: androidx.compose.ui.unit.Dp, onClick: () -> Unit
 ) {
-    Column(Modifier.width(72.dp).clickable(enabled = enabled, onClick = onClick),
+    val shortName = if (all) name else name.trim().substringBefore(' ')
+    Column(Modifier.width(itemWidth).semantics { contentDescription = name }.clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(48.dp).border(if (selected) 2.5.dp else 1.5.dp,
-            if (selected) LocketYellow else Color(0xFF444444), CircleShape).padding(4.dp)
-            .clip(CircleShape).background(Color(0xFF444444)), contentAlignment = Alignment.Center) {
-            if (avatar.isNotBlank() && !all) AsyncImage(avatar, name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            else Icon(if (all) Icons.Default.People else Icons.Default.Person, null, tint = Color.White)
+        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(if (selected) 44.dp else 35.dp)
+                .border(if (selected) 2.5.dp else 1.5.dp,
+                    if (selected) LocketYellow else Color(0xFF484848), CircleShape)
+                .padding(if (selected) 4.dp else 3.dp)
+                .clip(CircleShape).background(Color(0xFF444444)), contentAlignment = Alignment.Center) {
+                if (avatar.isNotBlank() && !all) AsyncImage(avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Icon(if (all) Icons.Default.People else Icons.Default.Person, null, tint = Color.White,
+                    modifier = Modifier.size(if (selected) 20.dp else 16.dp))
+            }
         }
-        Spacer(Modifier.height(7.dp))
-        Text(name, color = if (selected) LocketYellow else Color(0xFF8A8A8A), fontSize = 15.sp,
-            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(8.dp))
+        Text(shortName, color = if (selected) LocketYellow else Color(0xFF747474), fontSize = 16.sp,
+            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 

@@ -1123,7 +1123,7 @@ fun CameraScreen(
         }
 
         if (review != null) {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 54.dp)) {
                 review.recipients()
             }
         }
