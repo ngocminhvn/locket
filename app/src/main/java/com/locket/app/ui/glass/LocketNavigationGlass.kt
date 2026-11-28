@@ -10,6 +10,23 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.locket.app.ui.theme.LocketBlack
 import com.wexpa.liquidglass.GlassTabBarStyle
+import com.wexpa.liquidglass.Glass
+import com.wexpa.liquidglass.GlassInteraction
+
+// One optical preset for the entire bottom navigation group.
+private val navigationStyle = GlassTabBarStyle.Calm(true).copy(
+    height = 54.dp, contentPadding = 4.dp, pillInset = 4.dp
+)
+
+// Use exactly the central bar's optical material and directional lighting.
+// Auxiliary actions get a restrained touch glow, without moving their bounds
+// or acting as draggable tab selectors.
+internal val LocketSideNavigationGlass = Glass(
+    style = navigationStyle.bar,
+    light = navigationStyle.light
+).interactive(response = GlassInteraction.Calm.copy(
+    pressScale = 1f, pressGrowth = 0.dp, gel = false, pull = false
+))
 
 /** TKB SV's upstream Liquid Glass pipeline, with Locket's background unchanged. */
 @Composable
@@ -41,9 +58,7 @@ internal fun LocketGlassTabBar(
             selectedIndex = selectedIndex,
             onSelected = onSelected,
             modifier = modifier,
-            style = GlassTabBarStyle.Calm(true).copy(
-                height = 54.dp, contentPadding = 4.dp, pillInset = 4.dp
-            ),
+            style = navigationStyle,
             item = item
         )
     }
