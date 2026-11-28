@@ -50,7 +50,8 @@ data class MomentEntity(
     val md5: String = "",
     val isLocal: Boolean = false,
     // Map<String, Int> reactions, luu dang JSON (xem Converters)
-    val reactionsJson: String = "{}"
+    val reactionsJson: String = "{}",
+    @androidx.room.ColumnInfo(defaultValue = "'[]'") val overlaysJson: String = "[]"
 )
 
 @Entity(tableName = "friends")
@@ -110,7 +111,8 @@ fun Moment.toEntity() = MomentEntity(
     timeAgo = timeAgo,
     md5 = md5,
     isLocal = isLocal,
-    reactionsJson = Converters.reactionsToJson(reactions)
+    reactionsJson = Converters.reactionsToJson(reactions),
+    overlaysJson = overlaysJson
 )
 
 fun MomentEntity.toModel() = Moment(
@@ -125,7 +127,8 @@ fun MomentEntity.toModel() = Moment(
     timeAgo = timeAgo,
     reactions = Converters.reactionsFromJson(reactionsJson),
     md5 = md5,
-    isLocal = isLocal
+    isLocal = isLocal,
+    overlaysJson = overlaysJson
 )
 
 fun Friend.toEntity() = FriendEntity(
@@ -385,7 +388,7 @@ interface LocketDao {
 
 @Database(
     entities = [MomentEntity::class, FriendEntity::class, ConversationEntity::class, ChatMessageEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
