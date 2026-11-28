@@ -29,6 +29,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -80,6 +89,7 @@ import java.util.Locale
 private enum class CaptionKind { TEXT, REVIEW, LOCATION, WEATHER, TIME, MUSIC, LINK, STREAK, PARTY, OOTD, MISS, MORNING, NIGHT }
 
 internal class MomentReviewSlots(
+    val editingCaption: Boolean,
     val header: @Composable () -> Unit,
     val frame: @Composable () -> Unit,
     val indicators: @Composable () -> Unit,
@@ -118,7 +128,6 @@ internal fun rememberMomentReviewSlots(
     var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableFloatStateOf(0f) }
-    var reviewComment by remember(bitmap) { mutableStateOf("") }
     var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
     var musicPicker by remember(bitmap) { mutableStateOf(false) }
     var link by remember(bitmap) { mutableStateOf<LinkCaption?>(null) }
@@ -128,8 +137,25 @@ internal fun rememberMomentReviewSlots(
     var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
     var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(CaptionLocationData.recentWeather()) }
     var sheet by remember { mutableStateOf(false) }
-    var editor by remember { mutableStateOf<CaptionKind?>(null) }
-    var draft by remember { mutableStateOf("") }
+    var editingText by remember(bitmap) { mutableStateOf(false) }
+    var keyboardWasVisible by remember(bitmap) { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
+    fun finishTextEditing() {
+        editingText = false
+        keyboardWasVisible = false
+        focusManager.clearFocus()
+        keyboard?.hide()
+    }
+
+    LaunchedEffect(editingText, imeVisible) {
+        if (editingText) {
+            if (imeVisible) keyboardWasVisible = true
+            else if (keyboardWasVisible) finishTextEditing()
+        }
+    }
     var saving by remember { mutableStateOf(false) }
     var infoOpen by remember(bitmap) { mutableStateOf(false) }
     var zoom by remember(bitmap) { mutableFloatStateOf(1f) }
@@ -182,8 +208,8 @@ internal fun rememberMomentReviewSlots(
         val o = com.locket.app.model.CaptionOverlays
         return when (k) {
             CaptionKind.TEXT -> o.make("standard", text.trim(), blur = "ultra_thin", maxLines = 4)
-            CaptionKind.REVIEW -> o.make("review", "★${formatReviewRating(rating)}" + if (reviewComment.isBlank()) "" else " - $reviewComment",
-                payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", reviewComment) })
+            CaptionKind.REVIEW -> o.make("review", "★${formatReviewRating(rating)}",
+                payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", "") })
             CaptionKind.LOCATION -> locationFix?.let { fix ->
                 o.make("location", location, payload = com.google.gson.JsonObject().apply {
                     addProperty("location_name", location)
@@ -274,12 +300,16 @@ internal fun rememberMomentReviewSlots(
 
     fun choose(k: CaptionKind) {
         sheet = false
+        if (k == CaptionKind.TEXT) {
+            scope.launch {
+                pager.scrollToPage(general.indexOf(k))
+                editingText = true
+            }
+            return
+        }
         if (k in general) scope.launch { pager.scrollToPage(general.indexOf(k)) }
         when (k) {
-            CaptionKind.TEXT -> {
-                draft = text
-                editor = k
-            }
+            CaptionKind.TEXT -> Unit
             CaptionKind.LOCATION, CaptionKind.WEATHER -> requestCaption(k)
             CaptionKind.MUSIC -> musicPicker = true
             CaptionKind.LINK -> linkPicker = true
@@ -321,7 +351,7 @@ internal fun rememberMomentReviewSlots(
             musicPicker -> musicPicker = false
             linkPicker -> linkPicker = false
             infoOpen -> infoOpen = false
-            editor != null -> editor = null
+            editingText -> finishTextEditing()
             sheet -> sheet = false
             !isPosting && !saving -> onCancel()
         }
@@ -329,6 +359,7 @@ internal fun rememberMomentReviewSlots(
 
     // Review owns content and interactions; CameraScreen owns geometry.
     val slots = MomentReviewSlots(
+        editingCaption = editingText,
         header = {
             Box(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp)) {
                 Text("Gửi đến...", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold,
@@ -343,7 +374,7 @@ internal fun rememberMomentReviewSlots(
         }
         },
         frame = {
-            val gestureModifier = if (videoFile != null) Modifier else Modifier.pointerInput(bitmap) {
+            val gestureModifier = if (videoFile != null || editingText) Modifier else Modifier.pointerInput(bitmap) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     var drag = Offset.Zero
@@ -411,10 +442,14 @@ internal fun rememberMomentReviewSlots(
                 HorizontalPager(
                     state = pager,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = !isPosting && !transforming && zoom <= 1f
+                    userScrollEnabled = !editingText && !isPosting && !transforming && zoom <= 1f
                 ) { page ->
                     val item = general[page]
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    Box(Modifier.fillMaxSize().then(
+                        if (editingText && item == CaptionKind.TEXT) Modifier.clickable(
+                            interactionSource = null, indication = null, onClick = { finishTextEditing() }
+                        ) else Modifier
+                    ), contentAlignment = Alignment.BottomCenter) {
                         val label = if (fetchingCaption == item) "Đang cập nhật…" else value(item).ifBlank {
                             when (item) {
                                 CaptionKind.LOCATION -> "Lấy vị trí"
@@ -431,13 +466,13 @@ internal fun rememberMomentReviewSlots(
                                 horizontalAlignment = Alignment.CenterHorizontally) {
                                 ReviewRatingSelector(rating, enabled = !isPosting && !transforming && zoom <= 1f,
                                     onRatingChange = { rating = it })
-                                if (rating > 0f && reviewComment.isNotBlank()) {
-                                    Text(reviewComment, color = Color.White, fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.clickable(enabled = !isPosting) { draft = reviewComment; editor = CaptionKind.REVIEW }
-                                            .padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
-                                }
                             }
+                        } else if (item == CaptionKind.TEXT && editingText) {
+                            InlineCaptionEditor(
+                                text = text,
+                                onTextChange = { text = it.take(200) },
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+                            )
                         } else {
                             val data = com.locket.app.model.CaptionOverlays.decode(overlay(item))
                             val tap = { if (item in listOf(CaptionKind.TEXT, CaptionKind.LOCATION, CaptionKind.WEATHER, CaptionKind.MUSIC, CaptionKind.LINK)) choose(item) else sheet = true }
@@ -446,13 +481,13 @@ internal fun rememberMomentReviewSlots(
                         }
                     }
                 }
-                if (videoFile == null && zoom > 1f) {
+                if (!editingText && videoFile == null && zoom > 1f) {
                     Text(String.format(Locale.US, "%.1f×", zoom), color = Color.White, fontSize = 12.sp,
                         modifier = Modifier.align(Alignment.TopStart).padding(16.dp).clip(CircleShape)
                             .background(Color(0x99000000)).clickable { zoom = 1f; offset = Offset.Zero }
                             .padding(horizontal = 10.dp, vertical = 6.dp))
                 }
-                if (videoFile == null && showPhotoInfo) {
+                if (!editingText && videoFile == null && showPhotoInfo) {
                     IconButton(onClick = { infoOpen = true }, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(40.dp)) {
                         Icon(Icons.Default.ErrorOutline, "Thông tin ảnh", tint = Color.White,
                             modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0x99000000)))
@@ -551,10 +586,6 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("Aa Văn bản") { choose(CaptionKind.TEXT) }
                     CaptionChip("Review", icon = Icons.Default.Star, iconTint = LocketYellow) { choose(CaptionKind.REVIEW) }
                 }
-                if (kind == CaptionKind.REVIEW && rating > 0f) {
-                    Spacer(Modifier.height(8.dp))
-                    CaptionChip("Viết nhận xét") { sheet = false; draft = reviewComment; editor = CaptionKind.REVIEW }
-                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Music", icon = Icons.Default.MusicNote, iconTint = Color(0xFF1ED760)) { choose(CaptionKind.MUSIC) }
@@ -632,24 +663,37 @@ internal fun rememberMomentReviewSlots(
         }
     }
 
-    editor?.let {
-        AlertDialog(
-            onDismissRequest = { editor = null },
-            title = { Text(if (editor == CaptionKind.REVIEW) "Viết nhận xét" else "Thêm một tin nhắn") },
-            text = {
-                OutlinedTextField(value = draft, onValueChange = { draft = it.take(if (editor == CaptionKind.REVIEW) 36 else 200) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth())
-            },
-            confirmButton = { TextButton(onClick = {
-                if (editor == CaptionKind.REVIEW) reviewComment = draft.trim().let { value ->
-                    value.substring(0, value.offsetByCodePoints(0, value.codePointCount(0, value.length).coerceAtMost(36)))
-                } else text = draft
-                editor = null
-            }) { Text("Xong") } },
-            dismissButton = { TextButton(onClick = { editor = null }) { Text("Hủy") } }
-        )
-    }
     return slots
+}
+
+@Composable
+private fun InlineCaptionEditor(text: String, onTextChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    val requester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val style = TextStyle(color = Color.White, fontSize = 18.sp, lineHeight = 22.sp,
+        fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+    BasicTextField(
+        value = text,
+        onValueChange = onTextChange,
+        modifier = modifier.clip(RoundedCornerShape(30.dp))
+            .background(Color.Black.copy(alpha = 0.40f))
+            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .focusRequester(requester),
+        textStyle = style,
+        cursorBrush = SolidColor(Color.White),
+        maxLines = 4,
+        decorationBox = { inner ->
+            Box(contentAlignment = Alignment.Center) {
+                if (text.isEmpty()) Text("Thêm một tin nhắn",
+                    style = style.copy(color = Color.White.copy(alpha = 0.55f)))
+                inner()
+            }
+        }
+    )
+    LaunchedEffect(Unit) {
+        requester.requestFocus()
+        keyboard?.show()
+    }
 }
 
 private fun formatReviewRating(rating: Float): String =
@@ -663,7 +707,8 @@ private fun ReviewRatingSelector(rating: Float, enabled: Boolean, onRatingChange
         awaitEachGesture {
             val down = awaitFirstDown()
             fun updateAt(x: Float) {
-                val fraction = (x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                val inset = 7.dp.toPx()
+                val fraction = ((x - inset) / (size.width - 2 * inset).coerceAtLeast(1f)).coerceIn(0f, 1f)
                 update((fraction * 10f).roundToInt() / 2f)
             }
             down.consume()
@@ -685,10 +730,10 @@ private fun ReviewRatingSelector(rating: Float, enabled: Boolean, onRatingChange
             update((value.coerceIn(0f, 5f) * 2f).roundToInt() / 2f)
             true
         }
-    }.then(gesture).padding(horizontal = 7.dp, vertical = 4.dp),
+    }.then(gesture).padding(horizontal = 7.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         repeat(5) { index ->
-            OverlayReviewStar((rating - index).coerceIn(0f, 1f), Modifier.size(25.dp))
+            OverlayReviewStar((rating - index).coerceIn(0f, 1f), Modifier.size(38.dp))
         }
     }
 }

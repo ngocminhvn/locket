@@ -846,21 +846,23 @@ fun CameraScreen(
         )
     }
 
+    val editingCaption = review?.editingCaption == true
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .then(if (sharedHeaderHeight == null) Modifier.background(AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context))) else Modifier)
+            .then(if (editingCaption) Modifier.background(Color.Black)
+                else if (sharedHeaderHeight == null) Modifier.background(AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context))) else Modifier)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(if (editingCaption) Modifier.imePadding().statusBarsPadding() else Modifier),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top Bar (Matches 02-camera.jpg with real friend count and user avatar)
             val friendsLabel = "${friends.size} Bạn bè"
             if (sharedHeaderHeight != null || review != null) {
-                val height = sharedHeaderHeight ?: (66.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                val height = if (editingCaption) 0.dp else sharedHeaderHeight ?: (66.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
                 Box(Modifier.fillMaxWidth().height(height)) {
-                    review?.header?.invoke()
+                    if (!editingCaption) review?.header?.invoke()
                 }
             } else LocketTopBar(
                 title = friendsLabel,
@@ -873,7 +875,7 @@ fun CameraScreen(
                 onAvatarClick = onOpenProfile
             )
 
-            Spacer(modifier = Modifier.weight(0.55f))
+            Spacer(modifier = Modifier.weight(if (editingCaption) 1f else 0.55f))
 
             // Main Squircle Camera Viewfinder (Matches 02-camera.jpg)
             Box(
@@ -1129,6 +1131,9 @@ fun CameraScreen(
                 }
             }
 
+            if (editingCaption) {
+                Spacer(Modifier.weight(1f))
+            } else {
             Box(Modifier.weight(if (review == null) 1.25f else 1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 review?.indicators?.invoke()
             }
@@ -1228,9 +1233,10 @@ fun CameraScreen(
                 currentScreen = "camera",
                 onNavigate = onNavigate
             )
+            }
         }
 
-        if (review != null) {
+        if (review != null && !editingCaption) {
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 54.dp)) {
                 review.recipients()
             }
