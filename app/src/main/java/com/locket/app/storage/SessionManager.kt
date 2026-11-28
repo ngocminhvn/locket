@@ -101,8 +101,12 @@ class SessionManager(context: Context) {
     val isLoggedIn: Boolean
         get() = !idToken.isNullOrBlank()
 
+    var roomCacheClearPending: Boolean
+        get() = prefs.getBoolean("room_cache_clear_pending", false)
+        set(value) = prefs.edit().putBoolean("room_cache_clear_pending", value).apply()
+
     fun logout() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().putBoolean("room_cache_clear_pending", true).apply()
     }
 
     private fun defaultUser(): User {
@@ -129,14 +133,17 @@ class SessionManager(context: Context) {
         return emptyList()
     }
 
-    fun saveMoments(moments: List<Moment>) {
-        prefs.edit().putString("cached_moments", gson.toJson(moments)).apply()
+    fun hasWidgetMoment(owner: String): Boolean = readAux(owner, "widget_moment") != null
+
+    fun getWidgetMoment(owner: String): Moment? {
+        if (owner.isBlank() || !isLoggedIn || currentUser.uid != owner) return null
+        val raw = readAux(owner, "widget_moment") ?: return getSavedMoments().firstOrNull()
+        return runCatching { gson.fromJson(raw, Moment::class.java) }.getOrNull()
     }
 
-    fun addMoment(moment: Moment) {
-        val list = getSavedMoments().toMutableList()
-        list.add(0, moment)
-        saveMoments(list)
+    fun saveWidgetMoment(owner: String, moment: Moment?) {
+        if (!isLoggedIn || currentUser.uid != owner) return
+        writeAux(owner, "widget_moment", gson.toJson(moment))
     }
 
     fun getFriends(): List<Friend> {

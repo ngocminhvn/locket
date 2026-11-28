@@ -78,10 +78,13 @@ class LocketViewModel(
     private val deletedMomentIds = mutableSetOf<String>()
     private val hiddenFriendUids = mutableSetOf<String>()
 
-    private val _moments = MutableStateFlow<List<Moment>>(sessionManager.getSavedMoments())
+    private val _moments = MutableStateFlow<List<Moment>>(
+        if (sessionManager.hasWidgetMoment(sessionManager.currentUser.uid)) emptyList() else sessionManager.getSavedMoments()
+    )
     val moments: StateFlow<List<Moment>> = _moments.asStateFlow()
 
     private val momentWriteLock = Mutex()
+    private var cacheClearJob: Job? = null
     private var historyCursor: LocketApiClient.HistoryCursor? = null
     private val feedSyncLock = Mutex()
     private var lastFeedRefreshAt = 0L
@@ -152,7 +155,7 @@ class LocketViewModel(
                     it.copy(userName = _currentUser.value.displayName.ifBlank { "Bạn" },
                         userAvatarUrl = _currentUser.value.profilePictureUrl)
                 }
-                mergeMoments(own)
+                mergeMoments(account, own)
                 prefetchThumbnails(own.take(8).map { it.thumbnailUrl })
                 val next = page.nextPageToken
                 if (next != null && next == ownHistoryCursor) error("Máy chủ trả lại cùng con trỏ")
@@ -365,39 +368,47 @@ class LocketViewModel(
                         m.copy(userName = name.first, userAvatarUrl = name.second.ifBlank { m.userAvatarUrl }) else m
                 }
                 if (updated != _moments.value) {
-                    cache.saveMoments(updated)
-                    if (activeAccount(account)) _moments.value = updated
+                    persistMoments(account, updated)
                 }
             }
         }
     }
 
-    private suspend fun mergeMoments(incoming: List<Moment>) = momentWriteLock.withLock {
-        val merged = if (RustLocketCore.isAvailable) {
-            RustLocketCore.mergeMoments(_moments.value, incoming, deletedMomentIds, hiddenFriendUids)
-        } else {
-            (_moments.value + incoming)
-                .filter { it.id !in deletedMomentIds && it.userUid !in hiddenFriendUids }
-                .associateBy { it.id }.values
-                .sortedByDescending { it.timestampSeconds }
-        }
-        if (merged != _moments.value) {
-            cache.saveMoments(merged)
-            _moments.value = merged
+    private suspend fun persistMoments(account: String, updated: List<Moment>, tombstones: Set<String> = emptySet()) {
+        val before = _moments.value
+        val changed = updated != before
+        if (!changed && tombstones.isEmpty() && sessionManager.hasWidgetMoment(account)) return
+        cache.saveMomentChanges(account, before, updated, tombstones)
+        if (changed && activeAccount(account)) _moments.value = updated
+    }
+
+    private suspend fun mergeMoments(account: String, incoming: List<Moment>) {
+        cacheClearJob?.join()
+        momentWriteLock.withLock {
+            if (!activeAccount(account)) return
+            val current = _moments.value
+            val deleted = deletedMomentIds.toSet()
+            val hidden = hiddenFriendUids.toSet()
+            val merged = withContext(Dispatchers.Default) {
+                if (RustLocketCore.isAvailable) {
+                    RustLocketCore.mergeMoments(current, incoming, deleted, hidden)
+                } else {
+                    (current + incoming)
+                        .filter { it.id !in deleted && it.userUid !in hidden }
+                        .associateBy { it.id }.values
+                        .sortedByDescending { it.timestampSeconds }
+                }
+            }
+            if (activeAccount(account)) persistMoments(account, merged)
         }
     }
 
-    /**
-     * Bo moment khoi danh sach hien thi + Room cache (dung sau khi xoa /
-     * chan / an thanh cong tren server). Chay duoi momentWriteLock nhu
-     * mergeMoments de khong mat update khi sync chay song song.
-     */
-    private suspend fun removeMomentsFromCache(predicate: (Moment) -> Boolean) = momentWriteLock.withLock {
-        val updated = _moments.value.filterNot(predicate)
-        if (updated != _moments.value) {
-            cache.saveMoments(updated)
-            _moments.value = updated
-        }
+    private suspend fun removeMomentsFromCache(
+        account: String,
+        tombstones: Set<String> = emptySet(),
+        predicate: (Moment) -> Boolean
+    ) = momentWriteLock.withLock {
+        if (activeAccount(account)) persistMoments(account, _moments.value.filterNot(predicate), tombstones)
     }
 
     fun loadOlderMoments() {
@@ -420,7 +431,7 @@ class LocketViewModel(
                     }
                 }
                 val resolved = knownMomentNames(incoming)
-                mergeMoments(resolved)
+                mergeMoments(account, resolved)
                 enrichMomentNames(account, resolved)
                 // Dot anh cu vua ve chinh la cac trang ke tiep user sap vuot
                 // toi (dang gan cuoi danh sach) -> prefetch thumbnail ngay de
@@ -560,7 +571,7 @@ class LocketViewModel(
     private suspend fun applyFeed(account: String, records: List<Moment>) {
         if (!activeAccount(account) || records.isEmpty()) return
         val resolved = knownMomentNames(records)
-        mergeMoments(resolved)
+        mergeMoments(account, resolved)
         prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
         enrichMomentNames(account, resolved)
         if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
@@ -606,7 +617,7 @@ class LocketViewModel(
                         if (!activeAccount(account)) return@collect
                         if (delta.deletedIds.isNotEmpty()) {
                             deletedMomentIds.addAll(delta.deletedIds)
-                            removeMomentsFromCache { it.id in delta.deletedIds }
+                            removeMomentsFromCache(account, delta.deletedIds) { it.id in delta.deletedIds }
                         }
                         applyFeed(account, delta.upserts)
                         if (delta.ready) {
@@ -676,8 +687,7 @@ class LocketViewModel(
             if (!activeAccount(account)) return@withLock
             val updated = knownMomentNames(_moments.value)
             if (updated != _moments.value) {
-                cache.saveMoments(updated)
-                if (activeAccount(account)) _moments.value = updated
+                persistMoments(account, updated)
             }
         }
     }
@@ -808,6 +818,7 @@ class LocketViewModel(
         syncJob = viewModelScope.launch {
             _isSyncing.value = true
             try {
+                cacheClearJob?.join()
                 if (!apiClient.ensureFreshToken() || !activeAccount(account)) return@launch
                 apiClient.seedUserNames(_friends.value)
                 supervisorScope {
@@ -1545,7 +1556,7 @@ class LocketViewModel(
                 _momentViewers.update { it - moment.id }
                 _momentViewErrors.update { it - moment.id }
                 deletedMomentIds.add(moment.id)
-                removeMomentsFromCache { it.id == moment.id }
+                removeMomentsFromCache(owner, setOf(moment.id)) { it.id == moment.id }
                 refreshFeed()
                 onSuccess()
             } else {
@@ -1581,10 +1592,13 @@ class LocketViewModel(
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        val account = sessionManager.currentUser.uid
         viewModelScope.launch {
             val res = apiClient.blockFriend(userUid)
+            if (!activeAccount(account)) return@launch
             if (res.isSuccess) {
-                removeMomentsFromCache { it.userUid == userUid }
+                hiddenFriendUids.add(userUid)
+                removeMomentsFromCache(account) { it.userUid == userUid }
                 val updatedFriends = _friends.value.filter { it.uid != userUid }
                 _friends.value = updatedFriends
                 cache.saveFriends(updatedFriends)
@@ -1745,11 +1759,13 @@ class LocketViewModel(
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
+        val account = sessionManager.currentUser.uid
         viewModelScope.launch {
             val res = apiClient.toggleFriendHidden(userUid)
+            if (!activeAccount(account)) return@launch
             if (res.isSuccess) {
                 hiddenFriendUids.add(userUid)
-                removeMomentsFromCache { it.userUid == userUid }
+                removeMomentsFromCache(account) { it.userUid == userUid }
                 onSuccess()
             } else {
                 onError(res.exceptionOrNull()?.message ?: "Lỗi ẩn bạn bè")
@@ -1883,7 +1899,8 @@ class LocketViewModel(
         _historyError.value = null
         _historyLoading.value = false
         sessionManager.logout()
-        viewModelScope.launch { cache.clearAll() }
+        cacheClearJob = viewModelScope.launch { momentWriteLock.withLock { cache.clearAll() } }
+        LocketWidgetUpdater.updateAll(LocketApplication.instance)
         chatMessagesJob?.cancel()
         chatOlderJob?.cancel()
         chatNextPageToken = null
@@ -1915,7 +1932,10 @@ class LocketViewModel(
         val startupAccount = sessionManager.currentUser.uid
         viewModelScope.launch {
             try {
-                cache.migrateLegacyCacheIfNeeded()
+                momentWriteLock.withLock {
+                    if (sessionManager.roomCacheClearPending) cache.clearAll()
+                    cache.migrateLegacyCacheIfNeeded()
+                }
                 if (activeAccount(startupAccount) && startupAccount.isNotBlank()) {
                     val saved = kotlinx.coroutines.coroutineScope {
                         val momentsTask = async { cache.observeMoments().first() }
@@ -1924,7 +1944,12 @@ class LocketViewModel(
                         Triple(momentsTask.await(), friendsTask.await(), conversationsTask.await())
                     }
                     if (!activeAccount(startupAccount)) return@launch
-                    _moments.value = saved.first
+                    momentWriteLock.withLock {
+                        if (!activeAccount(startupAccount)) return@withLock
+                        _moments.value = saved.first
+                        sessionManager.saveWidgetMoment(startupAccount, saved.first.firstOrNull())
+                    }
+                    if (!activeAccount(startupAccount)) return@launch
                     _friends.value = saved.second
                     _conversations.value = saved.third
                     apiClient.seedUserNames(_friends.value)

@@ -16,9 +16,8 @@ import kotlinx.coroutines.withContext
  * - Nguon hien thi chinh: UI doc Flow tu Room -> mo app la thay du lieu
  *   cache ngay, khong cho mang. Sync chay nen, xong moi ghi de Room.
  * - Chi luu ban sao du lieu that da lay tu API. Khong sinh du lieu gia.
- * - Dual-write moments/friends sang SharedPreferences JSON cu de widget
- *   (LocketWidgetUpdater doc SessionManager.getSavedMoments()) van chay;
- *   conversations truoc gio chua tung cache trong prefs nen chi luu Room.
+ * - Keep one widget moment in preferences for widget updates. Full moment
+ *   history is stored in Room.
  * - Token/email/savedEmail van o SessionManager, khong chuyen sang Room.
  */
 class LocketCache(
@@ -28,7 +27,9 @@ class LocketCache(
     private val dao: LocketDao get() = db.dao()
 
     fun observeMoments(): Flow<List<Moment>> =
-        dao.observeMoments().map { list -> list.map { it.toModel() } }
+        dao.observeMoments().map { list ->
+            withContext(Dispatchers.Default) { list.map { it.toModel().also { moment -> moment.overlay } } }
+        }
 
     fun observeFriends(): Flow<List<Friend>> =
         dao.observeFriends().map { list -> list.map { it.toModel() } }
@@ -39,10 +40,22 @@ class LocketCache(
     fun observeChatMessages(conversationId: String): Flow<List<ChatMessage>> =
         dao.observeChatMessages(conversationId).map { list -> list.map { it.toModel() } }
 
-    suspend fun saveMoments(moments: List<Moment>) {
-        dao.reconcileMoments(withContext(Dispatchers.Default) { moments.map { it.toEntity() } })
-        // Widget still reads legacy JSON; serialize off the UI thread.
-        withContext(Dispatchers.IO) { sessionManager.saveMoments(moments) }
+    suspend fun saveMomentChanges(account: String, before: List<Moment>, after: List<Moment>, tombstones: Set<String>) {
+        val delta = withContext(Dispatchers.Default) {
+            val old = before.associateBy { it.id }
+            val deleted = HashSet(tombstones)
+            val upserts = after.mapNotNull { next ->
+                val previous = old.remove(next.id)
+                if (previous != next) next.toEntity() else null
+            }
+            deleted.addAll(old.keys)
+            upserts to deleted
+        }
+        if (sessionManager.roomCacheClearPending || !sessionManager.isLoggedIn || sessionManager.currentUser.uid != account) return
+        if (delta.first.isNotEmpty() || delta.second.isNotEmpty()) dao.applyMomentDelta(delta.first, delta.second)
+        if (before.firstOrNull() != after.firstOrNull() || !sessionManager.hasWidgetMoment(account)) {
+            sessionManager.saveWidgetMoment(account, after.firstOrNull())
+        }
     }
 
     suspend fun saveFriends(friends: List<Friend>) {
@@ -94,6 +107,7 @@ class LocketCache(
 
     suspend fun clearAll() {
         dao.clearAll()
+        sessionManager.roomCacheClearPending = false
     }
 
     /**

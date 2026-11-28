@@ -258,9 +258,6 @@ interface LocketDao {
     @Query("SELECT COUNT(*) FROM friends")
     suspend fun friendCount(): Int
 
-    @Query("SELECT * FROM moments")
-    suspend fun snapshotMoments(): List<MomentEntity>
-
     @Query("SELECT * FROM friends")
     suspend fun snapshotFriends(): List<FriendEntity>
 
@@ -280,12 +277,9 @@ interface LocketDao {
     suspend fun deleteConversations(ids: List<String>)
 
     @Transaction
-    suspend fun reconcileMoments(moments: List<MomentEntity>) {
-        val old = snapshotMoments().associateBy { it.id }
-        val keys = moments.mapTo(HashSet()) { it.id }
-        (old.keys - keys).chunked(400).forEach { deleteMoments(it) }
-        val changed = moments.filter { old[it.id] != it }
-        if (changed.isNotEmpty()) insertMoments(changed)
+    suspend fun applyMomentDelta(upserts: List<MomentEntity>, deleted: Set<String>) {
+        deleted.chunked(400).forEach { deleteMoments(it) }
+        if (upserts.isNotEmpty()) insertMoments(upserts)
     }
 
     @Transaction

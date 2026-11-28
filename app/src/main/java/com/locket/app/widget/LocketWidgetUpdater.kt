@@ -20,8 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Cap nhat widget tu cache moments that (SessionManager.getSavedMoments()).
- * Moment moi nhat = phan tu dau tien (fetchMomentsFeed xep getLatestMomentV2 len truoc).
+ * Renders the persisted latest moment and supports the legacy cache on upgrade.
  * Anh thumbnail tai that bang Coil ra Bitmap; that bai thi giu khung hinh, khong dung anh gia.
  */
 object LocketWidgetUpdater {
@@ -29,9 +28,12 @@ object LocketWidgetUpdater {
     fun updateAll(context: Context) {
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
-            val moments = SessionManager(appContext).getSavedMoments()
-            val latest = moments.firstOrNull()
+            val session = SessionManager(appContext)
+            val owner = session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty()
+            val latest = session.getWidgetMoment(owner)
             val views = buildViews(appContext, latest)
+            if (session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty() != owner ||
+                session.getWidgetMoment(owner) != latest) return@launch
             val manager = AppWidgetManager.getInstance(appContext)
             val ids = manager.getAppWidgetIds(
                 ComponentName(appContext, LocketWidgetProvider::class.java)
