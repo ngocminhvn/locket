@@ -35,6 +35,11 @@ class LocketApplication : Application(), ImageLoaderFactory {
                     db.execSQL("ALTER TABLE conversations ADD COLUMN lastMessageAtMs INTEGER")
                 }
             })
+            .addMigrations(object : Migration(3, 4) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE moments ADD COLUMN overlaysJson TEXT NOT NULL DEFAULT '[]'")
+                }
+            })
             .fallbackToDestructiveMigration()
             .build()
         cache = LocketCache(database, sessionManager)
