@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.drawable.toBitmap
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Moment
 import com.locket.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -156,7 +156,7 @@ internal fun MomentActionsSheet(moment: Moment, own: Boolean, onDismiss: () -> U
             Text(if (shareOnly) "Chia sẻ với bạn bè!" else "Tùy chọn khoảnh khắc", color = Color.White,
                 style = profileTextStyle(19.sp, 24.sp, FontWeight.Bold))
             Spacer(Modifier.height(26.dp))
-            AsyncImage(moment.thumbnailUrl, "Khoảnh khắc", Modifier.size(170.dp).rotate(-5f).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
+            SkeletonAsyncImage(moment.thumbnailUrl, "Khoảnh khắc", Modifier.size(170.dp).rotate(-5f).clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
             Spacer(Modifier.height(28.dp))
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 12.dp), color = LocketYellow)
             error?.let { Text(it, color = LocketRed, modifier = Modifier.padding(bottom = 12.dp)) }

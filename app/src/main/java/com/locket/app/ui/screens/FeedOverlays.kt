@@ -58,7 +58,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.emoji2.emojipicker.EmojiPickerView
 import com.locket.app.model.Friend
@@ -86,7 +86,7 @@ private fun FilterFriendRow(friend: Friend?, selected: Boolean, onClick: () -> U
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF50504D)), contentAlignment = Alignment.Center) {
             if (friend != null && friend.avatarUrl.isNotBlank())
-                AsyncImage(friend.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                SkeletonAsyncImage(friend.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else Icon(if (friend == null) Icons.Default.People else Icons.Default.Person, null, tint = Color.LightGray, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(12.dp))

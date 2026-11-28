@@ -28,7 +28,7 @@ import com.locket.app.model.CaptionOverlay
 import com.locket.app.model.CaptionSymbol
 import com.locket.app.model.captionSymbol
 import com.locket.app.model.Moment
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -118,7 +118,7 @@ internal fun MomentOverlayPill(data: CaptionOverlay?, fallback: String, modifier
             Icon(vector, null, modifier = Modifier.size(22.dp), tint = tint)
         } else when (data?.iconKind) {
             "emoji" -> if (name.isNotBlank()) Text(name, fontSize = 18.sp)
-            "image" -> if (name.startsWith("https://")) AsyncImage(name, null, Modifier.size(22.dp))
+            "image" -> if (name.startsWith("https://")) SkeletonAsyncImage(name, null, Modifier.size(22.dp))
             else -> if (type == "music") Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(20.dp))
         }
         Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold,

@@ -320,11 +320,12 @@ class LocketViewModel(
 
     /** Current/target photo first; keep 8 ahead and 3 behind. Video waits for photos. */
     fun prefetchUpcomingMoments(moments: List<Moment>, currentIndex: Int, count: Int = 8,
-                                forward: Boolean = true, targetIndex: Int = currentIndex) {
+                                forward: Boolean = true, targetIndex: Int = currentIndex,
+                                sizePx: Int = LocketApplication.instance.resources.displayMetrics.widthPixels) {
         cancelMomentPrefetch()
         if (moments.isEmpty()) return
         val app = LocketApplication.instance
-        val size = app.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val size = sizePx.coerceAtLeast(1)
         val next = if (forward) ((currentIndex + 1)..(currentIndex + count)).toList()
             else ((currentIndex - 1) downTo (currentIndex - count)).toList()
         val opposite = if (forward) (1..3).map { currentIndex - it } else (1..3).map { currentIndex + it }
@@ -354,12 +355,8 @@ class LocketViewModel(
     }
 
     fun prefetchMemoryMoments(moments: List<Moment>, currentIndex: Int, sizePx: Int) {
-        val nearby = (-3..3).mapNotNull { moments.getOrNull(currentIndex + it) }
-        val urls = nearby.map { it.thumbnailUrl }
-        prefetchThumbnails(urls, sizePx)
-        prefetchThumbnails(urls, 16)
-        // Existing adjacent video cache, bounded to the same neighborhood.
-        prefetchUpcomingMoments(moments, currentIndex, count = 3)
+        // Use the same decoded size as the detail viewer, rather than preloading at two sizes.
+        prefetchUpcomingMoments(moments, currentIndex, count = 3, sizePx = sizePx)
     }
 
     private suspend fun knownMomentNames(incoming: List<Moment>): List<Moment> {
@@ -615,6 +612,7 @@ class LocketViewModel(
         if (active) {
             startFeedListener()
             startSocialListeners()
+            if (_isLoggedIn.value) refreshOwnAvatar(sessionManager.currentUser)
             _activeConversationId.value?.let { startChatListener(it) }
         } else {
             feedListenJob?.cancel(); feedListenJob = null
@@ -625,8 +623,7 @@ class LocketViewModel(
             friendsLive = false; conversationsLive = false
             _feedRealtime.value = false
             _chatRealtime.value = false
-            videoPrefetchJobs.values.toList().forEach { it.cancel() }
-            videoPrefetchJobs.clear()
+            cancelMomentPrefetch()
         }
     }
 
@@ -1745,7 +1742,9 @@ class LocketViewModel(
         }
     }
 
-    fun refreshProfile(onDone: () -> Unit = {}, forceAvatar: Boolean = false) {
+    fun refreshProfile(onDone: () -> Unit = {}) = refreshProfileInternal(onDone, false)
+
+    private fun refreshProfileInternal(onDone: () -> Unit, forceAvatar: Boolean) {
         viewModelScope.launch {
             val uid = sessionManager.currentUser.uid
             if (uid.isBlank()) {
@@ -1794,7 +1793,7 @@ class LocketViewModel(
                 return@launch
             }
             val res = apiClient.changeProfilePictureUrl(up.downloadUrl)
-            if (res.isSuccess) refreshProfile(onSuccess, forceAvatar = true)
+            if (res.isSuccess) refreshProfileInternal(onSuccess, forceAvatar = true)
             else onError(res.exceptionOrNull()?.message ?: "Lỗi đổi ảnh đại diện")
         }
     }

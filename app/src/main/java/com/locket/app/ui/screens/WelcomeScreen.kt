@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 
 @Composable
 fun WelcomeScreen(
@@ -71,7 +71,7 @@ fun WelcomeScreen(
                                     .background(LocketSheetSurface)
                                     .border(2.5.dp, LocketYellow, RoundedCornerShape(22.dp))
                             ) {
-                                AsyncImage(
+                                SkeletonAsyncImage(
                                     model = "https://picsum.photos/seed/locketwidget/300/300",
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),

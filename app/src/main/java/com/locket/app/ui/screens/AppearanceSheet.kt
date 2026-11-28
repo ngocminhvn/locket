@@ -45,7 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.R
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.widget.LocketWidgetUpdater
@@ -128,7 +128,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                 }
                 "widget" -> {
                     Box(Modifier.padding(top = 12.dp).size(146.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFF303030))) {
-                        if (photo != null && photo.thumbnailUrl.isNotBlank()) AsyncImage(photo.thumbnailUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        if (photo != null && photo.thumbnailUrl.isNotBlank()) SkeletonAsyncImage(photo.thumbnailUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         if (frame != 0) Image(painterResource(AppearancePrefs.frames[frame]), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
                     }
                     Text("Mọi người", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
@@ -159,7 +159,7 @@ internal fun AppearanceSheet(page: String, viewModel: LocketViewModel, onDismiss
                                     Box(Modifier.size(28.dp).background(Color.White.copy(alpha = 0.23f), CircleShape))
                                 }
                                 Box(Modifier.fillMaxWidth().height(width.coerceAtMost(height * 0.46f)).clip(RoundedCornerShape(24.dp)).background(Color(0xFF303030))) {
-                                    if (photo != null && photo.thumbnailUrl.isNotBlank()) AsyncImage(photo.thumbnailUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    if (photo != null && photo.thumbnailUrl.isNotBlank()) SkeletonAsyncImage(photo.thumbnailUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                                 }
                                 Box(Modifier.size(56.dp).border(3.dp, LocketYellow, CircleShape).padding(5.dp).background(Color.White, CircleShape))
                                 Text(AppearancePrefs.themes[i], color = Color.White, fontWeight = FontWeight.Bold)

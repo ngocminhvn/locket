@@ -23,7 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.google.gson.JsonObject
 import com.locket.app.model.CaptionOverlays
 import kotlinx.coroutines.CancellationException
@@ -143,7 +143,7 @@ private fun SpotifyLinkDialog(initial: CaptionMusic?, onDismiss: () -> Unit, onS
                 }
                 track?.let { current ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        current.artwork?.let { AsyncImage(it, null, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
+                        current.artwork?.let { SkeletonAsyncImage(it, null, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
                         Text(current.title, fontWeight = FontWeight.Bold)
                     }
                     OutlinedTextField(value = artist, onValueChange = { artist = it.take(160) }, label = { Text("Nghệ sĩ") },
@@ -335,7 +335,7 @@ private fun MusicPickerRow(title: String, artist: String, artwork: String?, pend
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF383838)), contentAlignment = Alignment.Center) {
             Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(24.dp))
-            artwork?.let { AsyncImage(it, null, Modifier.fillMaxSize(),
+            artwork?.let { SkeletonAsyncImage(it, null, Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop) }
         }
         Column(Modifier.weight(1f)) {

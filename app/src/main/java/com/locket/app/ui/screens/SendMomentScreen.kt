@@ -60,7 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Friend
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -383,7 +383,7 @@ internal fun rememberMomentReviewSlots(
                     if (snapshotFile == null) {
                         Image(painter, "Ảnh vừa chụp", Modifier.fillMaxSize().then(imageTransform), contentScale = ContentScale.Crop)
                     } else {
-                        AsyncImage(
+                        SkeletonAsyncImage(
                             model = remember(snapshotFile, context) {
                                 ImageRequest.Builder(context).data(Uri.fromFile(snapshotFile))
                                     .crossfade(false).build()
@@ -643,7 +643,7 @@ private fun RecipientAvatar(
                     if (selected) selectionColor else Color.White.copy(alpha = 0.20f), CircleShape)
                 .padding(if (selected) 4.dp else 3.dp)
                 .clip(CircleShape).background(Color.White.copy(alpha = if (selected) 0.25f else 0.12f)), contentAlignment = Alignment.Center) {
-                if (avatar.isNotBlank() && !all) AsyncImage(avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (avatar.isNotBlank() && !all) SkeletonAsyncImage(avatar, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Icon(if (all) Icons.Default.People else Icons.Default.Person, null, tint = Color.White,
                     modifier = Modifier.size(if (selected) 18.dp else 16.dp))
             }

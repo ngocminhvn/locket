@@ -95,6 +95,8 @@ object LocketWidgetUpdater {
         val bitmap = loadBitmap(context, latest.thumbnailUrl)
         if (bitmap != null) {
             views.setImageViewBitmap(R.id.widget_image, bitmap)
+        } else {
+            views.setImageViewResource(R.id.widget_image, R.drawable.image_loading_skeleton)
         }
         return views
     }

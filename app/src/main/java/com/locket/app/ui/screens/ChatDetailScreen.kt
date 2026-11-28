@@ -58,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.ChatMessage
 import com.locket.app.model.Friend
 import com.locket.app.model.MessageReaction
@@ -336,7 +336,7 @@ fun ChatDetailScreen(
                                                 onLongClick = { openMessageMenu(msg) }
                                             )
                                     ) {
-                                        AsyncImage(
+                                        SkeletonAsyncImage(
                                             model = msg.thumbnailUrl,
                                             contentDescription = null,
                                             modifier = Modifier.fillMaxSize(),
@@ -516,7 +516,7 @@ fun ChatDetailScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     if (friend.avatarUrl.isNotBlank()) {
-                        AsyncImage(
+                        SkeletonAsyncImage(
                             model = friend.avatarUrl,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
@@ -805,7 +805,7 @@ private fun ReactionAnchor(
 private fun ChatAvatar(url: String, sizeDp: Int) {
     Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(LocketAvatarBg), contentAlignment = Alignment.Center) {
         if (url.isNotBlank()) {
-            AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            SkeletonAsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size((sizeDp * 0.55f).dp))
         }

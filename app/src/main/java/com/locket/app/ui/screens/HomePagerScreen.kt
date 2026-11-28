@@ -195,13 +195,17 @@ fun HomePagerScreen(
     // Prefetch anh cua cac moment ke tiep truoc khi user vuot toi, de anh
     // da nam trong disk cache cua Coil luc can hien (xem LocketViewModel).
     // page 1 = moments[0]; page 0 (camera) thi prefetch tu moment moi nhat.
-    LaunchedEffect(pagerState, moments) {
+    LaunchedEffect(tabActive, pagerState, moments) {
+        if (!tabActive) {
+            viewModel.cancelMomentPrefetch()
+            return@LaunchedEffect
+        }
         var previous = pagerState.currentPage
         snapshotFlow { pagerState.currentPage to pagerState.targetPage }
             .collect { (current, target) ->
                 val forward = if (target != current) target > current else current >= previous
-                viewModel.prefetchUpcomingMoments(moments, current - 1, count = 8, forward = forward)
-                if (target != current) viewModel.prefetchUpcomingMoments(moments, target - 1, count = 5, forward = forward)
+                viewModel.prefetchUpcomingMoments(moments, current - 1, count = 8,
+                    forward = forward, targetIndex = target - 1)
                 previous = current
             }
     }

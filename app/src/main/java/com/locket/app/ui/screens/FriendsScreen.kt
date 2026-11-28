@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Friend
 import com.locket.app.model.User
 import com.locket.app.ui.LocketViewModel
@@ -163,7 +163,7 @@ fun FriendsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Person, null, tint = Color.White)
-                        if (sUser.profilePictureUrl.isNotBlank()) AsyncImage(sUser.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        if (sUser.profilePictureUrl.isNotBlank()) SkeletonAsyncImage(sUser.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -325,7 +325,7 @@ fun FriendsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (request.avatarUrl.isNotBlank()) {
-                                    AsyncImage(
+                                    SkeletonAsyncImage(
                                         model = request.avatarUrl,
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
@@ -433,7 +433,7 @@ fun FriendsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (rec.avatarUrl.isNotBlank()) {
-                                    AsyncImage(
+                                    SkeletonAsyncImage(
                                         model = rec.avatarUrl,
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
@@ -556,7 +556,7 @@ fun FriendsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (friend.avatarUrl.isNotBlank()) {
-                                    AsyncImage(
+                                    SkeletonAsyncImage(
                                         model = friend.avatarUrl,
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),

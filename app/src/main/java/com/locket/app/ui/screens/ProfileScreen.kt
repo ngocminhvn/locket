@@ -60,7 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.google.zxing.EncodeHintType
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.RGBLuminanceSource
@@ -165,7 +165,7 @@ fun ProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         if (user.profilePictureUrl.isNotBlank()) {
-                            AsyncImage(
+                            SkeletonAsyncImage(
                                 model = user.profilePictureUrl,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize(),
@@ -273,7 +273,7 @@ fun ProfileScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         if (user.profilePictureUrl.isNotBlank()) {
-                            AsyncImage(user.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            SkeletonAsyncImage(user.profilePictureUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         } else {
                             Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
                         }
@@ -541,7 +541,7 @@ private fun BlockedUsersBottomSheet(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (blocked.avatarUrl.isNotBlank()) {
-                                    AsyncImage(
+                                    SkeletonAsyncImage(
                                         model = blocked.avatarUrl,
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
@@ -632,7 +632,9 @@ internal fun QrShareBottomSheet(
             val avatar = if (user.profilePictureUrl.isNotBlank()) {
                 try {
                     val result = context.imageLoader.execute(ImageRequest.Builder(context)
-                        .data(user.profilePictureUrl).size(320).allowHardware(false).build())
+                        .data((context.applicationContext as? com.locket.app.LocketApplication)
+                            ?.ownAvatarStore?.cachedFile(user.profilePictureUrl) ?: user.profilePictureUrl)
+                        .size(320).allowHardware(false).build())
                     (result as? SuccessResult)?.drawable?.toBitmap()
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (_: Exception) { null }

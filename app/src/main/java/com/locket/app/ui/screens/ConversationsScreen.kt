@@ -23,7 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -124,7 +124,7 @@ fun ConversationsScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             if (conv.friend.avatarUrl.isNotBlank()) {
-                                AsyncImage(
+                                SkeletonAsyncImage(
                                     model = conv.friend.avatarUrl,
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),

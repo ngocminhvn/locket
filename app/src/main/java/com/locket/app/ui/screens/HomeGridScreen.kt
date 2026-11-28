@@ -32,7 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.LocketTopBar
 import com.locket.app.ui.components.liquidGlassEffect
@@ -123,9 +123,8 @@ fun HomeGridScreen(
                             .background(LocketJournalDayBg)
                             .clickable { viewModel.prefetchThumbnails(listOf(moment.thumbnailUrl)); onMomentClick(index) }
                     ) {
-                        AsyncImage(
+                        SkeletonAsyncImage(
                             model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(moment.thumbnailUrl).size(cellPx).build(),
-                            placeholder = androidx.compose.ui.graphics.painter.ColorPainter(LocketSheetSurface),
                             contentDescription = moment.caption,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop

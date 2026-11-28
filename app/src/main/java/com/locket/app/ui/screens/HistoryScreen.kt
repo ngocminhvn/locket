@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.MomentVideo
@@ -296,11 +296,10 @@ private fun MonthCardDynamic(
                         Box(Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
                             when {
                                 !valid -> Unit
-                                ownMoment != null -> AsyncImage(ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                ownMoment != null -> SkeletonAsyncImage(ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                                     .data(ownMoment.thumbnailUrl).size((androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)).build(), null,
                                     Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(dayColor)
-                                        .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop,
-                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(dotColor))
+                                        .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop)
                                 isToday -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
                                     .background(Color(0xFF5A4A30)).border(3.dp, todayColor, RoundedCornerShape(10.dp))
                                     .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
@@ -465,7 +464,8 @@ fun MemoryDetailDialog(
                             }.clip(RoundedCornerShape(46.dp))
                                 .background(Color(0xFF1E1E20))) {
                                 val selected = page == pager.settledPage
-                                AsyncImage(remember(photo.thumbnailUrl, imagePx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(imagePx).build() }, photo.caption,
+                                var posterLoading by remember(photo.thumbnailUrl) { mutableStateOf(true) }
+                                SkeletonAsyncImage(remember(photo.thumbnailUrl, imagePx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(imagePx).build() }, photo.caption,
                                     Modifier.fillMaxSize()
                                         .then(if (selected && photo.videoUrl.isNullOrBlank()) Modifier.pointerInput(photo.id) {
                                             awaitEachGesture {
@@ -491,8 +491,10 @@ fun MemoryDetailDialog(
                                             translationX = pan.x; translationY = pan.y
                                         } else Modifier),
                                     contentScale = ContentScale.Crop,
-                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303032)))
-                                if (selected && !moving && !photo.videoUrl.isNullOrBlank()) {
+                                    onLoading = { posterLoading = true },
+                                    onSuccess = { posterLoading = false },
+                                    onError = { posterLoading = false })
+                                if (selected && !moving && !posterLoading && !photo.videoUrl.isNullOrBlank()) {
                                     MomentVideo(photo.videoUrl, Modifier.fillMaxSize())
                                 }
                                 if (!moving && (zoom <= 1f || !selected)) {
@@ -577,7 +579,7 @@ fun MemoryDetailDialog(
                             }
                             Box(Modifier.offset(x = slotWidth * position).size(60.dp),
                                 contentAlignment = Alignment.Center) {
-                                AsyncImage(remember(photo.thumbnailUrl, thumbnailPx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(thumbnailPx).build() }, "Ảnh kỷ niệm",
+                                SkeletonAsyncImage(remember(photo.thumbnailUrl, thumbnailPx) { ImageRequest.Builder(imageContext).data(photo.thumbnailUrl).size(thumbnailPx).build() }, "Ảnh kỷ niệm",
                                     Modifier.size(thumbSize).clip(RoundedCornerShape(if (distance < 0.5f) 12.dp else 9.dp))
                                         .clickable(enabled = !share && !delete) {
                                             zoom = 1f; pan = Offset.Zero

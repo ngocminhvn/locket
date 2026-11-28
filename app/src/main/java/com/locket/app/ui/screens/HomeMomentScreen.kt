@@ -45,7 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.model.Friend
 import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
@@ -159,9 +159,11 @@ fun HomeMomentScreen(
                 if (currentMoment != null) {
                     val videoUrl = currentMoment.videoUrl
                     var imageLoading by remember(currentMoment.thumbnailUrl) { mutableStateOf(true) }
-                    if (imageLoading && isActive) MomentLoadingSkeleton(Modifier.fillMaxSize())
-                    AsyncImage(
-                        model = currentMoment.thumbnailUrl,
+                    val imagePx = context.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+                    SkeletonAsyncImage(
+                        model = remember(currentMoment.thumbnailUrl, imagePx) {
+                            ImageRequest.Builder(context).data(currentMoment.thumbnailUrl).size(imagePx).crossfade(false).build()
+                        },
                         contentDescription = "Moment",
                         modifier = Modifier.fillMaxSize()
                             .then(if (videoUrl.isNullOrBlank()) Modifier.pointerInput(currentMoment.id) {
@@ -202,12 +204,11 @@ fun HomeMomentScreen(
                                 translationX = pan.x; translationY = pan.y
                             } else Modifier),
                         contentScale = ContentScale.Crop,
-                        error = ColorPainter(LocketJournalDayBg),
                         onLoading = { imageLoading = true },
                         onSuccess = { imageLoading = false },
                         onError = { imageLoading = false }
                     )
-                    if (!videoUrl.isNullOrBlank() && isActive) {
+                    if (!videoUrl.isNullOrBlank() && isActive && !imageLoading) {
                         MomentVideo(videoUrl, Modifier.fillMaxSize())
                     }
 
@@ -253,7 +254,7 @@ fun HomeMomentScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         if (currentMoment.userAvatarUrl.isNotBlank()) {
-                            AsyncImage(
+                            SkeletonAsyncImage(
                                 model = currentMoment.userAvatarUrl,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxSize(),
@@ -694,7 +695,7 @@ internal fun OwnMomentActivityBar(viewModel: LocketViewModel, moment: Moment) {
 private fun ViewerAvatar(viewer: Friend, size: Dp) {
     Box(Modifier.size(size).clip(CircleShape).background(LocketAvatarBg), contentAlignment = Alignment.Center) {
         if (viewer.avatarUrl.isNotBlank()) {
-            AsyncImage(viewer.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            SkeletonAsyncImage(viewer.avatarUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             val initials = viewer.displayName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
                 .take(2).joinToString("") { it.take(1).uppercase() }

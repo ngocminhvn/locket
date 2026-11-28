@@ -26,7 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.locket.app.ui.components.SkeletonAsyncImage
 import com.locket.app.ui.theme.*
 import com.wexpa.liquidglass.glassEffect
 import com.locket.app.ui.glass.LocketGlassTabBar
@@ -158,7 +158,7 @@ fun LocketProfileAvatar(avatarUrl: String, onClick: () -> Unit, modifier: Modifi
     Box(modifier.size(46.dp).clip(CircleShape).background(LocketAvatarBg)
         .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         if (avatarUrl.isNotBlank()) {
-            AsyncImage(avatarUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            SkeletonAsyncImage(avatarUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Icon(Icons.Default.Person, "Hồ sơ", tint = Color.White, modifier = Modifier.size(24.dp))
         }
@@ -457,7 +457,7 @@ fun FriendFilterSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             if (friend.avatarUrl.isNotBlank()) {
-                                AsyncImage(
+                                SkeletonAsyncImage(
                                     model = friend.avatarUrl,
                                     contentDescription = friend.displayName,
                                     modifier = Modifier.fillMaxSize(),
