@@ -34,6 +34,7 @@ import com.locket.app.api.LocketApiClient
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.components.FeedBottomBar
+import com.locket.app.ui.components.LocketProfileAvatar
 import com.locket.app.ui.screens.*
 import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
@@ -195,7 +196,7 @@ class MainActivity : ComponentActivity() {
                                     0 -> tabStateHolder.SaveableStateProvider("history") {
                                         HistoryScreen(viewModel = viewModel,
                                             onNavigate = { currentScreen = it },
-                                            onOpenProfile = { showProfileScreen = true })
+                                            onOpenProfile = { showProfileScreen = true }, sharedProfileAvatar = true)
                                     }
                                     1 -> {
                                         // Only bind the camera when its page is actually being displayed.
@@ -221,7 +222,8 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 cameraRequest = homeCameraRequest,
                                                 shareRequest = homeShareRequest,
-                                                onMomentColorSource = { lastMomentUrl = it }
+                                                onMomentColorSource = { lastMomentUrl = it },
+                                                sharedProfileAvatar = true
                                             )
                                         }
                                     }
@@ -232,13 +234,18 @@ class MainActivity : ComponentActivity() {
                                                 activeChatFriend = friend
                                                 currentScreen = "chat_detail"
                                             },
-                                            onOpenProfile = { showProfileScreen = true })
+                                            onOpenProfile = { showProfileScreen = true }, sharedProfileAvatar = true)
                                     }
                                 }
                             }
                             // Render one navigation bar outside the horizontal pager.
                             // Its bounds never move with a page, even while the user drags.
                             val homeSettled = pager.settledPage == 1
+                            if (!homeSettled || homeNavVisible) {
+                                val profile by viewModel.currentUser.collectAsState()
+                                LocketProfileAvatar(profile.profilePictureUrl, { showProfileScreen = true },
+                                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 24.dp, top = 10.dp))
+                            }
                             if (!homeSettled || homeNavVisible) {
                                 val conversations by viewModel.conversations.collectAsState()
                                 // Original Locket counts unread conversations, not messages.
@@ -261,10 +268,12 @@ class MainActivity : ComponentActivity() {
                                         onChatClick = { currentScreen = "chat" },
                                         onShareClick = { if (homeSettled && !pager.isScrollInProgress) homeShareRequest++ },
                                         separated = true,
-                                        currentScreen = tabRoutes[pager.settledPage],
+                                        currentScreen = tabRoutes[pager.currentPage],
                                         showSideActions = homeSettled && homeNavFeed,
                                         unreadConversations = unreadConversations,
-                                        adaptiveBackground = !homeSettled || homeNavFeed
+                                        adaptiveBackground = !homeSettled || homeNavFeed,
+                                        pagePosition = pager.currentPage + pager.currentPageOffsetFraction,
+                                        feedMode = homeSettled && homeNavFeed
                                     )
                                 }
                             }
