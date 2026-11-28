@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.locket.app.ui.LocketViewModel
+import com.locket.app.model.Friend
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlin.math.abs
@@ -48,9 +49,25 @@ fun HomePagerScreen(
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val loading by viewModel.historyLoading.collectAsState()
-    val hasMore by viewModel.historyHasMore.collectAsState()
-    val error by viewModel.historyError.collectAsState()
+    val feedLoading by viewModel.historyLoading.collectAsState()
+    val feedHasMore by viewModel.historyHasMore.collectAsState()
+    val feedError by viewModel.historyError.collectAsState()
+    val ownLoading by viewModel.ownHistoryLoading.collectAsState()
+    val ownHasMore by viewModel.ownHistoryHasMore.collectAsState()
+    val ownError by viewModel.ownHistoryError.collectAsState()
+    val ownSelected = currentUser.uid.isNotBlank() && selectedFriend?.uid == currentUser.uid
+    val loading = if (ownSelected) ownLoading else feedLoading
+    val hasMore = if (ownSelected) ownHasMore else feedHasMore
+    val error = if (ownSelected) ownError else feedError
+    val filterFriends = remember(friends, currentUser) {
+        val own = currentUser.takeIf { it.uid.isNotBlank() }?.let {
+            Friend(uid = it.uid, username = it.username, displayName = "Bạn", avatarUrl = it.profilePictureUrl)
+        }
+        listOfNotNull(own) + friends.filter { it.uid != currentUser.uid }.distinctBy { it.uid }
+    }
+    fun loadFilteredHistory() {
+        if (ownSelected) viewModel.loadOwnHistory() else viewModel.loadOlderMoments()
+    }
     val moments = remember(allMoments, selectedFriend) {
         allMoments.filter { selectedFriend == null || it.userUid == selectedFriend?.uid }
             .sortedByDescending { it.timestampSeconds }
@@ -105,7 +122,7 @@ fun HomePagerScreen(
     // luc cache trong); dedupe ben ViewModel nen goi lai cung khong gui trung.
     LaunchedEffect(pagerState.settledPage, moments) {
         if (pagerState.settledPage == 0) viewModel.selectFriend(null)
-        else moments.getOrNull(pagerState.settledPage - 1)?.let { viewModel.markMomentViewed(it.id) }
+        else moments.getOrNull(pagerState.settledPage - 1)?.takeIf { it.userUid != currentUser.uid }?.let { viewModel.markMomentViewed(it.id) }
     }
 
     // Prefetch anh cua cac moment ke tiep truoc khi user vuot toi, de anh
@@ -124,10 +141,10 @@ fun HomePagerScreen(
 
     // Prefetch before the last cached image; a dedicated trailing page stays
     // available if the server is still loading or a filtered page has no match.
-    LaunchedEffect(pagerState.currentPage, moments.size, loading, hasMore, error) {
+    LaunchedEffect(pagerState.currentPage, moments.size, loading, hasMore, error, ownSelected) {
         if (pagerState.currentPage > 0 && pagerState.currentPage >= (moments.size - 7).coerceAtLeast(1) &&
             hasMore && !loading && error == null) {
-            viewModel.loadOlderMoments()
+            loadFilteredHistory()
         }
     }
 
@@ -207,7 +224,7 @@ fun HomePagerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (loading) CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
                     Text(error ?: if (hasMore) "Đang tải ảnh cũ..." else "Chưa có khoảnh khắc nào", color = Color.White)
-                    if (error != null) TextButton(onClick = { viewModel.loadOlderMoments() }) { Text("Thử lại") }
+                    if (error != null) TextButton(onClick = { loadFilteredHistory() }) { Text("Thử lại") }
                     TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) { Text("Về camera") }
                 }
             }
@@ -295,7 +312,7 @@ fun HomePagerScreen(
     if (showFriendFilter) {
         FeedFriendPopup(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = headerHeight + 8.dp),
-            friends = friends,
+            friends = filterFriends,
             selectedFriend = selectedFriend,
             onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
             onDismiss = { showFriendFilter = false }
