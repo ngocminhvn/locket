@@ -2,8 +2,11 @@ use locket_core::{parse_chat_response, parse_history_response};
 
 #[test]
 fn history_preserves_exact_cursor_and_timestamp_nanos() {
-    let row = r#"[{"document":{"name":"projects/p/databases/locket/documents/history/u/entries/moment-a","fields":{"canonical_uid":{"stringValue":"moment-a"},"user":{"stringValue":"user-a"},"thumbnail_url":{"stringValue":"https://example.invalid/a.jpg"},"date":{"timestampValue":"2023-11-14T22:13:20.123456789Z"}}}}]"#;
+    let row = r#"[{"document":{"name":"projects/p/databases/locket/documents/history/u/entries/moment-a","fields":{"canonical_uid":{"stringValue":"moment-a"},"user":{"stringValue":"user-a"},"thumbnail_url":{"stringValue":"https://example.invalid/a.jpg"},"date":{"timestampValue":"2023-11-14T22:13:20.123456789Z"},"overlays":{"arrayValue":{"values":[{"mapValue":{"fields":{"overlay_type":{"stringValue":"caption"},"data":{"mapValue":{"fields":{"type":{"stringValue":"review"},"payload":{"mapValue":{"fields":{"rating":{"doubleValue":4.5},"comment":{"stringValue":"review"}}}}}}}}}}]}}}}}]"#;
     let page = parse_history_response(row.as_bytes(), "user-a", true, 1).unwrap();
+    let overlay: serde_json::Value = serde_json::from_str(&page.moments[0].overlays_json).unwrap();
+    assert_eq!(overlay[0]["data"]["payload"]["rating"], 4.5);
+    assert_eq!(overlay[0]["data"]["payload"]["comment"], "review");
     assert_eq!(page.moments[0].timestamp_nanoseconds, 123_456_789);
     assert_eq!(
         page.next_timestamp.as_deref(),
