@@ -15,17 +15,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.draw.clipToBounds
-import android.graphics.Bitmap
-import android.util.LruCache
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.core.graphics.drawable.toBitmap
-import coil.imageLoader
-import coil.request.SuccessResult
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import coil.request.ImageRequest
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -623,72 +612,10 @@ internal fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 
-// Cache only tiny prefiltered backdrops, never full-resolution moment images.
-private val homeBackdropCache = LruCache<String, ImageBitmap>(64)
-
-/** Prefilter the photo before handing it to Compose or the glass renderer.
- * This is a temporary strong-blur approximation pending the original native audit.
- * Even if a GPU blur is unavailable, this path cannot display the raw thumbnail.
- */
+/** Activity sheet shares the same cached gradient as the moment viewer. */
 @Composable
 internal fun MomentBackdrop(url: String) {
-    val context = LocalContext.current.applicationContext
-    var backdrop by remember { mutableStateOf<ImageBitmap?>(homeBackdropCache.get(url)) }
-    LaunchedEffect(context, url) {
-        if (url.isBlank()) {
-            backdrop = null
-        } else {
-            val next = homeBackdropCache.get(url) ?: withContext(Dispatchers.IO) {
-                try {
-                    val request = ImageRequest.Builder(context).data(url)
-                        .size(32).allowHardware(false).crossfade(false).build()
-                    val result = context.imageLoader.execute(request) as? SuccessResult
-                    result?.drawable?.toBitmap(32, 32, Bitmap.Config.ARGB_8888)?.let { source ->
-                        // Reduce to an 8x8 color field, then run two box-filter
-                        // passes before smooth enlargement. No recognizable
-                        // full-resolution image ever reaches the background.
-                        val tiny = Bitmap.createScaledBitmap(source, 8, 8, true)
-                        val pixels = IntArray(64)
-                        tiny.getPixels(pixels, 0, 8, 0, 0, 8, 8)
-                        var input = pixels
-                        repeat(2) {
-                            val output = IntArray(64)
-                            for (y in 0 until 8) for (x in 0 until 8) {
-                                var red = 0
-                                var green = 0
-                                var blue = 0
-                                var count = 0
-                                for (dy in -1..1) for (dx in -1..1) {
-                                    val p = input[(y + dy).coerceIn(0, 7) * 8 + (x + dx).coerceIn(0, 7)]
-                                    red += (p shr 16) and 255
-                                    green += (p shr 8) and 255
-                                    blue += p and 255
-                                    count++
-                                }
-                                output[y * 8 + x] = android.graphics.Color.rgb(red / count, green / count, blue / count)
-                            }
-                            input = output
-                        }
-                        val filtered = Bitmap.createBitmap(input, 8, 8, Bitmap.Config.ARGB_8888)
-                        Bitmap.createScaledBitmap(filtered, 64, 64, true).asImageBitmap()
-                            .also { homeBackdropCache.put(url, it) }
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            if (next != null) backdrop = next
-        }
-    }
-    Box(Modifier.fillMaxSize().clipToBounds().background(LocketMomentGround)) {
-        backdrop?.let {
-            Image(bitmap = it, contentDescription = null, modifier = Modifier.matchParentSize(),
-                contentScale = ContentScale.Crop)
-        }
-        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
-    }
+    AmbientBackground(url, AmbientMode.ACTIVITY)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
