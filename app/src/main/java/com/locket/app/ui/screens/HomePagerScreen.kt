@@ -47,7 +47,6 @@ fun HomePagerScreen(
     onNavigationState: (Boolean, Boolean) -> Unit = { _, _ -> },
     cameraRequest: Int = 0,
     shareRequest: Int = 0,
-    onMomentColorSource: (String) -> Unit = {},
     sharedProfileAvatar: Boolean = false
 ) {
     val allMoments by viewModel.moments.collectAsState()
@@ -107,10 +106,6 @@ fun HomePagerScreen(
     val cameraSelected = pagerState.settledPage == 0
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
     val showChrome = !(cameraSelected && cameraReviewVisible) && !zoomLocked
-    val themeColor = LocalMomentColor.current
-    LaunchedEffect(tabActive, activeMoment?.thumbnailUrl) {
-        if (tabActive) activeMoment?.thumbnailUrl?.takeIf { it.isNotBlank() }?.let(onMomentColorSource)
-    }
     var handledCameraRequest by remember { mutableIntStateOf(cameraRequest) }
     var handledShareRequest by remember { mutableIntStateOf(shareRequest) }
     LaunchedEffect(cameraRequest) {
@@ -193,7 +188,8 @@ fun HomePagerScreen(
         scope.launch { pagerState.animateScrollToPage(0) }
     }
 
-    Box(Modifier.fillMaxSize().background(momentGradient(if (cameraSelected) null else themeColor)).clipToBounds()) {
+    Box(Modifier.fillMaxSize().background(LocketBlack).clipToBounds()) {
+    if (!cameraSelected) MomentBackdrop(activeMoment?.thumbnailUrl.orEmpty())
     VerticalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
