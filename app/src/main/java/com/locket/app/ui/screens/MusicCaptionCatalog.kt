@@ -8,6 +8,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -89,7 +92,49 @@ internal object MusicCaptionCatalog {
         return link
     }
 
-    /** Progressive results: only recordings with explicit Spotify track relations. */
+    /**
+     * MetaBrainz's public Labs dataset maps recording MBIDs to actual Spotify
+     * track IDs, including tracks without a direct MusicBrainz URL relationship.
+     * The documented POST contract returns one result per input in order.
+     */
+    private suspend fun spotifyBatch(ids: List<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        val body = JSONArray().apply {
+            ids.forEach { put(JSONObject().put("recording_mbid", it)) }
+        }
+        val request = Request.Builder()
+            .url("https://labs.api.listenbrainz.org/spotify-id-from-mbid/json")
+            .header("User-Agent", "LocketAndroid/1.0 (https://github.com/ngocminhvn/locket/issues)")
+            .header("Accept", "application/json")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { response ->
+                check(response.isSuccessful) { "Dịch vụ ánh xạ Spotify tạm thời không khả dụng." }
+                val rows = JSONArray(response.body?.string() ?: error("Thiếu dữ liệu Spotify"))
+                check(rows.length() == ids.size) { "Phản hồi ánh xạ Spotify không hợp lệ." }
+                buildMap {
+                    ids.forEachIndexed { index, id ->
+                        val row = rows.optJSONObject(index) ?: return@forEachIndexed
+                        val echoed = row.optString("recording_mbid")
+                        if (echoed.isNotBlank() && !echoed.equals(id, ignoreCase = true)) return@forEachIndexed
+                        val tracks = row.optJSONArray("spotify_track_ids") ?: return@forEachIndexed
+                        for (i in 0 until tracks.length()) {
+                            val raw = tracks.optString(i)
+                            val url = SpotifyCaptionSource.canonicalTrack(raw)
+                                ?: raw.takeIf { it.matches(Regex("^[A-Za-z0-9]{22}$")) }
+                                    ?.let { SpotifyCaptionSource.canonicalTrack("spotify:track:$it") }
+                            if (url != null) {
+                                put(id, url)
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun search(raw: String, onResults: (List<MusicSearchHit>) -> Unit) {
         val query = raw.trim().take(100)
         if (query.length < 2) { onResults(emptyList()); return }
@@ -99,14 +144,13 @@ internal object MusicCaptionCatalog {
             return
         }
         val phrase = escaped(query)
-        // Prefer exact phrases but allow title/artist combinations.
         val tokens = query.split(Regex("\\s+")).filter { it.isNotBlank() }.take(10)
         val terms = tokens.joinToString(" AND ") { token ->
             val term = escaped(token)
             "(recording:\"$term\" OR artist:\"$term\")"
         }
         val result = try {
-            request("recording", mapOf("query" to "(recording:\"$phrase\" OR artist:\"$phrase\" OR ($terms))", "limit" to "8"))
+            request("recording", mapOf("query" to "(recording:\"$phrase\"^4 OR artist:\"$phrase\" OR ($terms))", "limit" to "25"))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
             val stale = synchronized(cacheLock) { queryCache[key]?.second }
@@ -114,29 +158,37 @@ internal object MusicCaptionCatalog {
             throw e
         }
         val rows = result.optJSONArray("recordings") ?: error("Phản hồi MusicBrainz không hợp lệ")
+        val candidates = (0 until minOf(rows.length(), 25)).mapNotNull { rows.optJSONObject(it) }
+            .filter { mbid.matches(it.optString("id")) && it.optString("title").isNotBlank() && artists(it).isNotBlank() }
+            .distinctBy { it.optString("id") }
+        val ids = candidates.map { it.optString("id") }
+        var mappingError: Exception? = null
+        val mapped = try { spotifyBatch(ids) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { mappingError = e; emptyMap() }
         val matches = mutableListOf<MusicSearchHit>()
         val seen = mutableSetOf<String>()
-        for (i in 0 until minOf(rows.length(), 8)) {
-            val row = rows.optJSONObject(i) ?: continue
-            val id = row.optString("id").takeIf { mbid.matches(it) } ?: continue
-            val title = row.optString("title").trim()
-            val artist = artists(row)
-            if (title.isBlank() || artist.isBlank()) continue
-            val link = try { spotifyUrl(id) }
-            catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) {
-                if (matches.isNotEmpty()) onResults(matches.toList())
-                throw e
-            } ?: continue
-            if (!seen.add(link)) continue
+        fun add(row: JSONObject, link: String) {
+            if (!seen.add(link) || matches.size >= 15) return
             val release = row.optJSONArray("releases")?.optJSONObject(0)?.optString("id")
                 ?.takeIf { mbid.matches(it) }
-            matches += MusicSearchHit(CaptionMusic(link, title, artist, null),
+            matches += MusicSearchHit(CaptionMusic(link, row.optString("title").trim(), artists(row), null),
                 release?.let { "https://coverartarchive.org/release/$it/front-250" })
-            onResults(matches.toList())
-            if (matches.size >= 8) break
         }
-        synchronized(cacheLock) {
+        candidates.forEach { row -> mapped[row.optString("id")]?.let { add(row, it) } }
+        onResults(matches.toList())
+        // Keep direct URL relations as a bounded fallback, never N requests
+        // for every candidate. Preserve valid batch hits even when this fails.
+        if (matches.size < 5) {
+            for (row in candidates.filterNot { mapped.containsKey(it.optString("id")) }.take(3)) {
+                val link = try { spotifyUrl(row.optString("id")) }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { mappingError = e; break }
+                if (link != null) { add(row, link); onResults(matches.toList()) }
+            }
+        }
+        if (matches.isEmpty() && mappingError != null) throw mappingError!!
+        if (matches.isNotEmpty()) synchronized(cacheLock) {
             queryCache[key] = now() to matches.toList()
             while (queryCache.size > 24) queryCache.remove(queryCache.keys.first())
         }
