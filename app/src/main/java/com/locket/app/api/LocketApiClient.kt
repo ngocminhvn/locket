@@ -2296,6 +2296,9 @@ class LocketApiClient(
         if (uid.isNullOrBlank() || token.isNullOrBlank() || !file.isFile || file.length() == 0L) {
             return@withContext UploadResult(false, errorMessage = "Video không hợp lệ hoặc chưa đăng nhập")
         }
+        if (file.length() > com.locket.app.model.MomentVideoLimits.MAX_BYTES) {
+            return@withContext UploadResult(false, errorMessage = "Video vượt quá 100 MB")
+        }
         val path = "users%2F$uid%2Fmoments%2Fvideos%2F${generateRandomId(20)}.mp4"
         val bucket = "locket-video"
         val endpoint = "https://firebasestorage.googleapis.com/v0/b/$bucket/o"

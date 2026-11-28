@@ -11,7 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** Android decides the actual run time; no foreground service or permanent polling. */
+/** One-shot network refresh requested by widget events; daily fallback is in widget XML. */
 class WidgetRefreshJob : JobService() {
     private val jobs = mutableMapOf<Int, Job>()
 
@@ -44,11 +44,9 @@ class WidgetRefreshJob : JobService() {
         fun schedule(context: Context, immediate: Boolean = false) {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             val service = ComponentName(context, WidgetRefreshJob::class.java)
-            if (scheduler.getPendingJob(PERIODIC) == null) {
-                scheduler.schedule(JobInfo.Builder(PERIODIC, service)
-                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setPeriodic(30 * 60 * 1000L).build())
-            }
+            // Remove the old 30-minute job on upgrade. The app-widget provider
+            // requests a daily system refresh; other refreshes are event-driven.
+            scheduler.cancel(PERIODIC)
             if (immediate && scheduler.getPendingJob(IMMEDIATE) == null) {
                 scheduler.schedule(JobInfo.Builder(IMMEDIATE, service)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).build())

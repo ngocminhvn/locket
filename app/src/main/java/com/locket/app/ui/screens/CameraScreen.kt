@@ -1,6 +1,7 @@
 package com.locket.app.ui.screens
 
 import android.Manifest
+import com.locket.app.model.MomentVideoLimits
 import android.content.Context
 import android.content.ContextWrapper
 import android.app.Activity
@@ -465,18 +466,11 @@ fun CameraScreen(
             // Some stream combinations cannot enable low-light boost.
         } }, ContextCompat.getMainExecutor(context))
     }
-    LaunchedEffect(recording) {
-        val activeRecording = recording ?: return@LaunchedEffect
-        // Standard account duration from the checked-in API spec.
-        delay(2500)
-        activeRecording.stop()
-    }
-
     LaunchedEffect(recordingStartedAt) {
         val startedAt = recordingStartedAt
         if (startedAt == 0L) return@LaunchedEffect
         while (true) {
-            recordingElapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceIn(0L, 2500L)
+            recordingElapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceIn(0L, MomentVideoLimits.MAX_DURATION_MS)
             delay(50)
         }
     }
@@ -599,7 +593,11 @@ fun CameraScreen(
         }
         val file = File.createTempFile("locket-video-", ".mp4", context.cacheDir)
         try {
-            var pending = capture.output.prepareRecording(context, FileOutputOptions.Builder(file).build())
+            val options = FileOutputOptions.Builder(file)
+                .setDurationLimitMillis(MomentVideoLimits.MAX_DURATION_MS)
+                .setFileSizeLimit(MomentVideoLimits.MAX_BYTES)
+                .build()
+            var pending = capture.output.prepareRecording(context, options)
             if (hasAudioPermission && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 pending = pending.withAudioEnabled()
             }
@@ -615,7 +613,9 @@ fun CameraScreen(
                     recording = null
                     holdingShutter = false
                     if (screenActive) restorePhotoSession()
-                    if (!screenActive || event.hasError()) {
+                    val reachedLimit = event.error == VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED ||
+                        event.error == VideoRecordEvent.Finalize.ERROR_FILE_SIZE_LIMIT_REACHED
+                    if (!screenActive || (event.hasError() && !reachedLimit)) {
                         file.delete()
                         if (screenActive) Toast.makeText(context, "Không thể quay video (${event.error})", Toast.LENGTH_SHORT).show()
                     } else {
@@ -625,6 +625,7 @@ fun CameraScreen(
                                 val thumbnail = withContext(Dispatchers.IO) {
                                     val retriever = MediaMetadataRetriever()
                                     try {
+                                        check(file.length() in 1L..MomentVideoLimits.MAX_BYTES) { "Video vượt quá 100 MB" }
                                         retriever.setDataSource(file.absolutePath)
                                         retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                                     } finally { retriever.release() }
@@ -715,7 +716,7 @@ fun CameraScreen(
                                         val count = input.read(buffer)
                                         if (count < 0) break
                                         total += count
-                                        check(total <= 50L * 1024 * 1024) { "Video quá lớn (tối đa 50 MB)" }
+                                        check(total <= MomentVideoLimits.MAX_BYTES) { "Video quá lớn (tối đa 100 MB)" }
                                         output.write(buffer, 0, count)
                                     }
                                 }
@@ -727,7 +728,7 @@ fun CameraScreen(
                                     "Chỉ hỗ trợ video MP4"
                                 }
                                 val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-                                check(duration != null && duration in 1L..2500L) { "Video tối đa 2,5 giây. Hãy cắt video trước khi chọn." }
+                                check(duration != null && duration in 1L..MomentVideoLimits.MAX_DURATION_MS) { "Video tối đa 20 giây. Hãy cắt video trước khi chọn." }
                                 retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                             } finally { retriever.release() }
                         } else {

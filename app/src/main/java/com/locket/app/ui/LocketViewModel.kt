@@ -1153,6 +1153,7 @@ class LocketViewModel(
         if (!activeAccount(owner) ||
             pendingUploads.size + failedUploads.size + (if (activeUpload != null) 1 else 0) >= 8) return@withLock false
         UploadCaption.validate(caption, overlaysJson)
+        if (videoFile != null) check(videoFile.length() in 1L..com.locket.app.model.MomentVideoLimits.MAX_BYTES) { "Video không hợp lệ hoặc vượt quá 100 MB" }
         val bytes = if (videoFile == null) {
             try { preparedThumbnail?.await() ?: withContext(Dispatchers.Default) { encodeMomentThumbnail(bitmap) } }
             catch (e: CancellationException) { throw e }
