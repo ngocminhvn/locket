@@ -91,6 +91,11 @@ class LocketViewModel(
     private var feedListenJob: Job? = null
     private var chatListenJob: Job? = null
     private var foreground = false
+    private var realtimeUnavailable = false
+    private fun listenerLinkageFailure(error: LinkageError) {
+        realtimeUnavailable = true
+        android.util.Log.e("LocketListen", "Realtime transport unavailable; using REST fallback", error)
+    }
     private var cacheHydrated = false
     private var friendsListenJob: Job? = null
     private var conversationsListenJob: Job? = null
@@ -490,33 +495,6 @@ class LocketViewModel(
     val isLoggedIn: Boolean
         get() = sessionManager.isLoggedIn
 
-    init {
-        // Cache-first: chuyen cache JSON cu sang Room 1 lan (neu chua),
-        // roi UI doc truc tiep Flow tu Room — mo app la thay du lieu ngay,
-        // khong cho mang. Sync chay nen o duoi, xong moi ghi de Room.
-        val startupAccount = sessionManager.currentUser.uid
-        viewModelScope.launch {
-            cache.migrateLegacyCacheIfNeeded()
-            if (activeAccount(startupAccount) && startupAccount.isNotBlank()) {
-                val momentsTask = async { cache.observeMoments().first() }
-                val friendsTask = async { cache.observeFriends().first() }
-                val conversationsTask = async { cache.observeConversations().first() }
-                val savedMoments = momentsTask.await()
-                val savedFriends = friendsTask.await()
-                val savedConversations = conversationsTask.await()
-                if (!activeAccount(startupAccount)) return@launch
-                _moments.value = savedMoments
-                _friends.value = savedFriends
-                _conversations.value = savedConversations
-                apiClient.seedUserNames(_friends.value)
-                apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
-                cacheHydrated = true
-                prefetchUpcomingMoments(_moments.value, -1)
-                restoreMomentUploads()
-                syncAllData()
-            } else { cacheHydrated = true; if (_isLoggedIn.value) { restoreMomentUploads(); syncAllData() } }
-        }
-    }
 
     fun selectFriend(friend: Friend?) {
         _selectedFriend.value = friend
@@ -623,6 +601,7 @@ class LocketViewModel(
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
                 try {
+                    if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenFeed(account).collect { delta ->
                         if (!activeAccount(account)) return@collect
                         if (delta.deletedIds.isNotEmpty()) {
@@ -637,6 +616,7 @@ class LocketViewModel(
                         }
                     }
                 } catch (e: CancellationException) { throw e }
+                catch (e: LinkageError) { listenerLinkageFailure(e) }
                 catch (e: Exception) {
                     android.util.Log.w("LocketListen", "Feed Listen disconnected: " + e.javaClass.simpleName)
                 } finally { _feedRealtime.value = false }
@@ -657,6 +637,7 @@ class LocketViewModel(
             var retry = 1_000L
             while (foreground && activeAccount(account) && _activeConversationId.value == convId) {
                 try {
+                    if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenChat(account, convId).collect { delta ->
                         if (!activeAccount(account) || _activeConversationId.value != convId) return@collect
                         chatSyncLock.withLock {
@@ -670,6 +651,7 @@ class LocketViewModel(
                         }
                     }
                 } catch (e: CancellationException) { throw e }
+                catch (e: LinkageError) { listenerLinkageFailure(e) }
                 catch (e: Exception) { android.util.Log.w("LocketListen", "Chat Listen disconnected: " + e.javaClass.simpleName) }
                 finally { _chatRealtime.value = false }
                 if (foreground && activeAccount(account) && _activeConversationId.value == convId) {
@@ -712,6 +694,7 @@ class LocketViewModel(
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
                 try {
+                    if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenFriends(account).collect { delta ->
                         if (!activeAccount(account)) return@collect
                         friendsSyncLock.withLock {
@@ -732,6 +715,7 @@ class LocketViewModel(
                         }
                     }
                 } catch (e: CancellationException) { throw e }
+                catch (e: LinkageError) { listenerLinkageFailure(e) }
                 catch (e: Exception) { android.util.Log.w("LocketListen", "Friends disconnected: " + e.javaClass.simpleName) }
                 finally { friendsLive = false }
                 if (foreground && activeAccount(account)) {
@@ -744,6 +728,7 @@ class LocketViewModel(
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
                 try {
+                    if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenInbox(account).collect { delta ->
                         if (!activeAccount(account)) return@collect
                         val known = _incomingFriendRequests.value.associateBy { it.uid }
@@ -759,6 +744,7 @@ class LocketViewModel(
                         if (delta.ready) retry = 1_000L
                     }
                 } catch (e: CancellationException) { throw e }
+                catch (e: LinkageError) { listenerLinkageFailure(e) }
                 catch (e: Exception) { android.util.Log.w("LocketListen", "Inbox disconnected: " + e.javaClass.simpleName) }
                 if (foreground && activeAccount(account)) {
                     refreshIncomingFriendRequests()
@@ -771,6 +757,7 @@ class LocketViewModel(
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
                 try {
+                    if (realtimeUnavailable) throw IllegalStateException("Realtime transport unavailable")
                     apiClient.listenConversations(account).collect { delta ->
                         if (!activeAccount(account)) return@collect
                         conversationSyncLock.withLock {
@@ -797,6 +784,7 @@ class LocketViewModel(
                         }
                     }
                 } catch (e: CancellationException) { throw e }
+                catch (e: LinkageError) { listenerLinkageFailure(e) }
                 catch (e: Exception) { android.util.Log.w("LocketListen", "Conversations disconnected: " + e.javaClass.simpleName) }
                 finally { conversationsLive = false }
                 if (foreground && activeAccount(account)) {
@@ -1919,4 +1907,41 @@ class LocketViewModel(
         _moments.value = emptyList()
         _conversations.value = emptyList()
     }
+
+    // Run only after all fields, including the persistent upload journal, exist.
+    init {
+        val startupAccount = sessionManager.currentUser.uid
+        viewModelScope.launch {
+            try {
+                cache.migrateLegacyCacheIfNeeded()
+                if (activeAccount(startupAccount) && startupAccount.isNotBlank()) {
+                    val saved = kotlinx.coroutines.coroutineScope {
+                        val momentsTask = async { cache.observeMoments().first() }
+                        val friendsTask = async { cache.observeFriends().first() }
+                        val conversationsTask = async { cache.observeConversations().first() }
+                        Triple(momentsTask.await(), friendsTask.await(), conversationsTask.await())
+                    }
+                    if (!activeAccount(startupAccount)) return@launch
+                    _moments.value = saved.first
+                    _friends.value = saved.second
+                    _conversations.value = saved.third
+                    apiClient.seedUserNames(_friends.value)
+                    apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                // Preserve existing legacy cache and login; don't erase data on a read failure.
+                android.util.Log.e("LocketStartup", "Room cache hydration failed", e)
+            }
+            cacheHydrated = true
+            if (_isLoggedIn.value) {
+                try { prefetchUpcomingMoments(_moments.value, -1) }
+                catch (e: Exception) { android.util.Log.w("LocketStartup", "Startup prefetch failed", e) }
+                catch (e: LinkageError) { android.util.Log.w("LocketStartup", "Optional video prefetch unavailable", e) }
+                restoreMomentUploads()
+                syncAllData()
+            }
+        }
+    }
+
 }
