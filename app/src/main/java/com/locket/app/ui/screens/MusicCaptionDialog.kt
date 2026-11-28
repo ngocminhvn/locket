@@ -178,6 +178,7 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
     var results by remember { mutableStateOf(emptyList<MusicSearchHit>()) }
     var searching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
+    var retrySearch by remember { mutableIntStateOf(0) }
     var selectedUrl by remember { mutableStateOf<String?>(null) }
     var linkFallback by remember { mutableStateOf(false) }
     val normalized = query.trim()
@@ -206,15 +207,18 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
         }
     }
 
-    LaunchedEffect(normalized, linkFallback) {
-        results = emptyList()
+    LaunchedEffect(normalized, linkFallback, retrySearch) {
+        results = recent.filter { normalized.isNotBlank() && (it.title.contains(normalized, ignoreCase = true) || it.artist.contains(normalized, ignoreCase = true)) }.map { MusicSearchHit(it) }
         searchError = null
         searching = false
         if (normalized.length < 2 || linkFallback) return@LaunchedEffect
         searching = true
         try {
             delay(550L)
-            MusicCaptionCatalog.search(normalized) { results = it }
+            MusicCaptionCatalog.search(normalized) { hits ->
+                val local = recent.filter { it.title.contains(normalized, ignoreCase = true) || it.artist.contains(normalized, ignoreCase = true) }.map { MusicSearchHit(it) }
+                results = (local + hits).distinctBy { it.music.spotifyUrl }
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { searchError = e.message ?: "Không tìm được bài hát" }
         finally { searching = false }
@@ -272,10 +276,27 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
                         }
                     }
                     if (!searching && results.isEmpty() && searchError == null) item {
-                        Text("Không tìm thấy bài có liên kết Spotify trong MusicBrainz. Thử tên khác hoặc dán link.",
+                        Text("Không tìm thấy bài có liên kết Spotify trong MusicBrainz. Thử tên khác hoặc tìm trên Spotify.",
                             color = Color.White.copy(alpha = 0.65f), modifier = Modifier.padding(8.dp), fontSize = 14.sp)
+                        TextButton(enabled = !isBusy, onClick = {
+                            val uri = Uri.parse("https://open.spotify.com/search/" + Uri.encode(normalized))
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                                .onFailure { searchError = "Không mở được Spotify." }
+                        }) { Text("Tìm trên Spotify", color = green) }
                     }
-                    searchError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) } }
+                    searchError?.let { message ->
+                        item {
+                            Text(message, color = Color.White.copy(alpha = 0.75f), modifier = Modifier.padding(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(enabled = !isBusy && !searching, onClick = { retrySearch++ }) { Text("Thử lại", color = green) }
+                                TextButton(enabled = !isBusy, onClick = {
+                                    val uri = Uri.parse("https://open.spotify.com/search/" + Uri.encode(normalized))
+                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                                        .onFailure { searchError = "Không mở được Spotify. Hãy dùng liên kết bài hát." }
+                                }) { Text("Tìm trên Spotify", color = green) }
+                            }
+                        }
+                    }
                 }
             }
             HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
