@@ -208,22 +208,8 @@ fun HomeMomentScreen(
                         MomentVideo(videoUrl, Modifier.fillMaxSize())
                     }
 
-                    // Caption overlay inside photo (Matches frame_010.jpg)
-                    if (!pinching && currentMoment.caption.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(horizontal = 16.dp, vertical = 16.dp)
-                                .background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(18.dp))
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = currentMoment.caption,
-                                color = Color.White,
-                                style = profileTextStyle(18.sp, 22.sp, FontWeight.Bold)
-                            )
-                        }
-                    }
+                    if (!pinching) MomentCaption(currentMoment, Modifier.align(Alignment.BottomCenter)
+                        .padding(horizontal = 20.dp, vertical = 20.dp))
                 } else {
                     Box(
                         modifier = Modifier.fillMaxSize(),
