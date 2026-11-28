@@ -762,6 +762,7 @@ fun CameraScreen(
             friends = friends,
             replyToFriend = replyToFriend,
             streak = ownStreak,
+            fetchNativeWeather = { lat, lon -> viewModel.getMomentWeather(lat, lon) },
             isPosting = persistingUpload,
             onCancel = {
                 clearCapture()
