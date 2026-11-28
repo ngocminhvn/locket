@@ -15,6 +15,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.locket.app.ui.components.LocketTopBar
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -148,6 +154,13 @@ class MainActivity : ComponentActivity() {
                             var homeNavFeed by remember { mutableStateOf(false) }
                             var homeCameraRequest by remember { mutableIntStateOf(0) }
                             var homeShareRequest by remember { mutableIntStateOf(0) }
+                            var homeFilterOpen by remember { mutableStateOf(false) }
+                            val profile by viewModel.currentUser.collectAsState()
+                            val friends by viewModel.friends.collectAsState()
+                            val selectedFriend by viewModel.selectedFriend.collectAsState()
+                            LaunchedEffect(pager.currentPage) {
+                                if (pager.currentPage != 1) homeFilterOpen = false
+                            }
                             // Programmatic taps and Android Back use the same pager motion.
                             LaunchedEffect(mainTab) {
                                 if (pager.currentPage != mainTab || pager.currentPageOffsetFraction != 0f) {
@@ -220,7 +233,9 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 cameraRequest = homeCameraRequest,
                                                 shareRequest = homeShareRequest,
-                                                sharedProfileAvatar = true
+                                                sharedProfileAvatar = true,
+                                                sharedFriendFilterOpen = homeFilterOpen,
+                                                onSharedFriendFilterChange = { homeFilterOpen = it }
                                             )
                                         }
                                     }
@@ -238,10 +253,35 @@ class MainActivity : ComponentActivity() {
                             // Render one navigation bar outside the horizontal pager.
                             // Its bounds never move with a page, even while the user drags.
                             val homeSettled = pager.settledPage == 1
-                            if (!homeSettled || homeNavVisible) {
-                                val profile by viewModel.currentUser.collectAsState()
-                                LocketProfileAvatar(profile.profilePictureUrl, { showProfileScreen = true },
-                                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 24.dp, top = 10.dp))
+                            // All top chrome stays in screen coordinates, not pager coordinates.
+                            val headerPage = pager.currentPage
+                            if (headerPage != 1 || homeNavVisible || homeFilterOpen) {
+                                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
+                                    if (headerPage == 1) {
+                                        LocketTopBar(
+                                            title = if (!homeNavFeed) "${friends.size} Bạn bè"
+                                                else if (selectedFriend?.uid == profile.uid) "Bạn"
+                                                else selectedFriend?.displayName?.trim()?.substringAfterLast(' ')?.ifBlank { "Tất cả bạn bè" } ?: "Tất cả bạn bè",
+                                            showDropdownArrow = homeNavFeed,
+                                            onSpeakerClick = { viewModel.syncAllData() },
+                                            onTitleClick = { if (!pager.isScrollInProgress) {
+                                                if (homeNavFeed) homeFilterOpen = !homeFilterOpen else showFriendsModal = true
+                                            } },
+                                            dropdownExpanded = homeFilterOpen,
+                                            adaptiveBackground = homeNavFeed,
+                                            showAvatar = false
+                                        )
+                                    } else {
+                                        Box(Modifier.fillMaxWidth().statusBarsPadding()
+                                            .padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
+                                            Text(if (headerPage == 0) "Kỷ niệm" else "Trò chuyện",
+                                                color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.align(Alignment.Center))
+                                        }
+                                    }
+                                    LocketProfileAvatar(profile.profilePictureUrl, { showProfileScreen = true },
+                                        Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 24.dp, top = 10.dp))
+                                }
                             }
                             if (!homeSettled || homeNavVisible) {
                                 val conversations by viewModel.conversations.collectAsState()
@@ -270,6 +310,22 @@ class MainActivity : ComponentActivity() {
                                         unreadConversations = unreadConversations,
                                         pagePosition = pager.currentPage + pager.currentPageOffsetFraction,
                                         feedMode = homeSettled && homeNavFeed
+                                    )
+                                }
+                            }
+                            if (homeFilterOpen && headerPage == 1) {
+                                val filterFriends = remember(friends, profile) {
+                                    val own = profile.takeIf { it.uid.isNotBlank() }?.let {
+                                        Friend(uid = it.uid, username = it.username, displayName = "Bạn", avatarUrl = it.profilePictureUrl)
+                                    }
+                                    listOfNotNull(own) + friends.filter { it.uid != profile.uid }.distinctBy { it.uid }
+                                }
+                                Box(Modifier.fillMaxSize()) {
+                                    FeedFriendPopup(
+                                        modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 74.dp),
+                                        friends = filterFriends, selectedFriend = selectedFriend,
+                                        onSelectFriend = { viewModel.selectFriend(it); homeFilterOpen = false },
+                                        onDismiss = { homeFilterOpen = false }
                                     )
                                 }
                             }
