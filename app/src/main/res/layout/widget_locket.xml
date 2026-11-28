@@ -41,6 +41,15 @@
             android:textColor="#CCCCCC"
             android:textSize="12sp" />
 
+        <ImageView
+            android:id="@+id/widget_overlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxHeight="60dp"
+            android:adjustViewBounds="true"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/widget_caption"
             android:layout_width="wrap_content"
