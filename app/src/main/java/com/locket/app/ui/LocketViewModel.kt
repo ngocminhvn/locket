@@ -1059,8 +1059,6 @@ class LocketViewModel(
         }
     }
 
-    internal suspend fun getMomentWeather(latitude: Double, longitude: Double) = apiClient.getMomentWeather(latitude, longitude)
-
     internal suspend fun enqueueMoment(
         bitmap: Bitmap,
         caption: String,
