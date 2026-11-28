@@ -308,7 +308,6 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = tabRoutes[pager.currentPage],
                                         showSideActions = homeSettled && homeNavFeed,
                                         unreadConversations = unreadConversations,
-                                        pagePosition = pager.currentPage + pager.currentPageOffsetFraction,
                                         feedMode = homeSettled && homeNavFeed
                                     )
                                 }
