@@ -156,11 +156,19 @@ class MainActivity : ComponentActivity() {
                             var homeCameraRequest by remember { mutableIntStateOf(0) }
                             var homeShareRequest by remember { mutableIntStateOf(0) }
                             var homeFilterOpen by remember { mutableStateOf(false) }
+                            var newChatOpen by remember { mutableStateOf(false) }
+                            val headerProgress = remember(pager) {
+                                { (1f - 2f * kotlin.math.abs(pager.currentPageOffsetFraction)).coerceIn(0f, 1f) }
+                            }
+                            val homeChromeProgress = remember(pager) {
+                                { (1f - 2f * kotlin.math.abs(pager.currentPage + pager.currentPageOffsetFraction - 1f)).coerceIn(0f, 1f) }
+                            }
                             val profile by viewModel.currentUser.collectAsState()
                             val friends by viewModel.friends.collectAsState()
                             val selectedFriend by viewModel.selectedFriend.collectAsState()
                             LaunchedEffect(pager.currentPage) {
                                 if (pager.currentPage != 1) homeFilterOpen = false
+                                if (pager.currentPage != 2) newChatOpen = false
                             }
                             // Programmatic taps and Android Back use the same pager motion.
                             LaunchedEffect(mainTab) {
@@ -236,7 +244,8 @@ class MainActivity : ComponentActivity() {
                                                 shareRequest = homeShareRequest,
                                                 sharedProfileAvatar = true,
                                                 sharedFriendFilterOpen = homeFilterOpen,
-                                                onSharedFriendFilterChange = { homeFilterOpen = it }
+                                                onSharedFriendFilterChange = { homeFilterOpen = it },
+                                                tabTransitionProgress = homeChromeProgress
                                             )
                                         }
                                     }
@@ -247,7 +256,9 @@ class MainActivity : ComponentActivity() {
                                                 activeChatFriend = friend
                                                 currentScreen = "chat_detail"
                                             },
-                                            onOpenProfile = { showProfileScreen = true }, sharedProfileAvatar = true)
+                                            onOpenProfile = { showProfileScreen = true }, sharedProfileAvatar = true,
+                                            sharedNewChatOpen = newChatOpen,
+                                            onSharedNewChatChange = { newChatOpen = it })
                                     }
                                 }
                             }
@@ -259,9 +270,6 @@ class MainActivity : ComponentActivity() {
                             // Fade out the outgoing header to zero at the midpoint,
                             // then fade in the incoming one at the same fixed anchors.
                             // The avatar deliberately never uses this layer.
-                            val headerProgress = remember(pager) {
-                                { (1f - 2f * kotlin.math.abs(pager.currentPageOffsetFraction)).coerceIn(0f, 1f) }
-                            }
                             if (headerPage != 1 || homeNavVisible || homeFilterOpen) {
                                 Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
                                     if (headerPage == 1) {
@@ -314,8 +322,12 @@ class MainActivity : ComponentActivity() {
                                         onShareClick = { if (homeSettled && !pager.isScrollInProgress) homeShareRequest++ },
                                         separated = true,
                                         currentScreen = tabRoutes[mainTab],
-                                        showSideActions = homeSettled && homeNavFeed,
-                                        unreadConversations = unreadConversations
+                                        showSideActions = headerPage == 1 && homeNavFeed,
+                                        unreadConversations = unreadConversations,
+                                        showNewChatAction = headerPage == 2,
+                                        onNewChatClick = { newChatOpen = true },
+                                        sideTransitionProgress = headerProgress,
+                                        sideActionsEnabled = !pager.isScrollInProgress
                                     )
                                 }
                             }
