@@ -63,7 +63,9 @@ fun HomeMomentScreen(
     reactionEvent: Pair<String, String>?,
     reactionSerial: Int,
     isActive: Boolean = true,
-    onZoomChange: (Boolean) -> Unit = {}
+    onZoomChange: (Boolean) -> Unit = {},
+    openActionsRequested: Boolean = false,
+    onActionsRequestConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val friends by viewModel.friends.collectAsState()
@@ -92,6 +94,12 @@ fun HomeMomentScreen(
     // thao tac nguy hiem). Chi hien muc phu hop: moment cua minh thi chi
     // co "Xoa khoanh khac", moment cua nguoi khac thi Bao cao / An / Chan.
     var menuAction by remember(currentMoment?.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(openActionsRequested, isActive, currentMoment?.id) {
+        if (openActionsRequested && isActive && currentMoment != null) {
+            menuAction = "menu"
+            onActionsRequestConsumed()
+        }
+    }
     var zoom by remember(currentMoment?.id) { mutableFloatStateOf(1f) }
     var pan by remember(currentMoment?.id) { mutableStateOf(Offset.Zero) }
     val zoomCallback by rememberUpdatedState(onZoomChange)

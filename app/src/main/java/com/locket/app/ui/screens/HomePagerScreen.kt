@@ -227,7 +227,9 @@ fun HomePagerScreen(
                 reactionEvent = reactionEvent,
                 reactionSerial = reactionSerial,
                 isActive = pagerState.settledPage == page && !pagerState.isScrollInProgress,
-                onZoomChange = { if (pagerState.settledPage == page) zoomLocked = it }
+                onZoomChange = { if (pagerState.settledPage == page) zoomLocked = it },
+                openActionsRequested = showShare && pagerState.settledPage == page,
+                onActionsRequestConsumed = { showShare = false }
             )
         }
     }
@@ -279,15 +281,11 @@ fun HomePagerScreen(
                         scope.launch { pagerState.animateScrollToPage(0) }
                     },
                     onChatClick = { onNavigate("chat") },
-                    onShareClick = { if (activeMoment != null) showShare = true },
+                    onShareClick = { if (activeMoment != null && !pagerState.isScrollInProgress) showShare = true },
                     separated = true
                 )
             }
         }
-    }
-    if (showShare && activeMoment != null) {
-        MomentActionsSheet(activeMoment, activeMoment.userUid == currentUser.uid,
-            onDismiss = { showShare = false }, onAction = { showShare = false }, shareOnly = true)
     }
     if (showFriendFilter) {
         FeedFriendPopup(
