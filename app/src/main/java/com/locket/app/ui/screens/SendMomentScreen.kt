@@ -639,14 +639,78 @@ internal fun rememberMomentReviewSlots(
         var title by remember { mutableStateOf(link?.title.orEmpty()) }
         var url by remember { mutableStateOf(link?.url.orEmpty()) }
         val valid = LinkCaption.create(title, url)
-        AlertDialog(onDismissRequest = { linkPicker = false }, title = { Text("Thêm liên kết") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(title, { title = it.take(200) }, label = { Text("Tên liên kết") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(url, { url = it.take(4096) }, label = { Text("URL") }, placeholder = { Text("https://...") }, singleLine = true, modifier = Modifier.fillMaxWidth(), isError = url.isNotBlank() && LinkCaption.validUrl(url.trim()) == null)
+        val invalidUrl = url.isNotBlank() && LinkCaption.validUrl(url.trim()) == null
+        ModalBottomSheet(
+            onDismissRequest = { linkPicker = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF242424),
+            contentColor = Color.White,
+            shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+            dragHandle = {
+                Box(Modifier.padding(top = 13.dp, bottom = 12.dp)
+                    .size(width = 34.dp, height = 4.dp)
+                    .background(Color.White.copy(alpha = 0.20f), CircleShape))
+            }
+        ) {
+            Column(
+                Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Thêm liên kết", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.CenterHorizontally))
+                val fieldColors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF363636),
+                    unfocusedContainerColor = Color(0xFF363636),
+                    errorContainerColor = Color(0xFF363636),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    errorTextColor = Color.White,
+                    focusedPlaceholderColor = Color.White.copy(alpha = 0.50f),
+                    unfocusedPlaceholderColor = Color.White.copy(alpha = 0.50f),
+                    cursorColor = LocketYellow,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    errorIndicatorColor = Color.Transparent
+                )
+                TextField(
+                    value = title, onValueChange = { title = it.take(200) },
+                    placeholder = { Text("Tên liên kết") },
+                    leadingIcon = { Icon(Icons.Default.Edit, null, tint = Color.White.copy(alpha = 0.65f)) },
+                    shape = RoundedCornerShape(28.dp), colors = fieldColors,
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                TextField(
+                    value = url, onValueChange = { url = it.take(4096) },
+                    placeholder = { Text("https://…") },
+                    leadingIcon = { Icon(Icons.Default.Link, null, tint = Color.White.copy(alpha = 0.65f)) },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                        autoCorrectEnabled = false
+                    ),
+                    shape = RoundedCornerShape(28.dp), colors = fieldColors,
+                    isError = invalidUrl, singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                if (invalidUrl) Text("Liên kết không hợp lệ", color = Color(0xFFFF8080),
+                    fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TextButton(onClick = { linkPicker = false }, modifier = Modifier.weight(1f)) {
+                        Text("Hủy", color = Color.White)
+                    }
+                    Button(
+                        onClick = { link = valid; linkPicker = false },
+                        enabled = valid != null, modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LocketYellow, contentColor = Color(0xFF191919),
+                            disabledContainerColor = Color.White.copy(alpha = 0.10f),
+                            disabledContentColor = Color.White.copy(alpha = 0.35f)
+                        ),
+                        shape = CircleShape
+                    ) { Text("Xong", fontWeight = FontWeight.Bold) }
                 }
-            }, confirmButton = { TextButton(enabled = valid != null, onClick = { link = valid; linkPicker = false }) { Text("Xong") } },
-            dismissButton = { TextButton(onClick = { linkPicker = false }) { Text("Hủy") } })
+                Spacer(Modifier.height(8.dp))
+            }
+        }
     }
 
     if (locationPicker) {
