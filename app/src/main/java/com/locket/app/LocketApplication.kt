@@ -67,7 +67,7 @@ class LocketApplication : Application(), ImageLoaderFactory {
     }
 
     private fun createMessageChannel() {
-        val manager = getSystemService(android.app.NotificationManager::class.java)
+        val manager = getSystemService(android.app.NotificationManager::class.java) ?: return
         manager.createNotificationChannel(android.app.NotificationChannel(
             MESSAGE_CHANNEL, "Tin nhắn", android.app.NotificationManager.IMPORTANCE_HIGH
         ).apply {
@@ -81,7 +81,7 @@ class LocketApplication : Application(), ImageLoaderFactory {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) return
-        val manager = getSystemService(android.app.NotificationManager::class.java)
+        val manager = getSystemService(android.app.NotificationManager::class.java) ?: return
         if (!manager.areNotificationsEnabled()) return
         val launch = android.content.Intent(this, MainActivity::class.java)
             .putExtra("open_chat", true)
@@ -107,7 +107,7 @@ class LocketApplication : Application(), ImageLoaderFactory {
     }
 
     fun clearMessageNotifications() {
-        getSystemService(android.app.NotificationManager::class.java).cancelAll()
+        getSystemService(android.app.NotificationManager::class.java)?.cancelAll()
     }
 
     companion object {
