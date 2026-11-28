@@ -146,7 +146,7 @@ The workflow `.github/workflows/build.yml` runs on manual dispatch or the existi
 When modifying this repository:
 1. **Never commit APK or build binaries** into git (`.gitignore` enforces this).
 2. **Always test Kotlin compilation** with `./gradlew compileDebugKotlin` before declaring work done.
-3. **Verify API responses** against the specifications in `Locket-API-Spec-1.247.3.md` and `locket-api-1.247.3.json`.
+3. **Verify API responses** against the specifications in `docs/Locket-API-Spec-1.247.3.md` and `docs/locket-api-1.247.3.json`.
 4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` modifier rather than flat generic backgrounds for cards and bottom navigation.
 5. **Keep Signup disabled** in `WelcomeScreen.kt`.
 

@@ -48,7 +48,7 @@ The output APK is generated at:
 
 ## 🤖 AI Agent & Architecture Guide
 
-For architecture and developer rules, see [AGENT.md](AGENT.md). API contracts: [human-readable specification](Locket-API-Spec-1.247.3.md) and [JSON specification](locket-api-1.247.3.json). Implementation notes and verification checklist: [audit status](docs/loading-audit-v2-status.md).
+For architecture and developer rules, see [AGENT.md](AGENT.md). API contracts: [human-readable specification](docs/Locket-API-Spec-1.247.3.md) and [JSON specification](docs/locket-api-1.247.3.json). Implementation notes and verification checklist: [audit status](docs/loading-audit-v2-status.md).
 
 ## APK downloads and updates
 
