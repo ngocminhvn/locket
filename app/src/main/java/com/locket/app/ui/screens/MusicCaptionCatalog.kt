@@ -25,22 +25,36 @@ internal object MusicCaptionCatalog {
     private fun now() = android.os.SystemClock.elapsedRealtime()
     private val mbid = Regex("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")
 
+    private var blockedUntil = 0L
+
     private suspend fun request(path: String, params: Map<String, String>): JSONObject = throttle.withLock {
-        delay((1100L - (now() - lastRequest)).coerceAtLeast(0))
-        lastRequest = now()
-        withContext(Dispatchers.IO) {
-            val url = "https://musicbrainz.org/ws/2/$path".toHttpUrl().newBuilder()
-                .addQueryParameter("fmt", "json").apply {
-                    params.forEach { (key, value) -> addQueryParameter(key, value) }
-                }.build()
-            val request = Request.Builder().url(url)
-                .header("User-Agent", "LocketAndroid/1.0 (https://github.com/ngocminhvn/locket)")
-                .header("Accept", "application/json").build()
-            client.newCall(request).execute().use { response ->
-                check(response.isSuccessful) { "MusicBrainz HTTP ${response.code}" }
-                JSONObject(response.body?.string() ?: error("Thiếu dữ liệu bài hát"))
+        if (now() < blockedUntil) error("Dịch vụ tìm nhạc đang bận. Hãy thử lại sau ít phút.")
+        val url = "https://musicbrainz.org/ws/2/$path".toHttpUrl().newBuilder()
+            .addQueryParameter("fmt", "json").apply {
+                params.forEach { (key, value) -> addQueryParameter(key, value) }
+            }.build()
+        val request = Request.Builder().url(url)
+            .header("User-Agent", "LocketAndroid/1.0 (https://github.com/ngocminhvn/locket/issues)")
+            .header("Accept", "application/json").build()
+        repeat(2) { attempt ->
+            delay((1200L - (now() - lastRequest)).coerceAtLeast(0))
+            lastRequest = now()
+            val reply = withContext(Dispatchers.IO) {
+                client.newCall(request).execute().use { response ->
+                    Triple(response.code, response.header("Retry-After"), response.body?.string())
+                }
+            }
+            if (reply.first in 200..299) return@withLock JSONObject(reply.third ?: error("Thiếu dữ liệu bài hát"))
+            if (reply.first != 503 && reply.first != 429)
+                error("Không tìm được bài hát (HTTP ${reply.first}).")
+            val wait = reply.second?.toLongOrNull()?.coerceIn(1L, 86_400L)?.times(1000L) ?: 3_000L
+            if (attempt == 0 && wait <= 5_000L) delay(wait)
+            else {
+                blockedUntil = now() + maxOf(wait, 30_000L)
+                error("Dịch vụ tìm nhạc đang bận. Hãy thử lại sau ít phút.")
             }
         }
+        error("Dịch vụ tìm nhạc đang bận.")
     }
 
     private fun escaped(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -91,17 +105,29 @@ internal object MusicCaptionCatalog {
             val term = escaped(token)
             "(recording:\"$term\" OR artist:\"$term\")"
         }
-        val result = request("recording", mapOf("query" to "(recording:\"$phrase\" OR artist:\"$phrase\" OR ($terms))", "limit" to "12"))
+        val result = try {
+            request("recording", mapOf("query" to "(recording:\"$phrase\" OR artist:\"$phrase\" OR ($terms))", "limit" to "8"))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
+            val stale = synchronized(cacheLock) { queryCache[key]?.second }
+            if (!stale.isNullOrEmpty()) { onResults(stale); return }
+            throw e
+        }
         val rows = result.optJSONArray("recordings") ?: error("Phản hồi MusicBrainz không hợp lệ")
         val matches = mutableListOf<MusicSearchHit>()
         val seen = mutableSetOf<String>()
-        for (i in 0 until minOf(rows.length(), 12)) {
+        for (i in 0 until minOf(rows.length(), 8)) {
             val row = rows.optJSONObject(i) ?: continue
             val id = row.optString("id").takeIf { mbid.matches(it) } ?: continue
             val title = row.optString("title").trim()
             val artist = artists(row)
             if (title.isBlank() || artist.isBlank()) continue
-            val link = spotifyUrl(id) ?: continue
+            val link = try { spotifyUrl(id) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                if (matches.isNotEmpty()) onResults(matches.toList())
+                throw e
+            } ?: continue
             if (!seen.add(link)) continue
             val release = row.optJSONArray("releases")?.optJSONObject(0)?.optString("id")
                 ?.takeIf { mbid.matches(it) }
