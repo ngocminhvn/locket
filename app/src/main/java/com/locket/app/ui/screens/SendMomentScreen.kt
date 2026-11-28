@@ -560,7 +560,7 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("🌙 Goodnight", gradient = Brush.verticalGradient(listOf(Color(0xFF370C6F), Color(0xFF575CD4)))) { choose(CaptionKind.NIGHT) }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text("Thời tiết: Open-Meteo · vị trí chỉ lấy khi bạn chọn.",
+                Text("Thời tiết: Open-Meteo · Địa danh: Android / BigDataCloud. Tọa độ chỉ được tra cứu khi bạn chọn.",
                     color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
                 Spacer(Modifier.height(20.dp))
             }
