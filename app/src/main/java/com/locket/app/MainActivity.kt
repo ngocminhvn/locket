@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.locket.app.ui.components.LocketTopBar
+import com.locket.app.ui.components.locketHeaderTransition
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -255,6 +256,12 @@ class MainActivity : ComponentActivity() {
                             val homeSettled = pager.settledPage == 1
                             // All top chrome stays in screen coordinates, not pager coordinates.
                             val headerPage = pager.currentPage
+                            // Fade out the outgoing header to zero at the midpoint,
+                            // then fade in the incoming one at the same fixed anchors.
+                            // The avatar deliberately never uses this layer.
+                            val headerProgress = remember(pager) {
+                                { (1f - 2f * kotlin.math.abs(pager.currentPageOffsetFraction)).coerceIn(0f, 1f) }
+                            }
                             if (headerPage != 1 || homeNavVisible || homeFilterOpen) {
                                 Box(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
                                     if (headerPage == 1) {
@@ -263,20 +270,21 @@ class MainActivity : ComponentActivity() {
                                                 else if (selectedFriend?.uid == profile.uid) "Bạn"
                                                 else selectedFriend?.displayName?.trim()?.substringAfterLast(' ')?.ifBlank { "Tất cả bạn bè" } ?: "Tất cả bạn bè",
                                             showDropdownArrow = homeNavFeed,
-                                            onSpeakerClick = { viewModel.syncAllData() },
+                                            onSpeakerClick = { if (!pager.isScrollInProgress) viewModel.syncAllData() },
                                             onTitleClick = { if (!pager.isScrollInProgress) {
                                                 if (homeNavFeed) homeFilterOpen = !homeFilterOpen else showFriendsModal = true
                                             } },
                                             dropdownExpanded = homeFilterOpen,
                                             adaptiveBackground = homeNavFeed,
-                                            showAvatar = false
+                                            showAvatar = false,
+                                            transitionProgress = headerProgress
                                         )
                                     } else {
                                         Box(Modifier.fillMaxWidth().statusBarsPadding()
                                             .padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
                                             Text(if (headerPage == 0) "Kỷ niệm" else "Trò chuyện",
                                                 color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.align(Alignment.Center))
+                                                modifier = Modifier.align(Alignment.Center).locketHeaderTransition(headerProgress))
                                         }
                                     }
                                     LocketProfileAvatar(profile.profilePictureUrl, { showProfileScreen = true },
