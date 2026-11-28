@@ -117,6 +117,7 @@ internal fun rememberMomentReviewSlots(
     var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var rating by remember(bitmap) { mutableFloatStateOf(0f) }
+    var reviewComment by remember(bitmap) { mutableStateOf("") }
     var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
     var musicPicker by remember(bitmap) { mutableStateOf(false) }
     var locationPicker by remember(bitmap) { mutableStateOf(false) }
@@ -177,8 +178,8 @@ internal fun rememberMomentReviewSlots(
         val o = com.locket.app.model.CaptionOverlays
         return when (k) {
             CaptionKind.TEXT -> o.make("standard", text.trim(), blur = "ultra_thin", maxLines = 4)
-            CaptionKind.REVIEW -> o.make("review", "★${formatReviewRating(rating)}",
-                payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", "") })
+            CaptionKind.REVIEW -> o.make("review", "★${formatReviewRating(rating)}" + if (reviewComment.isBlank()) "" else " - $reviewComment",
+                payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", reviewComment) })
             CaptionKind.LOCATION -> locationFix?.let { fix ->
                 o.make("location", location, payload = com.google.gson.JsonObject().apply {
                     addProperty("location_name", location)
@@ -422,6 +423,12 @@ internal fun rememberMomentReviewSlots(
                                 horizontalAlignment = Alignment.CenterHorizontally) {
                                 ReviewRatingSelector(rating, enabled = !isPosting && !transforming && zoom <= 1f,
                                     onRatingChange = { rating = it })
+                                if (rating > 0f && reviewComment.isNotBlank()) {
+                                    Text(reviewComment, color = Color.White, fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.clickable(enabled = !isPosting) { draft = reviewComment; editor = CaptionKind.REVIEW }
+                                            .padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
+                                }
                             }
                         } else {
                             val data = com.locket.app.model.CaptionOverlays.decode(overlay(item))
@@ -536,6 +543,10 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("Aa Văn bản") { choose(CaptionKind.TEXT) }
                     CaptionChip("Review", icon = Icons.Default.Star, iconTint = LocketYellow) { choose(CaptionKind.REVIEW) }
                 }
+                if (kind == CaptionKind.REVIEW && rating > 0f) {
+                    Spacer(Modifier.height(8.dp))
+                    CaptionChip("Viết nhận xét") { sheet = false; draft = reviewComment; editor = CaptionKind.REVIEW }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Music", icon = Icons.Default.MusicNote, iconTint = Color(0xFF1ED760)) { choose(CaptionKind.MUSIC) }
@@ -601,13 +612,15 @@ internal fun rememberMomentReviewSlots(
     editor?.let {
         AlertDialog(
             onDismissRequest = { editor = null },
-            title = { Text("Thêm một tin nhắn") },
+            title = { Text(if (editor == CaptionKind.REVIEW) "Viết nhận xét" else "Thêm một tin nhắn") },
             text = {
-                OutlinedTextField(value = draft, onValueChange = { draft = it.take(200) }, singleLine = true,
+                OutlinedTextField(value = draft, onValueChange = { draft = it.take(if (editor == CaptionKind.REVIEW) 36 else 200) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth())
             },
             confirmButton = { TextButton(onClick = {
-                text = draft
+                if (editor == CaptionKind.REVIEW) reviewComment = draft.trim().let { value ->
+                    value.substring(0, value.offsetByCodePoints(0, value.codePointCount(0, value.length).coerceAtMost(36)))
+                } else text = draft
                 editor = null
             }) { Text("Xong") } },
             dismissButton = { TextButton(onClick = { editor = null }) { Text("Hủy") } }
