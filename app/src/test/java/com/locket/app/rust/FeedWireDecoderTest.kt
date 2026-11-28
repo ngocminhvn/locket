@@ -12,7 +12,7 @@ class FeedWireDecoderTest {
         val buffer = ByteArrayOutputStream()
         DataOutputStream(buffer).use { out ->
             out.writeBytes("LKT1")
-            out.writeShort(1)
+            out.writeShort(2)
             out.writeByte(1)
             out.writeByte(0)
             out.writeByte(1)
@@ -26,6 +26,7 @@ class FeedWireDecoderTest {
             out.writeLong(1_700_000_000)
             out.writeInt(123_456_789)
             out.utf8("digest")
+            out.utf8("""[{"overlay_type":"caption","data":{"type":"review"}}]""")
         }
 
         val decoded = FeedWireDecoder.decode(buffer.toByteArray(), 1_700_000_060)
@@ -33,6 +34,7 @@ class FeedWireDecoderTest {
         assertEquals("token", decoded.syncToken)
         assertEquals("moment-a", decoded.moments.single().id)
         assertEquals("1m", decoded.moments.single().timeAgo)
+        assertEquals("""[{"overlay_type":"caption","data":{"type":"review"}}]""", decoded.moments.single().overlaysJson)
     }
 
     private fun DataOutputStream.utf8(value: String) {
