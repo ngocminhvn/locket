@@ -140,7 +140,7 @@ fun HomeMomentScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.0f)
-                    .clip(RoundedCornerShape(52.dp))
+                    .clip(RoundedCornerShape(46.dp))
                     .background(Color(0xFF1E1E1E))
                     .combinedClickable(
                         onLongClick = { if (currentMoment != null && !pinching && zoom <= 1f) menuAction = "menu" },
@@ -523,7 +523,7 @@ internal fun MomentReactionBar(
     if (showEmoji) MomentEmojiSheet(onDismiss = { showEmoji = false }, onPick = { react(it); showEmoji = false })
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
-            .height(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.10f))
+            .height(58.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
             .padding(start = 24.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -576,11 +576,15 @@ private fun MomentReplyDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0.65f) }
+        SideEffect {
+            window?.setDimAmount(0.65f)
+            window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
         LaunchedEffect(Unit) {
             focusRequester.requestFocus()
+            withFrameNanos { }
             keyboard?.show()
         }
         val firstName = moment.userName.trim().substringBefore(' ').ifBlank { moment.userUid }
@@ -623,6 +627,7 @@ private fun MomentReplyDialog(
                     BasicTextField(
                         value = message,
                         onValueChange = onMessageChange,
+                        readOnly = sending,
                         modifier = Modifier.weight(1f).focusRequester(focusRequester),
                         textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                         cursorBrush = SolidColor(Color.White),
