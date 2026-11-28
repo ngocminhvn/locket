@@ -216,6 +216,14 @@ fun CameraScreen(
         cameraPreferences.selfieFlash, cameraPreferences.mirror, activity) {
         var active = true
         var provider: ProcessCameraProvider? = null
+        val openingStarted = SystemClock.elapsedRealtime()
+        var firstStreamLogged = false
+        val streamObserver = androidx.lifecycle.Observer<PreviewView.StreamState> { state ->
+            if (active && !firstStreamLogged && boundCamera != null && state == PreviewView.StreamState.STREAMING) {
+                firstStreamLogged = true
+                android.util.Log.d("LocketCamera", "preview streaming after ${SystemClock.elapsedRealtime() - openingStarted}ms")
+            }
+        }
         boundCamera = null
         pinchingCamera = false
         cameraZoomRatio = 1f
@@ -233,7 +241,8 @@ fun CameraScreen(
         boundVideoSession = false
         val job = if (hasCameraPermission) scope.launch {
             try {
-                val cameraProvider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context).get() }
+                val cameraProvider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context.applicationContext).get() }
+                android.util.Log.d("LocketCamera", "provider ready after ${SystemClock.elapsedRealtime() - openingStarted}ms")
                 if (!active) return@launch
                 provider = cameraProvider
                 if (!cameraProvider.hasCamera(cameraSelector)) {
@@ -254,6 +263,7 @@ fun CameraScreen(
                 val rotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
                 val viewPort = ViewPort.Builder(Rational(1, 1), rotation).setScaleType(ViewPort.FILL_CENTER).build()
                 previewView.setScreenFlashWindow(activity?.window)
+                var attemptedBind = false
                 fun bind(selector: CameraSelector, extension: Boolean, hdr: Boolean, advanced: Boolean, includeVideo: Boolean): Camera {
                     val info = cameraProvider.getCameraInfo(selector)
                     val preview = Preview.Builder().setTargetRotation(rotation).apply {
@@ -286,7 +296,10 @@ fun CameraScreen(
                             }
                         }.build().also { group.addUseCase(it) }
                     } else null
-                    cameraProvider.unbindAll()
+                    // The previous effect has already released its session. Only
+                    // clear use cases here if retrying a failed bind in this effect.
+                    if (attemptedBind) cameraProvider.unbindAll()
+                    attemptedBind = true
                     return cameraProvider.bindToLifecycle(lifecycleOwner, selector, group.build()).also {
                         imageCapture = photo
                         videoCapture = video
@@ -310,6 +323,8 @@ fun CameraScreen(
                     }
                 }
                 boundCamera = camera
+                android.util.Log.d("LocketCamera", "use cases bound after ${SystemClock.elapsedRealtime() - openingStarted}ms")
+                previewView.previewStreamState.observe(lifecycleOwner, streamObserver)
                 zoomLimits = camera.cameraInfo.zoomState.value
                 cameraZoomRatio = zoomLimits?.zoomRatio ?: 1f
                 val exposure = camera.cameraInfo.exposureState
@@ -337,6 +352,7 @@ fun CameraScreen(
         onDispose {
             active = false
             job?.cancel()
+            previewView.previewStreamState.removeObserver(streamObserver)
             provider?.unbindAll()
             previewView.setScreenFlashWindow(null)
         }
