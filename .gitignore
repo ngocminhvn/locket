@@ -15,3 +15,7 @@ video_frames/
 .kotlin/
 /rust-core/target/
 /app/src/main/jniLibs/
+/output/
+/pages/
+__pycache__/
+*.pyc

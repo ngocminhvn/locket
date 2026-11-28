@@ -5,5 +5,9 @@
 - The updater reads the same manifest for either gesture. Tap version: Release. Hold version: Dev. No automatic cross-channel fallback. Monotonic versionCode prevents installing older Release over newer Dev.
 - Preserve only the latest APK and XZ for each channel using prior successful Pages snapshot or verified live files. Remove only the superseded files of the channel being updated. No extra tag, release, branch, or duplicated payload in the published site. Snapshot artifacts are retained for recovery.
 - APK and XZ payload checks include length, SHA-256, strict file names, channel/version, APK package and signature (Android installer final verification).
-- The earlier two-directory scheme was never deployed (Pages disabled when changed). Existing GitHub Releases untouched; old APKs need a one-time manual install of a Pages-capable build.
-- CI not triggered by ordinary source commits. Pages must be enabled before deployment. If Pages is disabled, the workflow produces signed Artifacts and explicitly skips publication with a warning; actual publication failures after enabling Pages remain failures. No build/device check was run in this change.
+- The earlier two-directory scheme was never deployed (Pages disabled when changed). Old APKs that still check GitHub Releases need a one-time manual install of a Pages-capable build.
+- CI not triggered by ordinary source commits. Pages must be enabled before deployment. If Pages is disabled, the workflow produces signed Artifacts and explicitly skips publication with a warning; actual publication failures after enabling Pages remain failures. 
+
+## Signing continuity
+
+Keep the existing repository secret `LOCKET_DEBUG_KEYSTORE_B64` and its configured signing alias. Never replace or commit signing material. The build fails if the secret is absent. Locket does not reuse TKB's signing key. CI verifies the signed APK against the configured keystore and retains its existing historical Release certificate checks when those Releases exist. The Pages publisher also checks the certificate and hashes of retained channel payloads. Do not bypass these safeguards or change the application ID. Android verifies the installed APK signature. Earlier pre-keystore versions had a documented one-time key rotation; see the workflow for the exact exceptions.

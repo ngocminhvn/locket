@@ -8,7 +8,7 @@ Directly integrates with the live Locket production protocol:
 * **Firebase Cloud Functions (v2 Callable):** `https://api.locketcamera.com`
 * **Firebase Identity Toolkit (REST Auth):** `https://identitytoolkit.googleapis.com`
 * **Google Cloud Storage Bucket:** `gs://locket-img`
-* **Google Cloud Firestore (REST):** Real-time users, friends, history, and conversations.
+* **Google Cloud Firestore (REST and Listen):** Real-time users, friends, history, and conversations.
 
 ---
 
@@ -28,7 +28,8 @@ Directly integrates with the live Locket production protocol:
 
 ### Requirements
 - **JDK 17** (e.g. Eclipse Temurin 17)
-- **Android SDK** (API 34, Build Tools 34.0.0)
+- **Android SDK** (compile SDK 37.1; target 34, minimum 26)
+- **Rust toolchain**, Android NDK and `cargo-ndk` for the native core; see [Rust core](docs/rust-core.md).
 
 ### Local Build
 ```bash
@@ -36,7 +37,8 @@ Directly integrates with the live Locket production protocol:
 git clone https://github.com/ngocminhvn/locket.git
 cd locket
 
-# Build Debug APK
+# Build native core and Debug APK
+./scripts/build-rust-android.sh
 ./gradlew assembleDebug
 ```
 The output APK is generated at:
@@ -46,13 +48,17 @@ The output APK is generated at:
 
 ## 🤖 AI Agent & Architecture Guide
 
-For comprehensive system architecture, API specifications, and guidelines for AI agents, see [AGENT.md](AGENT.md).
+For architecture and developer rules, see [AGENT.md](AGENT.md). API contracts: [human-readable specification](Locket-API-Spec-1.247.3.md) and [JSON specification](locket-api-1.247.3.json). Implementation notes and verification checklist: [audit status](docs/loading-audit-v2-status.md).
+
+## APK downloads and updates
+
+[Download from GitHub Pages](https://ngocminhvn.github.io/locket/). Run the [build workflow](https://github.com/ngocminhvn/locket/actions/workflows/build.yml) manually: Release unchecked builds Dev, checked builds Release. In the app, tap the version to check Release or hold it to check Dev. See [update channels and signing](docs/update-channels.md).
 
 ---
 
 ## 📄 License
 The project's own source code, to the extent the project has the rights to license it, is distributed under the **GNU General Public License v3.0 only (GPL-3.0-only)**. See [LICENSE](LICENSE).
 
-Earlier versions released under Apache-2.0 remain available under their original license; previously granted rights are not revoked. The original [Apache-2.0 license text](LICENSES/Apache-2.0.txt) is retained for applicable material. Third-party dependencies, fonts, and other assets retain their respective licenses.
+Earlier versions released under Apache-2.0 remain available under their original license; previously granted rights are not revoked. Applicable earlier material remains subject to its original Apache-2.0 terms. Third-party dependencies, fonts, and other assets retain their respective licenses.
 
 This is an unofficial client; no rights to Locket's trademarks, proprietary assets, or services are granted by this license.

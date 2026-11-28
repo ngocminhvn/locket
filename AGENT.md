@@ -53,7 +53,7 @@ app/src/main/java/com/locket/app/
 └── ui/
     ├── LocketViewModel.kt        # Central ViewModel, reactive flows, data synchronization
     ├── theme/
-    │   ├── Color.kt              # LocketYellow (#FFB800), LocketBlack (#000000), dark palette
+    │   ├── Color.kt              # Semantic Locket palette, including #FFB703 and #060505
     │   └── Theme.kt              # MaterialTheme wrapping
     ├── components/
     │   ├── LiquidGlass.kt        # Custom Compose modifier for frosted glass and glow borders
@@ -137,11 +137,7 @@ export ANDROID_HOME=/path/to/android-sdk
 The resulting APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
 ### 5.2 GitHub Actions CI
-The workflow `.github/workflows/build.yml` is manual-only (`workflow_dispatch`). Do not add push, pull request, scheduled, or other automatic build triggers. Start a build only when the repository owner explicitly requests one. It:
-1. Sets up JDK 17 (Temurin).
-2. Sets up Android SDK.
-3. Builds `./gradlew assembleDebug`.
-4. Uploads the debug APK as a GitHub Actions artifact (`locket-debug-apk`).
+The workflow `.github/workflows/build.yml` runs on manual dispatch or the existing explicit manual-build-request marker with its required commit-message guard. Do not add automatic source-change, pull request, or scheduled builds. Start a build only when the repository owner explicitly requests one. It tests/builds Rust, compiles and signs the R8 release APK, verifies the certificate, uploads APK/XZ artifacts and mapping, and deploys the selected Dev/Release channel to GitHub Pages when enabled. See [update channels](docs/update-channels.md).
 
 ---
 
@@ -166,8 +162,8 @@ When modifying this repository:
   panic or become successful empty data.
 - Do not migrate Room to rusqlite without comparable device benchmarks and a
   one-writer transactional migration/rollback plan.
-- The GitHub workflow must remain `workflow_dispatch`; do not run it unless the
-  repository owner explicitly asks for an APK build.
+- Preserve the explicitly requested build policy; do not run CI unless the
+  repository owner asks for an APK build.
 
 ### Navigation and release performance
 
