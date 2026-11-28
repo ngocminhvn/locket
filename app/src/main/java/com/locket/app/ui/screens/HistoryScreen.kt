@@ -71,7 +71,6 @@ fun HistoryScreen(
     sharedProfileAvatar: Boolean = false
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val baseColor = LocalMomentColor.current
     val allMoments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val moments = remember(allMoments, currentUser.uid) {
@@ -129,6 +128,16 @@ fun HistoryScreen(
     val visibleOldest = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
     val oldestVisibleMonth = visibleOldest?.let { key -> calendarMonths.firstOrNull { "${it.year}-${it.month}" == key } }
         ?: calendarMonths.last()
+    // Select a real thumbnail belonging to the visible calendar month, never the feed.
+    val historyUrl = remember(oldestVisibleMonth, momentsByDate) {
+        (oldestVisibleMonth.daysCount downTo 1).firstNotNullOfOrNull { day ->
+            momentsByDate["${oldestVisibleMonth.year}-${oldestVisibleMonth.month}-$day"]
+                ?.firstOrNull()?.thumbnailUrl?.takeIf { it.isNotBlank() }
+        }
+    }
+    val historyTint = rememberMomentColor(historyUrl, 220)
+    val historyColor = backdropColor(historyTint, HISTORY_SCRIM)
+    val rampColor = if (historyUrl == null) backdropColor(LocketMomentGround, HISTORY_SCRIM) else historyColor
     val cellPx = (context.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)
     LaunchedEffect(oldestVisibleMonth, momentsByDate) {
         val index = calendarMonths.indexOf(oldestVisibleMonth)
@@ -147,7 +156,7 @@ fun HistoryScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(momentGradient(baseColor))
+            .background(historyColor)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -183,7 +192,7 @@ fun HistoryScreen(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier
-                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = momentSurface(baseColor, LocketPillBg, 0.075f))
+                        .liquidGlassEffect(RoundedCornerShape(24.dp), backgroundColor = LocketPillBg)
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -212,13 +221,17 @@ fun HistoryScreen(
 
         // Fixed header stays visible while the months scroll underneath.
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
-            .background(Brush.verticalGradient(listOf(momentEdge(baseColor), momentEdge(baseColor).copy(alpha = 0.88f), Color.Transparent)))
+            .background(Brush.verticalGradient(listOf(rampColor, rampColor.copy(alpha = 0.88f), Color.Transparent)))
             .statusBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
             Text("Kỷ niệm", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
             if (!sharedProfileAvatar) LocketProfileAvatar(currentUser.profilePictureUrl, onOpenProfile,
                 Modifier.align(Alignment.CenterEnd))
         }
+
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .height(88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+            .background(Brush.verticalGradient(listOf(Color.Transparent, rampColor))))
 
         // Memory Full-Screen Viewer Dialog
         viewingMoment?.let { moment ->
@@ -264,11 +277,10 @@ private fun MonthCardDynamic(
     onMomentClick: (Moment) -> Unit,
     onTodayAddClick: () -> Unit
 ) {
-    val baseColor = LocalMomentColor.current
-    val cardColor = momentSurface(baseColor, LocketSheetBg, 0.055f)
-    val headerColor = momentSurface(baseColor, LocketSheetBg, 0.105f)
-    val dayColor = momentSurface(baseColor, LocketJournalDayBg, 0.065f)
-    val dotColor = momentSurface(baseColor, LocketSheetSurface, 0.15f)
+    val cardColor = LocketSheetBg
+    val headerColor = LocketSheetBg
+    val dayColor = LocketJournalDayBg
+    val dotColor = LocketSheetSurface
     val todayCal = Calendar.getInstance()
     val isCurrentMonth = todayCal.get(Calendar.YEAR) == monthData.year &&
             (todayCal.get(Calendar.MONTH) + 1) == monthData.month
@@ -334,7 +346,7 @@ private fun monthStart(month: CalendarMonthData): Long =
 
 @Composable
 private fun MemoryConnector() {
-    val connectorColor = momentSurface(LocalMomentColor.current, Color(0xFF3A3A3A), 0.15f)
+    val connectorColor = Color(0xFF3A3A3A)
     Canvas(Modifier.padding(vertical = 8.dp).size(width = 46.dp, height = 16.dp)) {
         val line = Path().apply {
             moveTo(0f, size.height * 0.15f)
@@ -572,4 +584,7 @@ fun MemoryDetailDialog(
 
 
 @Composable
-private fun MemoryBackdrop(url: String) = MomentBackdrop(url)
+private fun MemoryBackdrop(url: String) {
+    val tint = rememberMomentColor(url, 220)
+    Box(Modifier.fillMaxSize().background(backdropColor(tint, HISTORY_SCRIM)))
+}
