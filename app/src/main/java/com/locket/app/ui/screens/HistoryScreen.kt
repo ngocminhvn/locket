@@ -15,7 +15,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -357,7 +360,7 @@ fun MemoryDetailDialog(
     }
     val pager = rememberPagerState(initialPage = photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0)) { photos.size }
     val scope = rememberCoroutineScope()
-    val active = photos[pager.currentPage.coerceIn(0, photos.lastIndex)]
+    val active = photos[pager.settledPage.coerceIn(0, photos.lastIndex)]
     val date = remember(active.timestampSeconds) {
         Calendar.getInstance().apply { timeInMillis = active.timestampSeconds * 1000 }
     }
@@ -369,11 +372,11 @@ fun MemoryDetailDialog(
     var deleting by remember(active.id) { mutableStateOf(false) }
     var zoom by remember(active.id) { mutableFloatStateOf(1f) }
     var pan by remember(active.id) { mutableStateOf(Offset.Zero) }
-    val thumbs = rememberLazyListState(initialFirstVisibleItemIndex = pager.currentPage)
-    LaunchedEffect(active.id, pager.currentPage) {
+    var thumbDragging by remember { mutableStateOf(false) }
+    val moving = pager.isScrollInProgress || thumbDragging || kotlin.math.abs(pager.currentPageOffsetFraction) > 0.001f
+    LaunchedEffect(active.id) {
         zoom = 1f
         pan = Offset.Zero
-        if (photos.size > 1) thumbs.animateScrollToItem(pager.currentPage)
     }
     LaunchedEffect(pager.currentPage, photos.size, hasMore, loadingOlder, historyError) {
         if (hasMore && !loadingOlder && historyError == null && pager.currentPage >= (photos.size - 5).coerceAtLeast(0)) onLoadOlder()
@@ -399,7 +402,7 @@ fun MemoryDetailDialog(
                         Text("${date.get(Calendar.DAY_OF_MONTH)} tháng ${date.get(Calendar.MONTH) + 1}",
                             color = Color.White.copy(alpha = 0.90f), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
-                    IconButton(onClick = { share = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
+                    IconButton(onClick = { share = true }, enabled = !moving, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
                         Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White.copy(alpha = 0.90f), modifier = Modifier.size(26.dp))
                     }
                 }
@@ -412,7 +415,7 @@ fun MemoryDetailDialog(
                         pageSpacing = 16.dp,
                         beyondViewportPageCount = 1,
                         key = { photos[it].id },
-                        userScrollEnabled = zoom <= 1f && !share && !delete) { page ->
+                        userScrollEnabled = zoom <= 1f && !share && !delete && !thumbDragging) { page ->
                         val photo = photos[page]
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Box(Modifier.size(photoSize).graphicsLayer {
@@ -420,7 +423,7 @@ fun MemoryDetailDialog(
                                 scaleY = 1f - 0.28f * distance
                             }.clip(RoundedCornerShape(46.dp))
                                 .background(Color(0xFF1E1E20))) {
-                                val selected = page == pager.currentPage
+                                val selected = page == pager.settledPage
                                 AsyncImage(photo.thumbnailUrl, photo.caption,
                                     Modifier.fillMaxSize()
                                         .then(if (selected) Modifier.pointerInput(photo.id) {
@@ -447,7 +450,7 @@ fun MemoryDetailDialog(
                                             translationX = pan.x; translationY = pan.y
                                         } else Modifier),
                                     contentScale = ContentScale.Crop)
-                                if (zoom <= 1f || !selected) {
+                                if (!moving && (zoom <= 1f || !selected)) {
                                     val photoTime = remember(photo.timestampSeconds) {
                                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(photo.timestampSeconds * 1000))
                                     }
@@ -475,27 +478,62 @@ fun MemoryDetailDialog(
                 if (historyError != null && pager.currentPage >= (photos.size - 3).coerceAtLeast(0)) {
                     TextButton(onClick = onLoadOlder, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 94.dp)) { Text("Thử tải ảnh cũ", color = Color.White) }
                 }
-                LazyRow(
-                    state = thumbs,
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp),
-                    contentPadding = PaddingValues(horizontal = viewportWidth * 0.4f),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(photos, key = { it.id }) { photo ->
-                        val selected = photo.id == active.id
-                        val distance = kotlin.math.abs(photos.indexOf(photo) - pager.currentPage)
-                        val thumbSize = when (distance) { 0 -> 60.dp; 1 -> 41.dp; else -> 32.dp }
-                        Box(Modifier.width(viewportWidth / 5).height(60.dp), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(thumbSize).clip(RoundedCornerShape(if (selected) 18.dp else 10.dp))
-                            .border(if (selected) 3.dp else 0.dp, if (selected) Color.White.copy(alpha = 0.90f) else Color.Transparent, RoundedCornerShape(if (selected) 18.dp else 10.dp))
-                            .clickable { scope.launch { pager.animateScrollToPage(photos.indexOf(photo)) } }
-                            .padding(if (selected) 5.dp else 0.dp)) {
-                            AsyncImage(photo.thumbnailUrl, "Ảnh kỷ niệm", Modifier.fillMaxSize().clip(RoundedCornerShape(if (selected) 12.dp else 9.dp)),
-                                contentScale = ContentScale.Crop)
+                // One scroll position drives both carousels. The outline is
+                // a stationary overlay, not a border attached to a moving item.
+                val slotWidth = viewportWidth / 5
+                val dragRatio = (photoSize + 16.dp) / slotWidth
+                val dragState = rememberDraggableState { delta ->
+                    pager.dispatchRawDelta(-delta * dragRatio)
+                }
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 23.dp)
+                    .height(60.dp).clipToBounds()
+                    .draggable(
+                        state = dragState,
+                        orientation = Orientation.Horizontal,
+                        enabled = photos.size > 1 && zoom <= 1f && !share && !delete,
+                        onDragStarted = {
+                            pager.stopScroll()
+                            thumbDragging = true
+                        },
+                        onDragStopped = { velocity ->
+                            try {
+                                val direction = when {
+                                    velocity < -600f -> 1
+                                    velocity > 600f -> -1
+                                    else -> 0
+                                }
+                                val target = (pager.currentPage + direction).coerceIn(0, photos.lastIndex)
+                                pager.animateScrollToPage(target)
+                            } finally {
+                                thumbDragging = false
+                            }
                         }
+                    ), contentAlignment = Alignment.Center) {
+                    val first = (pager.currentPage - 3).coerceAtLeast(0)
+                    val last = (pager.currentPage + 3).coerceAtMost(photos.lastIndex)
+                    for (index in first..last) {
+                        val photo = photos[index]
+                        key(photo.id) {
+                            val position = index - pager.currentPage - pager.currentPageOffsetFraction
+                            val distance = kotlin.math.abs(position)
+                            val thumbSize = when {
+                                distance < 1f -> (50f - 9f * distance).dp
+                                distance < 2f -> (41f - 9f * (distance - 1f)).dp
+                                else -> 32.dp
+                            }
+                            Box(Modifier.offset(x = slotWidth * position).size(60.dp),
+                                contentAlignment = Alignment.Center) {
+                                AsyncImage(photo.thumbnailUrl, "Ảnh kỷ niệm",
+                                    Modifier.size(thumbSize).clip(RoundedCornerShape(if (distance < 0.5f) 12.dp else 9.dp))
+                                        .clickable(enabled = !share && !delete) {
+                                            zoom = 1f; pan = Offset.Zero
+                                            scope.launch { pager.animateScrollToPage(index) }
+                                        }, contentScale = ContentScale.Crop)
+                            }
                         }
                     }
+                    Box(Modifier.size(60.dp)
+                        .border(3.dp, Color.White.copy(alpha = 0.90f), RoundedCornerShape(18.dp)))
                 }
             }
         }
