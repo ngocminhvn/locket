@@ -2,11 +2,12 @@ use locket_core::{parse_feed_response, wire};
 
 #[test]
 fn parses_callable_feed_and_preserves_nanos() {
-    let input = br#"{"result":{"status":200,"sync_token":"opaque-token","data":[{"canonical_uid":"moment-a","user":"user-a","thumbnail_url":"https://example.invalid/a.jpg","caption":"","date":{"_seconds":1700000000,"_nanoseconds":123456789},"md5":"digest"}]}}"#;
+    let input = br#"{"result":{"status":200,"sync_token":"opaque-token","data":[{"canonical_uid":"moment-a","user":"user-a","thumbnail_url":"https://example.invalid/a.jpg","caption":"","overlays":[{"overlay_type":"caption","data":{"type":"review","payload":{"rating":4.5}}}],"date":{"_seconds":1700000000,"_nanoseconds":123456789},"md5":"digest"}]}}"#;
     let feed = parse_feed_response(input).unwrap();
     assert!(!feed.not_modified);
     assert_eq!(feed.sync_token.as_deref(), Some("opaque-token"));
     assert_eq!(feed.moments[0].timestamp_nanoseconds, 123456789);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&feed.moments[0].overlays_json).unwrap()[0]["data"]["payload"]["rating"], 4.5);
     let encoded = wire::encode_feed(&feed).unwrap();
     assert_eq!(&encoded[..4], b"LKT1");
 }
