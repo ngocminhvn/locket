@@ -70,6 +70,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3:1.5.0")
     implementation("androidx.compose.animation:animation")
+    implementation("dev.shayxo.liquidglass:liquidglass:1.0.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.emoji2:emoji2-emojipicker:1.7.0")
