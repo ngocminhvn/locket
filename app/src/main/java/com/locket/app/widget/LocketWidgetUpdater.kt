@@ -77,7 +77,13 @@ object LocketWidgetUpdater {
         views.setTextViewText(R.id.widget_name, latest.userName.ifBlank { latest.userUid })
         views.setTextViewText(R.id.widget_time, latest.timeAgo)
         val caption = com.locket.app.model.CaptionOverlays.label(latest)
-        if (caption.isNotBlank()) {
+        val overlay = WidgetCaptionRenderer.render(context, latest)
+        views.setViewVisibility(R.id.widget_overlay, if (overlay != null) View.VISIBLE else View.GONE)
+        if (overlay != null) {
+            views.setImageViewBitmap(R.id.widget_overlay, overlay)
+            views.setContentDescription(R.id.widget_overlay, caption)
+            views.setViewVisibility(R.id.widget_caption, View.GONE)
+        } else if (caption.isNotBlank()) {
             views.setViewVisibility(R.id.widget_caption, View.VISIBLE)
             views.setTextViewText(R.id.widget_caption, caption)
         } else {
