@@ -2,6 +2,9 @@ name: Build Locket Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build.yml']
 
 permissions:
   contents: write
@@ -12,6 +15,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[one-shot build requested]')
     name: Build signed APK
     runs-on: ubuntu-latest
 
