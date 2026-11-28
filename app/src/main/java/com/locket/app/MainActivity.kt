@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
                             val activeRoute by rememberUpdatedState(currentScreen)
                             var homeNavVisible by remember { mutableStateOf(true) }
                             var homeNavFeed by remember { mutableStateOf(false) }
+                            var homeVerticalProgress by remember { mutableFloatStateOf(1f) }
                             var homeCameraRequest by remember { mutableIntStateOf(0) }
                             var homeShareRequest by remember { mutableIntStateOf(0) }
                             var homeFilterOpen by remember { mutableStateOf(false) }
@@ -245,7 +246,8 @@ class MainActivity : ComponentActivity() {
                                                 sharedProfileAvatar = true,
                                                 sharedFriendFilterOpen = homeFilterOpen,
                                                 onSharedFriendFilterChange = { homeFilterOpen = it },
-                                                tabTransitionProgress = homeChromeProgress
+                                                tabTransitionProgress = homeChromeProgress,
+                                                onVerticalChromeProgress = { homeVerticalProgress = it }
                                             )
                                         }
                                     }
@@ -280,12 +282,14 @@ class MainActivity : ComponentActivity() {
                                             showDropdownArrow = homeNavFeed,
                                             onSpeakerClick = { if (!pager.isScrollInProgress) viewModel.syncAllData() },
                                             onTitleClick = { if (!pager.isScrollInProgress) {
-                                                if (homeNavFeed) homeFilterOpen = !homeFilterOpen else showFriendsModal = true
+                                                if (homeVerticalProgress >= 0.999f) {
+                                                    if (homeNavFeed) homeFilterOpen = !homeFilterOpen else showFriendsModal = true
+                                                }
                                             } },
                                             dropdownExpanded = homeFilterOpen,
                                             adaptiveBackground = homeNavFeed,
                                             showAvatar = false,
-                                            transitionProgress = headerProgress
+                                            transitionProgress = { headerProgress() * homeVerticalProgress }
                                         )
                                     } else {
                                         Box(Modifier.fillMaxWidth().statusBarsPadding()
@@ -326,8 +330,8 @@ class MainActivity : ComponentActivity() {
                                         unreadConversations = unreadConversations,
                                         showNewChatAction = headerPage == 2,
                                         onNewChatClick = { newChatOpen = true },
-                                        sideTransitionProgress = headerProgress,
-                                        sideActionsEnabled = !pager.isScrollInProgress
+                                        sideTransitionProgress = { headerProgress() * if (headerPage == 1) homeVerticalProgress else 1f },
+                                        sideActionsEnabled = !pager.isScrollInProgress && (headerPage != 1 || homeVerticalProgress >= 0.999f)
                                     )
                                 }
                             }
