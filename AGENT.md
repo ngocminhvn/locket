@@ -30,7 +30,7 @@ The client communicates directly with Locket's production backend:
 | **Android SDK** | compileSdk 37.1, targetSdk 34, minSdk 26 |
 | **Android Gradle Plugin (AGP)** | 9.2.1 |
 | **UI Framework** | Jetpack Compose (BOM 2026.11.01), Compose Compiler 2.4.21 |
-| **Design System** | Material 3 Expressive 1.5.0, Liquid Glass gradients (no realtime blur) |
+| **Design System** | Material 3 Expressive 1.5.0, Liquid Glass gradients on ordinary surfaces; upstream Liquid Glass 1.0.0 shader only on main navigation |
 | **Camera** | CameraX 1.6.2 (`camera-core`, `camera-camera2`, `camera-lifecycle`, `camera-view`) |
 | **Networking** | OkHttp 5.5.1, Gson 2.15.0 |
 | **Image Loading** | Coil Compose 2.7.0 |
@@ -147,7 +147,7 @@ When modifying this repository:
 1. **Never commit APK or build binaries** into git (`.gitignore` enforces this).
 2. **Always test Kotlin compilation** with `./gradlew compileDebugKotlin` before declaring work done.
 3. **Verify API responses** against the specifications in `docs/Locket-API-Spec-1.247.3.md` and `docs/locket-api-1.247.3.json`.
-4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` modifier rather than flat generic backgrounds for cards and bottom navigation.
+4. **Preserve Liquid Glass styling**: Use `.liquidGlassEffect()` for ordinary cards. Main navigation uses the same upstream `dev.shayxo.liquidglass:liquidglass:1.0.0` optical renderer as TKB SV; preserve the existing nav layout and pager-driven selector. Keep the glass recording scoped to the main tabs, with no extra drag, bounce, or haptic feedback.
 5. **Keep Signup disabled** in `WelcomeScreen.kt`.
 
 ### Rust core rules
