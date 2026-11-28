@@ -15,6 +15,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.blur
+import android.os.Build
 import coil.request.ImageRequest
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -501,7 +503,7 @@ internal fun MomentReactionBar(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .clip(RoundedCornerShape(32.dp))
-                    .background(Color.White.copy(alpha = 0.075f))
+                    .background(Color.White.copy(alpha = 0.10f))
                     .padding(horizontal = 8.dp, vertical = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -612,11 +614,24 @@ internal fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
 }
 
 
-/** Photo-derived ambient gradient for memory viewers and activity sheets. */
+/** Home photo backdrop: strong blur plus BLACK80. The 25 dp blur is a
+ * Compose approximation of the observed original blur setting, not its exact native kernel.
+ * Older Android uses a very small decoded image as a lightweight fallback. */
 @Composable
 internal fun MomentBackdrop(url: String) {
-    val color = rememberMomentColor(url)
-    Box(Modifier.fillMaxSize().background(momentGradient(color)))
+    val context = LocalContext.current
+    val supportsBlur = Build.VERSION.SDK_INT >= 31
+    val request = remember(context, url, supportsBlur) {
+        ImageRequest.Builder(context).data(url).size(if (supportsBlur) 48 else 4)
+            .allowHardware(false).crossfade(false).build()
+    }
+    Box(Modifier.fillMaxSize().clipToBounds().background(LocketMomentGround)) {
+        if (url.isNotBlank()) {
+            AsyncImage(request, null, Modifier.matchParentSize()
+                .then(if (supportsBlur) Modifier.blur(25.dp) else Modifier), contentScale = ContentScale.Crop)
+        }
+        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.80f)))
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
