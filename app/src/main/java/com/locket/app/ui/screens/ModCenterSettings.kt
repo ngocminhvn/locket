@@ -226,15 +226,12 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     fun checkChannel(channel: String) {
         if (busy || progress != null) return
         busy = true
-        val label = if (channel == "release") "Release" else "Dev"
         scope.launch {
             try {
                 val latest = latestRelease(channel)
                 when {
-                    latest == null -> message = "Chưa có bản $label trên GitHub Pages."
-                    latest.build > installedBuild(context) -> { downloaded = null; release = latest }
-                    latest.build == installedBuild(context) -> message = "Bạn đang sử dụng bản $label mới nhất."
-                    else -> message = "Bản $label mới nhất (${latest.version}) cũ hơn bản đang cài ($version). Android không cho cập nhật xuống phiên bản cũ."
+                    latest != null && latest.build > installedBuild(context) -> { downloaded = null; release = latest }
+                    else -> message = "Không có bản cập nhật mới."
                 }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { message = e.localizedMessage ?: "Không kiểm tra được cập nhật" }
