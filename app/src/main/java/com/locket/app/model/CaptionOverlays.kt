@@ -39,14 +39,17 @@ object CaptionOverlays {
     fun obj(obj: JsonObject?, key: String): JsonObject? =
         obj?.get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 
-    fun first(json: String): JsonObject? = runCatching {
-        JsonParser.parseString(json).asJsonArray.firstOrNull { el ->
-            el.isJsonObject && string(el.asJsonObject, "overlay_type") == "caption" &&
-                string(obj(el.asJsonObject, "data"), "type") in setOf(
-                    "standard", "review", "time", "location", "weather", "streak", "static_content", "music", "star_sign", "status", "link"
-                )
-        }?.asJsonObject
-    }.getOrNull()
+    fun first(json: String?): JsonObject? {
+        if (json.isNullOrBlank()) return null
+        return runCatching {
+            JsonParser.parseString(json).asJsonArray.firstOrNull { el ->
+                el.isJsonObject && string(el.asJsonObject, "overlay_type") == "caption" &&
+                    string(obj(el.asJsonObject, "data"), "type") in setOf(
+                        "standard", "review", "time", "location", "weather", "streak", "static_content", "music", "star_sign", "status", "link"
+                    )
+            }?.asJsonObject
+        }.getOrNull()
+    }
 
     fun data(moment: Moment) = obj(first(moment.overlaysJson), "data")
     fun label(moment: Moment): String {
