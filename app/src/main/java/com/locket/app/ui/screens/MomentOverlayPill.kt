@@ -130,6 +130,7 @@ internal fun MomentOverlayPill(data: JsonObject?, fallback: String, modifier: Mo
             else -> when (type) {
                 "location" -> Icon(Icons.Default.LocationOn, null, tint = iconColor, modifier = Modifier.size(20.dp))
                 "music" -> Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(20.dp))
+                else -> Unit
             }
         }
         Text(label, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.Bold,
