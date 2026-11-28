@@ -125,9 +125,25 @@ fun HomePagerScreen(
     val activeMoment = moments.getOrNull(pagerState.settledPage - 1)
         ?: if (!cameraChrome) moments.firstOrNull() else null
     val palette = rememberAmbientPalette(activeMoment?.thumbnailUrl ?: moments.firstOrNull()?.thumbnailUrl, AmbientMode.HOME)
-    val feedBrush = palette.brush()
     val context = LocalContext.current
-    val cameraBrush = AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context))
+    val cameraColors = AppearancePrefs.cameraColors(AppearancePrefs.cameraTheme(context))
+    // Blend one stationary gradient, shared by the background and both scrims.
+    // At either endpoint this is exactly the existing camera/feed theme.
+    fun mix(a: Color, b: Color, t: Float): Color = Color(
+        red = a.red + (b.red - a.red) * t,
+        green = a.green + (b.green - a.green) * t,
+        blue = a.blue + (b.blue - a.blue) * t
+    )
+    val backgroundPalette = AmbientPalette(
+        mix(cameraColors.first(), palette.top, feedProgress),
+        mix(mix(cameraColors.first(), cameraColors.last(), 0.48f), palette.middle, feedProgress),
+        mix(cameraColors.last(), palette.bottom, feedProgress)
+    )
+    fun backgroundAt(position: Float): Color {
+        val y = position.coerceIn(0f, 1f)
+        return if (y <= 0.48f) mix(backgroundPalette.top, backgroundPalette.middle, y / 0.48f)
+        else mix(backgroundPalette.middle, backgroundPalette.bottom, (y - 0.48f) / 0.52f)
+    }
     val showChrome = !(cameraSelected && cameraReviewVisible) && !zoomLocked
     var handledCameraRequest by remember { mutableIntStateOf(cameraRequest) }
     var handledShareRequest by remember { mutableIntStateOf(shareRequest) }
@@ -216,8 +232,7 @@ fun HomePagerScreen(
 
     // One stationary background for both pages. Blend only at the camera boundary;
     // the camera's own theme and the feed palette stay unchanged at rest.
-    Box(Modifier.fillMaxSize().background(LocketBlack).background(cameraBrush)
-        .background(feedBrush, alpha = feedProgress).clipToBounds()) {
+    Box(Modifier.fillMaxSize().background(backgroundPalette.brush()).clipToBounds()) {
     VerticalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
@@ -323,36 +338,39 @@ fun HomePagerScreen(
         }
     }
 
-    // Soft top and bottom scrims keep the fixed chrome readable without
-    // obscuring the scrolling photos with hard edges.
-    if (showChrome && pagerState.isScrollInProgress) {
+    // Sample the exact shared theme under the translucent chrome. Keep the
+    // scrims mounted at rest so finishing a gesture cannot flash a black strip.
+    if (showChrome) {
         Canvas(Modifier.matchParentSize()) {
+            if (size.height <= 0f) return@Canvas
             val top = headerHeight.toPx().coerceAtMost(size.height)
             val footer = (cameraFooterHeight.toPx() + (feedFooterHeight - cameraFooterHeight).toPx() * feedControlProgress)
                 .coerceAtMost(size.height)
             // Both stationary navigation areas remain translucent while photos
             // travel underneath. No hard clipping or opaque background masks.
             val fadeHeight = (top + 38.dp.toPx()).coerceAtMost(size.height)
-            val tint = androidx.compose.ui.graphics.lerp(LocketBlack, palette.top, feedProgress)
+            fun topTint(stop: Float, alpha: Float) =
+                backgroundAt(fadeHeight * stop / size.height).copy(alpha = alpha)
             drawRect(
                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    0f to tint.copy(alpha = 0.90f),
-                    0.42f to tint.copy(alpha = 0.65f),
-                    0.72f to tint.copy(alpha = 0.30f),
-                    1f to tint.copy(alpha = 0f),
+                    0f to topTint(0f, 0.90f),
+                    0.42f to topTint(0.42f, 0.65f),
+                    0.72f to topTint(0.72f, 0.30f),
+                    1f to topTint(1f, 0f),
                     endY = fadeHeight
                 ),
                 size = androidx.compose.ui.geometry.Size(size.width, fadeHeight)
             )
             val bottomFadeHeight = (footer + 24.dp.toPx()).coerceAtMost(size.height)
             val bottomStart = size.height - bottomFadeHeight
-            val bottomTint = androidx.compose.ui.graphics.lerp(LocketBlack, palette.bottom, feedProgress)
+            fun bottomTint(stop: Float, alpha: Float) =
+                backgroundAt((bottomStart + bottomFadeHeight * stop) / size.height).copy(alpha = alpha)
             drawRect(
                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    0f to bottomTint.copy(alpha = 0f),
-                    0.30f to bottomTint.copy(alpha = 0.18f),
-                    0.65f to bottomTint.copy(alpha = 0.48f),
-                    1f to bottomTint.copy(alpha = 0.86f),
+                    0f to bottomTint(0f, 0f),
+                    0.30f to bottomTint(0.30f, 0.18f),
+                    0.65f to bottomTint(0.65f, 0.48f),
+                    1f to bottomTint(1f, 0.86f),
                     startY = bottomStart,
                     endY = size.height
                 ),
