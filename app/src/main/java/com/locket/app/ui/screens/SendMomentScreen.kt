@@ -336,12 +336,16 @@ internal fun rememberMomentReviewSlots(
                         val shape = RoundedCornerShape(30.dp)
                         val base = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).clip(shape)
                         if (item == CaptionKind.REVIEW) {
-                            Row(base.background(Color(0x99000000)).padding(horizontal = 10.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(base.background(Color(0x99000000)).padding(horizontal = 9.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(1.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
                                 repeat(5) { index ->
-                                    IconButton(onClick = { rating = index + 1 }, enabled = !isPosting, modifier = Modifier.size(32.dp)) {
-                                        Icon(if (index < rating) Icons.Default.Star else Icons.Default.StarBorder,
-                                            "Đánh giá ${index + 1} sao", tint = LocketYellow, modifier = Modifier.size(26.dp))
+                                    val picked = index < rating
+                                    IconButton(onClick = { rating = index + 1 }, enabled = !isPosting, modifier = Modifier.size(28.dp)) {
+                                        ReviewStar(
+                                            tint = Color(0xFFFFCF38).copy(alpha = if (picked) 1f else 0.38f),
+                                            modifier = Modifier.size(21.dp).semantics { contentDescription = "Đánh giá ${index + 1} sao" }
+                                        )
                                     }
                                 }
                             }
@@ -543,6 +547,27 @@ private fun RecipientAvatar(
         Text(shortName, color = if (selected) selectionColor else Color.White.copy(alpha = 0.44f), fontSize = 16.sp,
             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 4.dp))
+    }
+}
+
+/** Filled five-point star with rounded tips, matching the reference review badge. */
+@Composable
+private fun ReviewStar(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val radius = size.minDimension * 0.43f
+        val path = Path().apply {
+            repeat(10) { index ->
+                val angle = -Math.PI / 2 + index * Math.PI / 5
+                val r = radius * if (index % 2 == 0) 1f else 0.48f
+                val x = center.x + (kotlin.math.cos(angle) * r).toFloat()
+                val y = center.y + (kotlin.math.sin(angle) * r).toFloat()
+                if (index == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+        drawPath(path, tint)
+        drawPath(path, tint, style = Stroke(width = size.minDimension * 0.065f,
+            cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
