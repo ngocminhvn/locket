@@ -64,7 +64,7 @@ class LocketApiClient(
                 if (id.isBlank() || owner.isBlank() || thumb.isBlank()) return@mapNotNull null
                 Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
                     videoUrl = extractString(fields, "video_url").ifBlank { null }, caption = extractString(fields, "caption"),
-                    timestampSeconds = time, timeAgo = formatMomentAge(time), md5 = extractString(fields, "md5"))
+                    timestampSeconds = time, timeAgo = formatMomentAge(time), md5 = extractString(fields, "md5"), overlaysJson = firestoreOverlays(fields))
             }
             emit(LiveDelta(records, event.deletedIds, event.ready))
         }
@@ -1414,7 +1414,7 @@ class LocketApiClient(
                 Moment(id = id, userUid = owner, userName = "",
                     thumbnailUrl = thumb, videoUrl = extractString(fields, "video_url").ifBlank { null },
                     caption = extractString(fields, "caption"), timestampSeconds = timestamp,
-                    timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"))
+                    timeAgo = formatMomentAge(timestamp), md5 = extractString(fields, "md5"), overlaysJson = firestoreOverlays(fields))
             }.orEmpty()
             val names = if (ownOnly) emptyMap() else cachedUserNames(records.map { it.userUid })
             val resolved = records.map { m ->
@@ -1439,6 +1439,27 @@ class LocketApiClient(
         }
     }
 
+    // Firestore REST wraps each nested field in its Value representation.
+    private fun unwrapFirestore(value: JsonElement): JsonElement {
+        if (!value.isJsonObject) return value
+        val obj = value.asJsonObject
+        obj.get("mapValue")?.takeIf { it.isJsonObject }?.let { map ->
+            return JsonObject().apply {
+                map.asJsonObject.getAsJsonObject("fields")?.entrySet()?.forEach { (key, item) -> add(key, unwrapFirestore(item)) }
+            }
+        }
+        obj.get("arrayValue")?.takeIf { it.isJsonObject }?.let { array ->
+            return JsonArray().apply { array.asJsonObject.getAsJsonArray("values")?.forEach { add(unwrapFirestore(it)) } }
+        }
+        obj.get("integerValue")?.let { return it.asString.toLongOrNull()?.let { n -> com.google.gson.JsonPrimitive(n) } ?: it }
+        for (key in listOf("stringValue", "doubleValue", "booleanValue", "timestampValue", "nullValue")) {
+            obj.get(key)?.let { return if (key == "nullValue") com.google.gson.JsonNull.INSTANCE else it }
+        }
+        return value
+    }
+    private fun firestoreOverlays(fields: JsonObject): String =
+        runCatching { fields.get("overlays")?.let(::unwrapFirestore)?.takeIf { it.isJsonArray }?.toString() }.getOrNull() ?: "[]"
+
     private fun parseMomentJson(mObj: JsonObject): Moment? {
         val id = optString(mObj, "canonical_uid").ifBlank { optString(mObj, "id") }
         val thumb = optString(mObj, "thumbnail_url")
@@ -1449,7 +1470,8 @@ class LocketApiClient(
         return Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
             videoUrl = optString(mObj, "video_url").ifBlank { null },
             caption = optString(mObj, "caption"), timestampSeconds = timestamp,
-            timeAgo = formatMomentAge(timestamp), md5 = optString(mObj, "md5"))
+            timeAgo = formatMomentAge(timestamp), md5 = optString(mObj, "md5"),
+            overlaysJson = mObj.get("overlays")?.takeIf { it.isJsonArray }?.toString() ?: "[]")
     }
 
     suspend fun reactToMoment(momentUid: String, ownerUid: String, reaction: String, intensity: Int = 1): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -2298,7 +2320,8 @@ class LocketApiClient(
         // {update_streak_for_yyyymmdd: today}, nguoc lai khong co field).
         // null = hom nay da ghi nhan roi, khong gui field.
         updateStreakForYyyymmdd: String? = null,
-        expectedUid: String? = null
+        expectedUid: String? = null,
+        overlaysJson: String = "[]"
     ): PostResult = withContext(Dispatchers.IO) {
         val token = getToken()
         if (expectedUid != null && getUid() != expectedUid)
@@ -2314,9 +2337,11 @@ class LocketApiClient(
             val url = "$FUNCTIONS_BASE_URL/postMomentV2"
             val innerData = JsonObject().apply {
                 addProperty("thumbnail_url", thumbnailUrl)
-                addProperty("caption", caption)
+                if (caption.isNotBlank()) addProperty("caption", caption)
                 add("recipients", gson.toJsonTree(recipients))
-                add("overlays", gson.toJsonTree(emptyList<String>()))
+                val overlays = com.google.gson.JsonParser.parseString(overlaysJson).asJsonArray
+                require(overlays.size() <= 1) { "Mỗi khoảnh khắc chỉ gửi một overlay" }
+                if (overlays.size() > 0) add("overlays", overlays)
                 addProperty("md5", md5)
                 if (!videoUrl.isNullOrBlank()) addProperty("video_url", videoUrl)
                 if (!updateStreakForYyyymmdd.isNullOrBlank()) {
