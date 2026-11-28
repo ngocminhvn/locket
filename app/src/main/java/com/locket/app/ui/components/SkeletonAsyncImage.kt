@@ -51,7 +51,7 @@ internal fun SkeletonAsyncImage(
         current
     } else null
     val actualModel = remember(model, snapshot, app) {
-        if (app != null && model is String && snapshot?.requestedUrl == model &&
+        if (app != null && model is String && snapshot != null && snapshot.requestedUrl == model &&
             app.sessionManager.isLoggedIn && snapshot.owner == app.sessionManager.currentUser.uid) {
             snapshot.file ?: if (snapshot.loading) null else model
         } else model
