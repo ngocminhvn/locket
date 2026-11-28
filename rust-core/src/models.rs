@@ -5,6 +5,7 @@ pub struct Moment {
     pub thumbnail_url: String,
     pub video_url: Option<String>,
     pub caption: String,
+    pub overlays_json: String,
     pub timestamp_seconds: i64,
     pub timestamp_nanoseconds: u32,
     pub md5: String,
