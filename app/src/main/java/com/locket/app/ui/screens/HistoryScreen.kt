@@ -73,36 +73,18 @@ fun HistoryScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val allMoments by viewModel.moments.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val moments = remember(allMoments, currentUser.uid) {
-        if (currentUser.uid.isBlank()) emptyList() else allMoments.filter { it.userUid == currentUser.uid }
-    }
+    val todayAndZone = rememberHistoryDate()
+    val (today, zone) = todayAndZone
+    val index = remember(allMoments, currentUser.uid, zone) { HistoryIndex.build(allMoments, currentUser.uid, zone) }
+    val moments = index.moments
     val historyLoading by viewModel.ownHistoryLoading.collectAsState()
     val historyHasMore by viewModel.ownHistoryHasMore.collectAsState()
     val historyError by viewModel.ownHistoryError.collectAsState()
     val coveredThrough by viewModel.ownHistoryCoveredThrough.collectAsState()
     var viewingMoment by remember { mutableStateOf<Moment?>(null) }
 
-    // Group moments by "year-month-day"
-    val momentsByDate = remember(moments) {
-        val map = mutableMapOf<String, MutableList<Moment>>()
-        val cal = Calendar.getInstance()
-        for (m in moments) {
-            cal.timeInMillis = m.timestampSeconds * 1000
-            val y = cal.get(Calendar.YEAR)
-            val month = cal.get(Calendar.MONTH) + 1
-            val d = cal.get(Calendar.DAY_OF_MONTH)
-            val key = "$y-$month-$d"
-            map.getOrPut(key) { mutableListOf() }.add(m)
-        }
-        map
-    }
-
-    val currentMonth = remember { java.time.YearMonth.now() }
-    val oldestOwnMonth = remember(moments) {
-        moments.minOfOrNull { it.timestampSeconds }?.let {
-            java.time.YearMonth.from(java.time.Instant.ofEpochSecond(it).atZone(java.time.ZoneId.systemDefault()))
-        }
-    }
+    val currentMonth = java.time.YearMonth.from(today)
+    val oldestOwnMonth = index.oldestMonth
     val defaultStart = currentMonth.minusMonths(14)
     val firstMonth = minOf(defaultStart, oldestOwnMonth ?: defaultStart)
     val calendarMonths = remember(firstMonth, currentMonth) {
@@ -129,23 +111,24 @@ fun HistoryScreen(
     val oldestVisibleMonth = visibleOldest?.let { key -> calendarMonths.firstOrNull { "${it.year}-${it.month}" == key } }
         ?: calendarMonths.last()
     // Select a real thumbnail belonging to the visible calendar month, never the feed.
-    val historyUrl = remember(oldestVisibleMonth, momentsByDate) {
+    val historyUrl = remember(oldestVisibleMonth, index) {
         (oldestVisibleMonth.daysCount downTo 1).firstNotNullOfOrNull { day ->
-            momentsByDate["${oldestVisibleMonth.year}-${oldestVisibleMonth.month}-$day"]
-                ?.firstOrNull()?.thumbnailUrl?.takeIf { it.isNotBlank() }
+            index.moment(oldestVisibleMonth.year, oldestVisibleMonth.month, day)?.thumbnailUrl?.takeIf { it.isNotBlank() }
         }
     }
     val ambient = rememberAmbientPalette(historyUrl, AmbientMode.HISTORY)
     val topRampColor = ambient.top
     val bottomRampColor = ambient.bottom
     val cellPx = (context.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)
-    LaunchedEffect(oldestVisibleMonth, momentsByDate) {
-        val index = calendarMonths.indexOf(oldestVisibleMonth)
-        val months = calendarMonths.subList((index - 1).coerceAtLeast(0), (index + 2).coerceAtMost(calendarMonths.size))
-        val urls = months.flatMap { month -> (1..month.daysCount).mapNotNull { day -> momentsByDate["${month.year}-${month.month}-$day"]?.firstOrNull()?.thumbnailUrl } }
+    LaunchedEffect(oldestVisibleMonth, index) {
+        val monthIndex = calendarMonths.indexOf(oldestVisibleMonth)
+        val months = calendarMonths.subList((monthIndex - 1).coerceAtLeast(0), (monthIndex + 2).coerceAtMost(calendarMonths.size))
+        val urls = months.flatMap { month ->
+            (1..month.daysCount).mapNotNull { day -> index.moment(month.year, month.month, day)?.thumbnailUrl }
+        }
         viewModel.prefetchThumbnails(urls, cellPx)
     }
-    val neededTs = remember(oldestVisibleMonth) { monthStart(oldestVisibleMonth) }
+    val neededTs = remember(oldestVisibleMonth, zone) { monthStart(oldestVisibleMonth, zone) }
     val needsMore = viewModel.isLoggedIn && historyHasMore && historyError == null &&
         (coveredThrough == null || coveredThrough!! >= neededTs)
     LaunchedEffect(needsMore, historyLoading, historyError, coveredThrough) {
@@ -167,10 +150,11 @@ fun HistoryScreen(
             // Month Cards
             items(calendarMonths, key = { "${it.year}-${it.month}" }) { monthData ->
                 val monthLoading = historyHasMore && historyError == null &&
-                    (coveredThrough == null || coveredThrough!! >= monthStart(monthData))
+                    (coveredThrough == null || coveredThrough!! >= monthStart(monthData, zone))
                 MonthCardDynamic(
                     monthData = monthData,
-                    momentsByDate = momentsByDate,
+                    historyIndex = index,
+                    today = today,
                     isLoading = monthLoading,
                     shimmer = shimmer,
                     onMomentClick = { viewingMoment = it },
@@ -209,7 +193,7 @@ fun HistoryScreen(
                         fontSize = 15.sp
                     )
                     Text(
-                        text = if (historyHasMore && (coveredThrough == null || coveredThrough!! >= java.time.LocalDate.now().minusDays(streak.toLong() + 1).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond())) "🔥 Đang tải" else "🔥 $streak ngày chuỗi",
+                        text = if (historyHasMore && (coveredThrough == null || coveredThrough!! >= today.minusDays(streak.toLong() + 1).atStartOfDay(zone).toEpochSecond())) "🔥 Đang tải" else "🔥 $streak ngày chuỗi",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -272,7 +256,8 @@ data class CalendarMonthData(
 @Composable
 private fun MonthCardDynamic(
     monthData: CalendarMonthData,
-    momentsByDate: Map<String, List<Moment>>,
+    historyIndex: HistoryIndex,
+    today: java.time.LocalDate,
     isLoading: Boolean = false,
     shimmer: Float = 0f,
     onMomentClick: (Moment) -> Unit,
@@ -282,10 +267,8 @@ private fun MonthCardDynamic(
     val headerColor = LocketSheetBg
     val dayColor = LocketJournalDayBg
     val dotColor = LocketSheetSurface
-    val todayCal = Calendar.getInstance()
-    val isCurrentMonth = todayCal.get(Calendar.YEAR) == monthData.year &&
-            (todayCal.get(Calendar.MONTH) + 1) == monthData.month
-    val todayDay = todayCal.get(Calendar.DAY_OF_MONTH)
+    val isCurrentMonth = today.year == monthData.year && today.monthValue == monthData.month
+    val todayDay = today.dayOfMonth
 
     val firstDate = java.time.LocalDate.of(monthData.year, monthData.month, 1)
     val offset = firstDate.dayOfWeek.value - 1
@@ -302,8 +285,8 @@ private fun MonthCardDynamic(
                     repeat(7) { col ->
                         val day = row * 7 + col - offset + 1
                         val valid = day in 1..monthData.daysCount
-                        val ownMoment = if (valid) momentsByDate["${monthData.year}-${monthData.month}-$day"]?.firstOrNull() else null
-                        val today = isCurrentMonth && day == todayDay
+                        val ownMoment = if (valid) historyIndex.moment(monthData.year, monthData.month, day) else null
+                        val isToday = isCurrentMonth && day == todayDay
                         val future = isCurrentMonth && day > todayDay
                         val holiday = when {
                             monthData.month == 10 && day == 31 -> "🎃"
@@ -325,7 +308,7 @@ private fun MonthCardDynamic(
                                     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
                                         .background(androidx.compose.ui.graphics.lerp(dayColor, dotColor, intensity)))
                                 }
-                                today -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                isToday -> Box(Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
                                     .background(LocketGoldBanner).border(2.5.dp, LocketYellow, RoundedCornerShape(10.dp))
                                     .clickable(onClick = onTodayAddClick), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Add, "Thêm khoảnh khắc", tint = LocketYellow, modifier = Modifier.size(24.dp))
@@ -342,8 +325,35 @@ private fun MonthCardDynamic(
     }
 }
 
-private fun monthStart(month: CalendarMonthData): Long =
-    java.time.LocalDate.of(month.year, month.month, 1).atStartOfDay(java.time.ZoneId.systemDefault()).toEpochSecond()
+private fun monthStart(month: CalendarMonthData, zone: java.time.ZoneId): Long =
+    java.time.LocalDate.of(month.year, month.month, 1).atStartOfDay(zone).toEpochSecond()
+
+@Composable
+private fun rememberHistoryDate(): Pair<java.time.LocalDate, java.time.ZoneId> {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun currentDate(): Pair<java.time.LocalDate, java.time.ZoneId> {
+        val zone = java.time.ZoneId.systemDefault()
+        return java.time.LocalDate.now(zone) to zone
+    }
+    var date by remember { mutableStateOf(currentDate()) }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+                date = currentDate()
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_DATE_CHANGED)
+            addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(android.content.Intent.ACTION_TIME_CHANGED)
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            context, receiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return date
+}
 
 @Composable
 private fun MemoryConnector() {
@@ -372,10 +382,9 @@ fun MemoryDetailDialog(
     onPrefetch: (List<Moment>, Int, Int) -> Unit = { _, _, _ -> },
     onDelete: ((Moment, Boolean, () -> Unit) -> Unit)? = null
 ) {
-    val photos = remember(moment.id, historyMoments) {
-        (historyMoments + moment).distinctBy { it.id }.sortedByDescending { it.timestampSeconds }
-    }
-    val pager = rememberPagerState(initialPage = photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0)) { photos.size }
+    val photos = remember(moment, historyMoments) { historyPhotos(historyMoments, moment) }
+    val initialPage = remember(photos, moment.id) { photos.indexOfFirst { it.id == moment.id }.coerceAtLeast(0) }
+    val pager = rememberPagerState(initialPage = initialPage) { photos.size }
     val scope = rememberCoroutineScope()
     val active = photos[pager.settledPage.coerceIn(0, photos.lastIndex)]
     val showViewCount by viewModel.showViewCount.collectAsState()
