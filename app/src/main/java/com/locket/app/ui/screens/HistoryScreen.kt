@@ -128,6 +128,13 @@ fun HistoryScreen(
     val visibleOldest = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
     val oldestVisibleMonth = visibleOldest?.let { key -> calendarMonths.firstOrNull { "${it.year}-${it.month}" == key } }
         ?: calendarMonths.last()
+    val cellPx = (context.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)
+    LaunchedEffect(oldestVisibleMonth, momentsByDate) {
+        val index = calendarMonths.indexOf(oldestVisibleMonth)
+        val months = calendarMonths.subList((index - 1).coerceAtLeast(0), (index + 2).coerceAtMost(calendarMonths.size))
+        val urls = months.flatMap { month -> (1..month.daysCount).mapNotNull { day -> momentsByDate["${month.year}-${month.month}-$day"]?.firstOrNull()?.thumbnailUrl } }
+        viewModel.prefetchThumbnails(urls, cellPx)
+    }
     val neededTs = remember(oldestVisibleMonth) { monthStart(oldestVisibleMonth) }
     val needsMore = viewModel.isLoggedIn && historyHasMore && historyError == null &&
         (coveredThrough == null || coveredThrough!! >= neededTs)
@@ -293,9 +300,11 @@ private fun MonthCardDynamic(
                         Box(Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
                             when {
                                 !valid -> Unit
-                                ownMoment != null -> AsyncImage(ownMoment.thumbnailUrl, null,
+                                ownMoment != null -> AsyncImage(ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                    .data(ownMoment.thumbnailUrl).size((androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics.widthPixels / 8).coerceAtLeast(1)).build(), null,
                                     Modifier.fillMaxSize().clip(RoundedCornerShape(11.dp)).background(Color(0xFF292929))
-                                        .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop)
+                                        .clickable { onMomentClick(ownMoment) }, contentScale = ContentScale.Crop,
+                                    placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303030)))
                                 isLoading && !future -> {
                                     val phase = (shimmer * 2f - (row * 7 + col) / 35f).coerceIn(0f, 1f)
                                     val intensity = (1f - kotlin.math.abs(phase * 2f - 1f)) * 0.55f

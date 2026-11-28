@@ -54,6 +54,12 @@ fun HomeGridScreen(
     val historyError by viewModel.historyError.collectAsState()
     var showFriendFilter by remember { androidx.compose.runtime.mutableStateOf(false) }
     val gridState = rememberLazyGridState()
+    val cellPx = ((androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics.widthPixels - 12 * androidx.compose.ui.platform.LocalDensity.current.density) / 3).toInt().coerceAtLeast(1)
+    LaunchedEffect(gridState, moments, cellPx) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }.collect { last ->
+            viewModel.prefetchThumbnails(moments.drop((last + 1).coerceAtLeast(0)).take(9).map { it.thumbnailUrl }, cellPx)
+        }
+    }
 
     // Tai them lich su khi cuon gan het luoi (con ~9 anh = 3 hang cuoi).
     // Chi goi khi chua het, khong dang tai, khong loi; ViewModel tu chan
@@ -115,10 +121,11 @@ fun HomeGridScreen(
                             .aspectRatio(1.0f)
                             .clip(RoundedCornerShape(18.dp))
                             .background(Color(0xFF202022))
-                            .clickable { onMomentClick(index) }
+                            .clickable { viewModel.prefetchThumbnails(listOf(moment.thumbnailUrl)); onMomentClick(index) }
                     ) {
                         AsyncImage(
-                            model = moment.thumbnailUrl,
+                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(moment.thumbnailUrl).size(cellPx).build(),
+                            placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFF303032)),
                             contentDescription = moment.caption,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop

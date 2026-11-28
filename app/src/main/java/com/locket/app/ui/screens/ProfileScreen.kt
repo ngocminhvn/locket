@@ -136,6 +136,7 @@ fun ProfileScreen(
     val user by viewModel.currentUser.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
     val blockedUsers by viewModel.blockedUsers.collectAsState()
+    LaunchedEffect(user.uid) { if (user.uid.isNotBlank()) viewModel.refreshProfile() }
 
     Box(
         modifier = Modifier

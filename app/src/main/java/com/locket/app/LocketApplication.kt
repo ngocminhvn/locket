@@ -42,9 +42,8 @@ class LocketApplication : Application(), ImageLoaderFactory {
 
     /**
      * Coil dung chung 1 ImageLoader cho ca app (ke ca widget) voi disk
-     * cache ro rang 250 MB, ton trong Cache-Control cua server.
-     * (Coil 2 khong co API respectCacheHeaders tren DiskCache.Builder —
-     * chi co o Coil 3 — nen khong goi o day.)
+     * cache ro rang 250 MB. Header behavior follows Coil 2 defaults;
+     * cache-control and token rotation have not been measured on device.
      */
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)

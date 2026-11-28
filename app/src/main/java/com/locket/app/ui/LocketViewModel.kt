@@ -173,7 +173,7 @@ class LocketViewModel(
     // URL thumbnail da enqueue prefetch trong phien (tranh goi trung).
     // Chi truy cap tu main thread (LaunchedEffect + viewModelScope mac dinh
     // chay tren Main) nen khong can dong bo them.
-    private val prefetchedThumbnails = mutableSetOf<String>()
+    private val prefetchedThumbnails = linkedSetOf<String>()
     private val videoPrefetchJobs = mutableMapOf<String, Job>()
     private val videoPrefetched = linkedSetOf<String>()
 
@@ -273,21 +273,17 @@ class LocketViewModel(
      * prefetch thumbnail, KHONG tai file video. AsyncImage sau do doc tu
      * cache nen hien ngay (neu anh da kip tai ve truoc).
      */
-    fun prefetchThumbnails(urls: List<String>) {
-        val fresh = urls.distinct().filter { it.isNotBlank() && prefetchedThumbnails.add(it) }
-        if (prefetchedThumbnails.size > 300) {
-            prefetchedThumbnails.clear()
-            prefetchedThumbnails.addAll(fresh)
-        }
-        if (fresh.isEmpty()) return
+    fun prefetchThumbnails(urls: List<String>, sizePx: Int = LocketApplication.instance.resources.displayMetrics.widthPixels) {
+        val size = sizePx.coerceAtLeast(1)
         val app = LocketApplication.instance
         val loader = app.imageLoader
-        for (url in fresh) {
-            loader.enqueue(ImageRequest.Builder(app).data(url)
-                .size(app.resources.displayMetrics.widthPixels)
-                .listener(onError = { _, _ ->
-                    viewModelScope.launch { prefetchedThumbnails.remove(url) }
-                }).build())
+        for (url in urls.distinct().filter { it.isNotBlank() }) {
+            val key = "$size:$url"
+            if (prefetchedThumbnails.remove(key)) { prefetchedThumbnails.add(key); continue }
+            prefetchedThumbnails.add(key)
+            while (prefetchedThumbnails.size > 300) prefetchedThumbnails.remove(prefetchedThumbnails.first())
+            loader.enqueue(ImageRequest.Builder(app).data(url).size(size)
+                .listener(onError = { _, _ -> viewModelScope.launch { prefetchedThumbnails.remove(key) } }).build())
         }
     }
 
@@ -676,6 +672,7 @@ class LocketViewModel(
     private suspend fun publishFriends(account: String, friends: List<Friend>) {
         if (!activeAccount(account)) return
         apiClient.seedUserNames(friends)
+        prefetchThumbnails(friends.map { it.avatarUrl }, 128)
         if (friends != _friends.value) {
             cache.saveFriends(friends)
             if (!activeAccount(account)) return
@@ -710,11 +707,13 @@ class LocketViewModel(
                             val existing = _friends.value.associateBy { it.uid }
                             val updated = if (delta.ready) linkedMapOf<String, Friend>() else LinkedHashMap(existing)
                             delta.deletedIds.forEach { updated.remove(it) }
-                            val missing = delta.upserts.filter { it !in existing }
+                            val missing = apiClient.staleUserNames(delta.upserts)
                             val names = if (missing.isEmpty()) emptyMap() else apiClient.resolveUserNames(missing)
                             delta.upserts.forEach { uid ->
-                                updated[uid] = existing[uid] ?: names[uid]?.let { Friend(uid, uid, it.first, it.second) }
-                                    ?: Friend(uid, uid, uid)
+                                updated[uid] = names[uid]?.let { name ->
+                                    existing[uid]?.copy(displayName = name.first, avatarUrl = name.second)
+                                        ?: Friend(uid, uid, name.first, name.second)
+                                } ?: existing[uid] ?: Friend(uid, uid, uid)
                             }
                             publishFriends(account, updated.values.toList())
                             if (delta.ready) { retry = 1_000L; friendsLive = true }

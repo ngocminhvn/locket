@@ -82,18 +82,40 @@ class LocketApiClient(
     private val nameResolveLock = kotlinx.coroutines.sync.Mutex()
     private val tokenRefreshLock = kotlinx.coroutines.sync.Mutex()
     private fun nameKey(uid: String) = "${getUid().orEmpty()}:$uid"
-    private fun nameNow() = android.os.SystemClock.elapsedRealtime()
+    private fun nameNow() = System.currentTimeMillis()
+    private fun storedName(uid: String): CachedName? {
+        val account = getUid().orEmpty()
+        if (account.isBlank()) return null
+        return runCatching {
+            val raw = com.locket.app.LocketApplication.instance.sessionManager.readAux(account, "profile:$uid") ?: return null
+            val obj = org.json.JSONObject(raw)
+            CachedName(obj.getString("name") to obj.getString("avatar"), obj.getLong("expires"))
+        }.getOrNull()
+    }
+    private fun cacheName(uid: String, pair: Pair<String, String>, account: String? = getUid()) {
+        if (account.isNullOrBlank() || getUid() != account || pair.first.isBlank() || pair.first == uid) return
+        val entry = CachedName(pair, nameNow() + 86_400_000L)
+        nameCache["$account:$uid"] = entry
+        runCatching {
+            com.locket.app.LocketApplication.instance.sessionManager.writeAux(account, "profile:$uid",
+                org.json.JSONObject().put("name", pair.first).put("avatar", pair.second).put("expires", entry.expiresAt).toString())
+        }
+    }
+    private fun cachedName(uid: String): CachedName? = nameCache[nameKey(uid)] ?: storedName(uid)?.also {
+        nameCache.putIfAbsent(nameKey(uid), it)
+    }
     fun seedUserNames(friends: List<Friend>, fresh: Boolean = false) {
         for (friend in friends) {
             if (friend.uid.isBlank() || friend.displayName.isBlank() || friend.displayName == friend.uid) continue
             val key = nameKey(friend.uid)
-            val entry = CachedName(friend.displayName to friend.avatarUrl, nameNow() + if (fresh) 86_400_000L else 0L)
-            if (fresh) nameCache[key] = entry else nameCache.putIfAbsent(key, entry)
+            if (fresh) cacheName(friend.uid, friend.displayName to friend.avatarUrl)
+            else nameCache.putIfAbsent(key, storedName(friend.uid) ?: CachedName(friend.displayName to friend.avatarUrl, 0L))
         }
     }
     fun clearUserNameCache() = nameCache.clear()
+    fun staleUserNames(uids: List<String>): List<String> = uids.distinct().filter { cachedName(it)?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
     private fun cachedUserNames(uids: List<String>): Map<String, Pair<String, String>> =
-        uids.distinct().mapNotNull { uid -> nameCache[nameKey(uid)]?.value?.let { uid to it } }.toMap()
+        uids.distinct().mapNotNull { uid -> cachedName(uid)?.value?.let { uid to it } }.toMap()
 
 
     companion object {
@@ -778,7 +800,7 @@ class LocketApiClient(
             val reusable = friendUids.mapNotNull { uid ->
                 cachedByUid[uid]?.takeIf {
                     it.displayName.isNotBlank() && it.displayName != uid &&
-                        nameCache[nameKey(uid)]?.expiresAt?.let { expiry -> expiry > nameNow() } == true
+                        cachedName(uid)?.expiresAt?.let { expiry -> expiry > nameNow() } == true
                 }
             }
             val friendsList = reusable.toMutableList()
@@ -840,15 +862,14 @@ class LocketApiClient(
 
             // 2. For any friend not returned by fetchUsers, fetch document users/{uid} individually
             val missingUids = friendUids.filter { uid -> friendsList.none { it.uid == uid } }
-            friendsList.addAll(kotlinx.coroutines.coroutineScope {
-                missingUids.chunked(4).flatMap { batch ->
-                    batch.map { uid -> async {
-                        fetchUserProfileFromDoc(uid) ?: cachedByUid[uid] ?: Friend(uid, uid, uid)
-                    } }.map { it.await() }
-                }
-            })
-
             if (getUid() == userUid) seedUserNames(friendsList.filterNot { it.uid in reusedIds }, fresh = true)
+            val fallback = kotlinx.coroutines.coroutineScope {
+                missingUids.chunked(4).flatMap { batch ->
+                    batch.map { uid -> async { uid to fetchUserProfileFromDoc(uid) } }.map { it.await() }
+                }
+            }
+            if (getUid() == userUid) seedUserNames(fallback.mapNotNull { it.second }, fresh = true)
+            friendsList.addAll(fallback.map { (uid, friend) -> friend ?: cachedByUid[uid] ?: Friend(uid, uid, uid) })
             Result.success(friendsList.map { friend ->
                 val previous = cachedByUid[friend.uid]
                 if (previous != null && (friend.displayName.isBlank() || friend.displayName == friend.uid))
@@ -873,7 +894,7 @@ class LocketApiClient(
         nameResolveLock.withLock {
         val account = getUid()
         val result = cachedUserNames(distinct).toMutableMap()
-        val missing = distinct.filter { nameCache[nameKey(it)]?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
+        val missing = distinct.filter { cachedName(it)?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
         // fetchUsers chi nhan toi da 20 uid/call (21+ server tra "Malformed request", da verify live)
         // -> chia nho moi batch 10 uid cho an toan.
         for (batch in missing.chunked(20)) {
@@ -910,7 +931,7 @@ class LocketApiClient(
                         if (displayName != uid) {
                             val pair = displayName to avatar
                             result[uid] = pair
-                            nameCache[nameKey(uid)] = CachedName(pair, nameNow() + 86_400_000L)
+                            cacheName(uid, pair, account)
                         }
                     }
                 }
@@ -919,7 +940,7 @@ class LocketApiClient(
                 // Keep known cached names if refresh fails.
             }
         }
-        val unresolved = missing.filter { nameCache[nameKey(it)]?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
+        val unresolved = missing.filter { cachedName(it)?.expiresAt?.let { expiry -> expiry > nameNow() } != true }
         val fallback = kotlinx.coroutines.coroutineScope {
             unresolved.chunked(4).flatMap { batch -> batch.map { uid -> async { fetchUserProfileFromDoc(uid) } }.mapNotNull { it.await() } }
         }
@@ -927,7 +948,7 @@ class LocketApiClient(
         fallback.filter { it.displayName != it.uid && it.displayName.isNotBlank() }.forEach { friend ->
             val pair = friend.displayName to friend.avatarUrl
             result[friend.uid] = pair
-            nameCache[nameKey(friend.uid)] = CachedName(pair, nameNow() + 86_400_000L)
+            cacheName(friend.uid, pair, account)
         }
         result
         }
@@ -987,7 +1008,9 @@ class LocketApiClient(
                     addProperty("username", username)
                 })
             }
-            val resp = callEndpoint("getUserByUsername", payload)
+            val bytes = callEndpointBytes("getUserByUsername", payload, propagateFailure = true, cancellable = true)
+            val root = bytes?.let { gson.fromJson(it.toString(Charsets.UTF_8), JsonObject::class.java) }
+            val resp = root?.get("result")?.takeIf { it.isJsonObject }?.asJsonObject ?: root
             if (resp != null && resp.get("status")?.asInt == 200) {
                 val data = resp.getAsJsonObject("data")
                 val user = User(
@@ -1000,7 +1023,8 @@ class LocketApiClient(
             } else {
                 Result.success(null)
             }
-        } catch (e: Exception) {
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
             Result.failure(e)
         }
     }
@@ -2355,7 +2379,7 @@ class LocketApiClient(
     }
 
     /** Transport only: keep callable response bytes intact for one Rust parse. */
-    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject, propagateFailure: Boolean = false): ByteArray? {
+    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject, propagateFailure: Boolean = false, cancellable: Boolean = false): ByteArray? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
         val body = payload.toString().toRequestBody("application/json".toMediaType())
         fun buildRequest(token: String?): Request {
@@ -2367,6 +2391,13 @@ class LocketApiClient(
             return builder.build()
         }
         return try {
+            if (cancellable) {
+                val token = getToken()
+                var reply = awaitHttpBytes(buildRequest(token))
+                if (reply.first == 401 && refreshIdToken(token)) reply = awaitHttpBytes(buildRequest(getToken()))
+                if (reply.first !in 200..299) error("Máy chủ trả HTTP ${reply.first}")
+                return reply.second
+            }
             withContext(Dispatchers.IO) {
                 val usedToken = getToken()
                 var resp = client.newCall(buildRequest(usedToken)).execute()
@@ -2395,6 +2426,21 @@ class LocketApiClient(
             null
         }
     }
+
+    private suspend fun awaitHttpBytes(request: Request): Pair<Int, ByteArray> =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    continuation.resumeWith(Result.failure(e))
+                }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    val result = runCatching { response.use { it.code to (it.body?.bytes() ?: byteArrayOf()) } }
+                    continuation.resumeWith(result)
+                }
+            })
+        }
 
     private fun extractString(fields: JsonObject?, fieldName: String): String {
         val v = fields?.getAsJsonObject(fieldName)?.get("stringValue") ?: return ""
