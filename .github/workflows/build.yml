@@ -7,6 +7,10 @@ on:
     paths: ['.github/manual-build-request.txt']
   workflow_dispatch:
     inputs:
+      verify_only:
+        description: 'Run tests, compile Kotlin and verify native ABIs without publishing'
+        type: boolean
+        default: false
       release:
         description: 'Release (R) — unchecked builds Dev'
         type: boolean
@@ -26,7 +30,7 @@ concurrency:
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[manual build request]'))
-    name: Build signed APK
+    name: Test or build Android
     runs-on: ubuntu-latest
     outputs:
       pages_enabled: ${{ steps.pages_status.outputs.enabled }}
@@ -75,7 +79,12 @@ jobs:
           cargo test --manifest-path rust-core/Cargo.toml --locked
           ./scripts/build-rust-android.sh
 
+      - name: Verify Kotlin and run unit tests
+        if: inputs.verify_only
+        run: gradle testDebugUnitTest compileDebugKotlin --stacktrace --no-daemon
+
       - name: Build, sign, verify and package APK
+        if: ${{ !inputs.verify_only }}
         env:
           LOCKET_DEBUG_KEYSTORE_B64: ${{ secrets.LOCKET_DEBUG_KEYSTORE_B64 }}
           # Public certificate digest from successful build 43 (run 46097105930).
@@ -133,6 +142,7 @@ jobs:
           python3 scripts/prepare-pages-update.py
 
       - name: Upload APK Artifact
+        if: ${{ !inputs.verify_only }}
         uses: actions/upload-artifact@v4
         with:
           name: locket-signed-apk-${{ env.LOCKET_CHANNEL }}
@@ -145,7 +155,7 @@ jobs:
 
       - name: Prepare GitHub Pages update
         id: pages_status
-        if: github.ref == 'refs/heads/main'
+        if: ${{ !inputs.verify_only && github.ref == 'refs/heads/main' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
