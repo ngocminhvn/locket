@@ -1190,13 +1190,12 @@ class LocketViewModel(
 
     private suspend fun uploadQueuedMoment(item: StoredMomentUpload) {
         val webp = item.video == null
-        val bytes = withContext(Dispatchers.IO) { item.thumbnail.readBytes() }
         check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
         if (item.thumbnailUrl == null) {
-            val upload = apiClient.uploadMomentThumbnail(bytes, webp = webp, expectedUid = item.owner)
+            val upload = apiClient.uploadMomentThumbnail(item.thumbnail, webp = webp, expectedUid = item.owner)
             check(upload.success && !upload.downloadUrl.isNullOrBlank()) { upload.errorMessage ?: "Lỗi tải ảnh" }
             item.thumbnailUrl = upload.downloadUrl
-            item.md5 = upload.md5 ?: apiClient.computeMd5(bytes)
+            item.md5 = checkNotNull(upload.md5)
             withContext(Dispatchers.IO) { uploadStore.save(item) }
         }
         if (item.video != null && item.videoUrl == null) {

@@ -1,6 +1,5 @@
 package com.locket.app.api
 
-import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
@@ -27,7 +26,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.net.URLEncoder
-import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -2207,31 +2205,19 @@ class LocketApiClient(
     // 5. UPLOAD & POST MOMENT
     // ==========================================
 
-    fun computeMd5(bytes: ByteArray, isCameraRoll: Boolean = false): String {
-        var base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        if (isCameraRoll) {
-            base64 += "_${System.currentTimeMillis()}"
-        }
-        val md = MessageDigest.getInstance("MD5")
-        val digest = md.digest(base64.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
     suspend fun uploadMomentThumbnail(
-        imageBytes: ByteArray,
-        isCameraRoll: Boolean = false,
-        webp: Boolean = false,
-        expectedUid: String? = null
+        file: File,
+        webp: Boolean,
+        expectedUid: String
     ): UploadResult = withContext(Dispatchers.IO) {
         val token = getToken()
-        val uid = getUid() ?: "anonymous"
-        if (expectedUid != null && uid != expectedUid)
+        val uid = getUid()
+        if (uid != expectedUid)
             return@withContext UploadResult(success = false, errorMessage = "Phiên đăng nhập đã thay đổi")
         val randomId = generateRandomId(20)
         val extension = if (webp) "webp" else "jpg"
         val mime = if (webp) "image/webp" else "image/jpeg"
         val encodedPath = "users%2F$uid%2Fmoments%2Fthumbnails%2F$randomId.$extension"
-        val md5Hex = computeMd5(imageBytes, isCameraRoll)
 
         if (token.isNullOrBlank()) {
             return@withContext UploadResult(
@@ -2241,8 +2227,9 @@ class LocketApiClient(
         }
 
         try {
+            val md5Hex = file.inputStream().use(::thumbnailMd5)
             val uploadUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o?uploadType=media&name=$encodedPath"
-            val body = imageBytes.toRequestBody(mime.toMediaType())
+            val body = file.asRequestBody(mime.toMediaType())
             val request = Request.Builder()
                 .url(uploadUrl)
                 .addHeader("Authorization", "Bearer $token")
@@ -2251,23 +2238,23 @@ class LocketApiClient(
                 .post(body)
                 .build()
 
-            val response = client.newCall(request).execute()
-            val respStr = response.body?.string() ?: ""
-
-            if (response.isSuccessful) {
-                val json = gson.fromJson(respStr, JsonObject::class.java)
-                val downloadTokens = json.get("downloadTokens")?.asString ?: ""
-                val publicUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o/$encodedPath?alt=media&token=$downloadTokens"
-                UploadResult(
-                    success = true,
-                    downloadUrl = publicUrl,
-                    md5 = md5Hex
-                )
-            } else {
-                UploadResult(
-                    success = false,
-                    errorMessage = "Upload Storage thất bại (HTTP ${response.code}): $respStr"
-                )
+            client.newCall(request).execute().use { response ->
+                val respStr = response.body?.string() ?: ""
+                if (response.isSuccessful) {
+                    val json = gson.fromJson(respStr, JsonObject::class.java)
+                    val downloadTokens = json.get("downloadTokens")?.asString ?: ""
+                    val publicUrl = "https://firebasestorage.googleapis.com/v0/b/$STORAGE_BUCKET/o/$encodedPath?alt=media&token=$downloadTokens"
+                    UploadResult(
+                        success = true,
+                        downloadUrl = publicUrl,
+                        md5 = md5Hex
+                    )
+                } else {
+                    UploadResult(
+                        success = false,
+                        errorMessage = "Upload Storage thất bại (HTTP ${response.code}): $respStr"
+                    )
+                }
             }
         } catch (e: Exception) {
             UploadResult(success = false, errorMessage = e.localizedMessage ?: "Lỗi tải ảnh lên Storage")
