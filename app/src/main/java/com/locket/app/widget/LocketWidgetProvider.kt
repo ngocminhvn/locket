@@ -12,6 +12,17 @@ class LocketWidgetProvider : AppWidgetProvider() {
         LocketWidgetUpdater.updateAll(context)
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: android.os.Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        LocketWidgetUpdater.updateAll(context)
+        WidgetRefreshJob.schedule(context, immediate = true)
+    }
+
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         val session = SessionManager(context)
         val owner = session.currentUser.uid

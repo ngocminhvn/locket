@@ -83,7 +83,12 @@ object LocketWidgetUpdater {
                     moment.copy(userName = f.displayName.ifBlank { f.username }.ifBlank { moment.userName })
                 } ?: moment
             }
-            val views = buildViews(context, named)
+            val options = manager.getAppWidgetOptions(id)
+            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 150).takeIf { it > 0 } ?: 150
+            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 150).takeIf { it > 0 } ?: 150
+            val compact = width < 210 || height < 210
+            val avatarUrl = named?.let { friends[it.userUid]?.avatarUrl.orEmpty().ifBlank { it.userAvatarUrl } }.orEmpty()
+            val views = buildViews(context, named, compact, width, avatarUrl)
             if (session.currentUser.uid.takeIf { session.isLoggedIn }.orEmpty() != owner ||
                 session.readAux(owner, "widget_friend:$id").orEmpty() != selection ||
                 id !in manager.getAppWidgetIds(ComponentName(context, LocketWidgetProvider::class.java))) continue
@@ -92,7 +97,7 @@ object LocketWidgetUpdater {
         success
     }
 
-    private suspend fun buildViews(context: Context, latest: Moment?): RemoteViews {
+    private suspend fun buildViews(context: Context, latest: Moment?, compact: Boolean, width: Int, avatarUrl: String): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_locket)
         val frame = com.locket.app.ui.screens.AppearancePrefs.frameResource(context)
         views.setViewVisibility(R.id.widget_custom_frame, if (frame == 0) View.GONE else View.VISIBLE)
@@ -114,30 +119,46 @@ object LocketWidgetUpdater {
             views.setViewVisibility(R.id.widget_image, View.GONE)
             views.setViewVisibility(R.id.widget_scrim, View.GONE)
             views.setViewVisibility(R.id.widget_info, View.GONE)
+            views.setViewVisibility(R.id.widget_compact_info, View.GONE)
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
             return views
         }
 
         views.setViewVisibility(R.id.widget_image, View.VISIBLE)
         views.setViewVisibility(R.id.widget_scrim, View.VISIBLE)
-        views.setViewVisibility(R.id.widget_info, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_info, if (compact) View.GONE else View.VISIBLE)
+        views.setViewVisibility(R.id.widget_compact_info, if (compact) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.widget_empty, View.GONE)
 
-        // Ten that; chua resolve duoc ten thi hien uid (dung quy uoc app goc)
-        views.setTextViewText(R.id.widget_name, latest.userName.ifBlank { latest.userUid })
-        views.setTextViewText(R.id.widget_time, latest.timeAgo)
+        val name = latest.userName.ifBlank { latest.userUid }
         val caption = com.locket.app.model.CaptionOverlays.label(latest)
-        val overlay = WidgetCaptionRenderer.render(context, latest)
-        views.setViewVisibility(R.id.widget_overlay, if (overlay != null) View.VISIBLE else View.GONE)
-        if (overlay != null) {
-            views.setImageViewBitmap(R.id.widget_overlay, overlay)
-            views.setContentDescription(R.id.widget_overlay, caption)
-            views.setViewVisibility(R.id.widget_caption, View.GONE)
-        } else if (caption.isNotBlank()) {
-            views.setViewVisibility(R.id.widget_caption, View.VISIBLE)
-            views.setTextViewText(R.id.widget_caption, caption)
+        if (compact) {
+            val avatar = loadBitmap(context, avatarUrl, 96)?.let(::roundAvatar)
+            views.setViewVisibility(R.id.widget_avatar, if (avatar != null) View.VISIBLE else View.GONE)
+            if (avatar != null) views.setImageViewBitmap(R.id.widget_avatar, avatar)
+            val available = (width - if (avatar != null) 60 else 20).coerceAtLeast(36)
+            val overlay = if (latest.overlay?.kind == "standard") null
+                else WidgetCaptionRenderer.render(context, latest, available.toFloat(), compact = true)
+            views.setViewVisibility(R.id.widget_compact_overlay, if (overlay != null) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_compact_caption, if (overlay == null) View.VISIBLE else View.GONE)
+            if (overlay != null) {
+                views.setImageViewBitmap(R.id.widget_compact_overlay, overlay)
+                views.setContentDescription(R.id.widget_compact_overlay, caption)
+            } else {
+                views.setTextViewText(R.id.widget_compact_caption, caption.ifBlank { name })
+            }
         } else {
-            views.setViewVisibility(R.id.widget_caption, View.GONE)
+            views.setTextViewText(R.id.widget_name, name)
+            views.setTextViewText(R.id.widget_time, latest.timeAgo)
+            val overlay = WidgetCaptionRenderer.render(context, latest, (width - 24).coerceAtLeast(36).toFloat())
+            views.setViewVisibility(R.id.widget_overlay, if (overlay != null) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_caption, if (overlay == null && caption.isNotBlank()) View.VISIBLE else View.GONE)
+            if (overlay != null) {
+                views.setImageViewBitmap(R.id.widget_overlay, overlay)
+                views.setContentDescription(R.id.widget_overlay, caption)
+            } else {
+                views.setTextViewText(R.id.widget_caption, caption)
+            }
         }
 
         val bitmap = loadBitmap(context, latest.thumbnailUrl)
@@ -149,7 +170,20 @@ object LocketWidgetUpdater {
         return views
     }
 
-    private suspend fun loadBitmap(context: Context, url: String): Bitmap? {
+    private fun roundAvatar(source: Bitmap): Bitmap {
+        val size = minOf(source.width, source.height)
+        val result = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(result)
+        val path = android.graphics.Path().apply {
+            addCircle(size / 2f, size / 2f, size / 2f, android.graphics.Path.Direction.CW)
+        }
+        canvas.clipPath(path)
+        canvas.drawBitmap(source, (size - source.width) / 2f, (size - source.height) / 2f,
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+        return result
+    }
+
+    private suspend fun loadBitmap(context: Context, url: String, size: Int = 900): Bitmap? {
         if (url.isBlank()) return null
         return try {
             // Dung ImageLoader singleton cua app (LocketApplication):
@@ -158,7 +192,7 @@ object LocketWidgetUpdater {
             val request = ImageRequest.Builder(context)
                 .data(url)
                 .allowHardware(false)
-                .size(900, 900)
+                .size(size, size)
                 .build()
             val result = loader.execute(request)
             (result.drawable as? BitmapDrawable)?.bitmap

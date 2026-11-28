@@ -156,6 +156,7 @@ fun ChatDetailScreen(
     }
     val listState = rememberLazyListState()
     val newestFirst = remember(messages) { messages.asReversed() }
+    val lastSentId = remember(newestFirst) { newestFirst.firstOrNull { it.isMe }?.id }
     val repeatedMomentCards = remember(messages) { repeatedChatMomentCards(messages) }
     val currentMessages by rememberUpdatedState(messages)
 
@@ -307,124 +308,126 @@ fun ChatDetailScreen(
                         }
                     }
                     items(newestFirst, key = { it.id }) { msg ->
-                        val timeStr = formatTime(msg.createdAtMs)
-                        if (!msg.thumbnailUrl.isNullOrBlank() && msg.id !in repeatedMomentCards) {
-                            // Shared Moment Card in Chat (tin kem moment that)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                if (timeStr.isNotBlank()) {
-                                    Text(
-                                        text = timeStr,
-                                        color = Color.White.copy(alpha = 0.42f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-                                }
-                                ReactionAnchor(
-                                    reactions = if (msg.text.isBlank()) msg.reactions else emptyList(),
-                                    badgeAtStart = false,
-                                    insetBadge = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onReactionClick = { openMessageMenu(msg) }
+                        Column(Modifier.fillMaxWidth()) {
+                            val timeStr = formatTime(msg.createdAtMs)
+                            if (!msg.thumbnailUrl.isNullOrBlank() && msg.id !in repeatedMomentCards) {
+                                // Shared Moment Card in Chat (tin kem moment that)
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .aspectRatio(1.0f)
-                                            .onGloballyPositioned { if (msg.text.isBlank()) messageBounds[msg.id] = it.boundsInRoot() }
-                                            .clip(RoundedCornerShape(42.dp))
-                                            .background(LocketSheetSurface)
-                                            .combinedClickable(
-                                                onClick = {},
-                                                onLongClick = { openMessageMenu(msg) }
-                                            )
-                                    ) {
-                                        SkeletonAsyncImage(
-                                            model = msg.thumbnailUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
+                                    if (timeStr.isNotBlank()) {
+                                        Text(
+                                            text = timeStr,
+                                            color = Color.White.copy(alpha = 0.42f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(bottom = 8.dp)
                                         )
-
-                                        val attachment = remember(attachmentIndex, msg.replyMomentUid, msg.thumbnailUrl) {
-                                            attachmentIndex.resolve(msg.replyMomentUid, msg.thumbnailUrl)
-                                        }
-                                        val linkedMoment = attachment.moment
-                                        val ownerUid = attachment.ownerUid
-                                        val ownerFriend = ownerUid?.let { friendsByUid[it] }
-                                        val ownerName = when {
-                                            ownerUid != null && ownerUid == myUid -> "Bạn"
-                                            ownerFriend != null -> ownerFriend.displayName.ifBlank { ownerFriend.username }
-                                                .ifBlank { linkedMoment?.userName.orEmpty() }
-                                                .ifBlank { "Không rõ tên" }
-                                            else -> linkedMoment?.userName.orEmpty().ifBlank { "Không rõ người đăng" }
-                                        }
-                                        val ownerAvatar = when {
-                                            ownerUid != null && ownerUid == myUid -> currentUser.profilePictureUrl
-                                                .ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
-                                            ownerFriend != null -> ownerFriend.avatarUrl.ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
-                                            else -> linkedMoment?.userAvatarUrl.orEmpty()
-                                        }
-                                        // The sender of a reply and the author of its attached photo are different roles.
-                                        Row(
+                                    }
+                                    ReactionAnchor(
+                                        reactions = if (msg.text.isBlank()) msg.reactions else emptyList(),
+                                        badgeAtStart = false,
+                                        insetBadge = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onReactionClick = { openMessageMenu(msg) }
+                                    ) {
+                                        Box(
                                             modifier = Modifier
-                                                .padding(24.dp)
-                                                .clip(CircleShape).background(Color.Black.copy(alpha = 0.46f))
-                                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                                .align(Alignment.TopStart),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                .fillMaxWidth()
+                                                .aspectRatio(1.0f)
+                                                .onGloballyPositioned { if (msg.text.isBlank()) messageBounds[msg.id] = it.boundsInRoot() }
+                                                .clip(RoundedCornerShape(42.dp))
+                                                .background(LocketSheetSurface)
+                                                .combinedClickable(
+                                                    onClick = {},
+                                                    onLongClick = { openMessageMenu(msg) }
+                                                )
                                         ) {
-                                            ChatAvatar(ownerAvatar, 24)
-                                            Text(
-                                                text = ownerName,
-                                                color = Color.White,
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.weight(1f, fill = false),
-                                                maxLines = 1,
-                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            SkeletonAsyncImage(
+                                                model = msg.thumbnailUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
                                             )
-                                            // Do not pass the reply timestamp off as the photo's creation date.
-                                            val dateLabel = linkedMoment?.timestampSeconds?.let(::chatMomentDate).orEmpty()
-                                            if (dateLabel.isNotBlank()) {
-                                                Text(dateLabel, color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+
+                                            val attachment = remember(attachmentIndex, msg.replyMomentUid, msg.thumbnailUrl) {
+                                                attachmentIndex.resolve(msg.replyMomentUid, msg.thumbnailUrl)
+                                            }
+                                            val linkedMoment = attachment.moment
+                                            val ownerUid = attachment.ownerUid
+                                            val ownerFriend = ownerUid?.let { friendsByUid[it] }
+                                            val ownerName = when {
+                                                ownerUid != null && ownerUid == myUid -> "Bạn"
+                                                ownerFriend != null -> ownerFriend.displayName.ifBlank { ownerFriend.username }
+                                                    .ifBlank { linkedMoment?.userName.orEmpty() }
+                                                    .ifBlank { "Không rõ tên" }
+                                                else -> linkedMoment?.userName.orEmpty().ifBlank { "Không rõ người đăng" }
+                                            }
+                                            val ownerAvatar = when {
+                                                ownerUid != null && ownerUid == myUid -> currentUser.profilePictureUrl
+                                                    .ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
+                                                ownerFriend != null -> ownerFriend.avatarUrl.ifBlank { linkedMoment?.userAvatarUrl.orEmpty() }
+                                                else -> linkedMoment?.userAvatarUrl.orEmpty()
+                                            }
+                                            // The sender of a reply and the author of its attached photo are different roles.
+                                            Row(
+                                                modifier = Modifier
+                                                    .padding(24.dp)
+                                                    .clip(CircleShape).background(Color.Black.copy(alpha = 0.46f))
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                                    .align(Alignment.TopStart),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                ChatAvatar(ownerAvatar, 24)
+                                                Text(
+                                                    text = ownerName,
+                                                    color = Color.White,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                    maxLines = 1,
+                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                )
+                                                // Do not pass the reply timestamp off as the photo's creation date.
+                                                val dateLabel = linkedMoment?.timestampSeconds?.let(::chatMomentDate).orEmpty()
+                                                if (dateLabel.isNotBlank()) {
+                                                    Text(dateLabel, color = Color.White.copy(alpha = 0.62f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            linkedMoment?.let {
+                                                MomentCaption(it, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
                                             }
                                         }
-                                        linkedMoment?.let {
-                                            MomentCaption(it, Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 20.dp))
-                                        }
+                                    }
+                                    // Text kem theo moment (neu co)
+                                    if (msg.text.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor, onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                                     }
                                 }
-                                // Text kem theo moment (neu co)
-                                if (msg.text.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor, onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
+                            } else if (msg.isMe) {
+                                MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
+                                    onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    ChatAvatar(friend.avatarUrl, 32)
+                                    MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
+                                        modifier = Modifier.weight(1f), onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
                                 }
                             }
-                        } else if (msg.isMe) {
-                            MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
-                                onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Bottom,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                ChatAvatar(friend.avatarUrl, 32)
-                                MessageBubble(msg = msg, bubbleColor = bubbleColor, sentColor = sentColor,
-                                    modifier = Modifier.weight(1f), onBounds = { messageBounds[msg.id] = it }, onLongClick = { openMessageMenu(msg) })
+                            if (msg.isMe && msg.id == lastSentId && pendingHere.isEmpty()) {
+                                Text("Đã gửi", color = LocketTextDim, fontSize = 11.sp,
+                                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp, top = 3.dp),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End)
                             }
-                        }
-                        if (msg.isMe && msg.id == newestFirst.firstOrNull()?.id && pendingHere.isEmpty()) {
-                            Text("Đã gửi", color = LocketTextDim, fontSize = 11.sp,
-                                modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.End)
                         }
                     }
                     // Dang tai them tin cu: vong loading nho o dau danh sach

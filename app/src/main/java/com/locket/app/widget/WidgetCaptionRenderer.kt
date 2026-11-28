@@ -17,7 +17,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal object WidgetCaptionRenderer {
-    fun render(context: Context, moment: Moment): Bitmap? {
+    fun render(context: Context, moment: Moment, maxWidth: Float = 244f, compact: Boolean = false): Bitmap? {
         val data = moment.overlay ?: return null
         val type = data.kind
         val rating = data.rating
@@ -44,13 +44,14 @@ internal object WidgetCaptionRenderer {
         if (!review && label.isBlank()) return null
         val scale = context.resources.displayMetrics.density.coerceIn(1f, 3f)
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 14f
+            textSize = if (compact) 12f else 14f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             this.color = data.foreground
         }
-        val clipped = TextUtils.ellipsize(label, paint, 224f, TextUtils.TruncateAt.END).toString()
-        val width = (if (review) maxOf(112f, paint.measureText(clipped) + 20f) else paint.measureText(clipped) + 20f).coerceIn(32f, 244f)
-        val height = if (review && comment.isNotBlank()) 46f else 30f
+        val limit = maxWidth.coerceIn(32f, 320f)
+        val clipped = TextUtils.ellipsize(label, paint, (limit - 20f).coerceAtLeast(1f), TextUtils.TruncateAt.END).toString()
+        val width = (if (review) maxOf(if (compact) 70f else 112f, paint.measureText(clipped) + 20f) else paint.measureText(clipped) + 20f).coerceIn(32f, limit)
+        val height = if (review && comment.isNotBlank()) 46f else if (compact) 24f else 30f
         val bitmap = Bitmap.createBitmap((width * scale).toInt(), (height * scale).toInt(), Bitmap.Config.ARGB_8888)
         bitmap.density = context.resources.displayMetrics.densityDpi
         val canvas = Canvas(bitmap)
@@ -60,7 +61,7 @@ internal object WidgetCaptionRenderer {
             this.color = colors.firstOrNull() ?: 0x99000000.toInt()
             if (colors.size >= 2) shader = LinearGradient(0f, 0f, 0f, height, colors.toIntArray(), null, Shader.TileMode.CLAMP)
         }
-        canvas.drawRoundRect(0f, 0f, width, height, 14f, 14f, bg)
+        if (!(compact && review)) canvas.drawRoundRect(0f, 0f, width, height, height / 2f, height / 2f, bg)
         paint.textAlign = Paint.Align.CENTER
         if (review) {
             val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -69,12 +70,14 @@ internal object WidgetCaptionRenderer {
                 strokeJoin = Paint.Join.ROUND
             }
             repeat(5) { i ->
-                val cx = width / 2f + (i - 2) * 19f
-                val cy = 15f
+                val spacing = minOf(if (compact) 12f else 19f, width / 5f)
+                val starScale = minOf(1f, spacing / 19f)
+                val cx = width / 2f + (i - 2) * spacing
+                val cy = if (compact && comment.isBlank()) height / 2f else 15f
                 val path = Path()
                 repeat(10) { j ->
                     val angle = -Math.PI / 2 + j * Math.PI / 5
-                    val radius = if (j % 2 == 0) 7f else 3.4f
+                    val radius = (if (j % 2 == 0) 7f else 3.4f) * starScale
                     val x = cx + (cos(angle) * radius).toFloat()
                     val y = cy + (sin(angle) * radius).toFloat()
                     if (j == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -87,7 +90,7 @@ internal object WidgetCaptionRenderer {
                 starPaint.alpha = 255
                 if (filled > 0f) {
                     val save = canvas.save()
-                    canvas.clipRect(cx - 8f, cy - 8f, cx - 8f + 16f * filled, cy + 8f)
+                    canvas.clipRect(cx - 8f * starScale, cy - 8f * starScale, cx - 8f * starScale + 16f * starScale * filled, cy + 8f * starScale)
                     starPaint.style = Paint.Style.FILL
                     canvas.drawPath(path, starPaint)
                     canvas.restoreToCount(save)
