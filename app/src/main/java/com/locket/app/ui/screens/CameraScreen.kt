@@ -767,13 +767,13 @@ fun CameraScreen(
                 clearCapture()
                 viewModel.setReplyToFriend(null)
             },
-            onSend = { caption, recipients ->
+            onSend = { caption, recipients, overlaysJson ->
                 if (!persistingUpload) {
                     persistingUpload = true
                     val video = capturedVideo
                     scope.launch {
                         try {
-                            if (viewModel.enqueueMoment(bitmap, caption, recipients, video, prepared)) {
+                            if (viewModel.enqueueMoment(bitmap, caption, recipients, video, prepared, overlaysJson)) {
                                 // Only dismiss after the exact upload payload is durable.
                                 transferred[0] = true
                                 clearCapture()
