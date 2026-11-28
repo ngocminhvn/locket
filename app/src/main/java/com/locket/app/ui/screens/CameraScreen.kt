@@ -763,7 +763,7 @@ fun CameraScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context)))
+            .then(if (sharedHeaderHeight == null) Modifier.background(AppearancePrefs.cameraBrush(AppearancePrefs.cameraTheme(context))) else Modifier)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
