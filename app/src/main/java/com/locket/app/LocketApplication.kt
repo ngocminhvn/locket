@@ -28,6 +28,7 @@ class LocketApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        createMessageChannel()
         sessionManager = SessionManager(this)
         ownAvatarStore = com.locket.app.storage.OwnAvatarStore(this, sessionManager)
         database = Room.databaseBuilder(this, LocketDatabase::class.java, "locket_cache.db")
@@ -65,7 +66,53 @@ class LocketApplication : Application(), ImageLoaderFactory {
             .build()
     }
 
+    private fun createMessageChannel() {
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        manager.createNotificationChannel(android.app.NotificationChannel(
+            MESSAGE_CHANNEL, "Tin nhắn", android.app.NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Thông báo tin nhắn Locket mới"
+            enableVibration(true)
+        })
+    }
+
+    fun notifyNewMessage(conversation: com.locket.app.model.Conversation) {
+        if (!sessionManager.isLoggedIn) return
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) return
+        val launch = android.content.Intent(this, MainActivity::class.java)
+            .putExtra("open_chat", true)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = android.app.PendingIntent.getActivity(this, 0, launch,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        val name = conversation.friend.displayName.takeIf { it.isNotBlank() && it != conversation.friend.uid }
+        val notification = androidx.core.app.NotificationCompat.Builder(this, MESSAGE_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(name ?: "Locket")
+            .setContentText(conversation.lastMessage.ifBlank { "Tin nhắn mới" })
+            .setContentIntent(pending)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(androidx.core.app.NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .build()
+        try {
+            manager.notify("chat:" + conversation.id, 1, notification)
+        } catch (_: SecurityException) {
+            // Permission may have been revoked since the check.
+        }
+    }
+
+    fun clearMessageNotifications() {
+        getSystemService(android.app.NotificationManager::class.java).cancelAll()
+    }
+
     companion object {
+        private const val MESSAGE_CHANNEL = "chat_messages"
+
         lateinit var instance: LocketApplication
             private set
     }
