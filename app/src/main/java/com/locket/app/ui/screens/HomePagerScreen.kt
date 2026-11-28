@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -312,21 +311,15 @@ fun HomePagerScreen(
         }
     }
 
-    // Keep a soft top scrim and the existing stationary footer while scrolling.
-    // The bottom gradient uses full viewport coordinates.
+    // Soft top and bottom scrims keep the fixed chrome readable without
+    // obscuring the scrolling photos with hard edges.
     if (showChrome && pagerState.isScrollInProgress) {
         Canvas(Modifier.matchParentSize()) {
             val top = headerHeight.toPx().coerceAtMost(size.height)
             val footer = (if (crossingCamera || cameraChrome) cameraFooterHeight else feedFooterHeight)
                 .toPx().coerceAtMost(size.height)
-            fun androidx.compose.ui.graphics.drawscope.DrawScope.paintChrome() {
-                drawRect(LocketBlack)
-                drawRect(cameraBrush)
-                drawRect(feedBrush, alpha = feedProgress)
-            }
-            // Reference Home header: the photo remains visible behind the
-            // stationary controls, fading smoothly into the feed background.
-            // Keep the existing opaque footer treatment unchanged.
+            // Both stationary navigation areas remain translucent while photos
+            // travel underneath. No hard clipping or opaque background masks.
             val fadeHeight = (top + 38.dp.toPx()).coerceAtMost(size.height)
             val tint = androidx.compose.ui.graphics.lerp(LocketBlack, palette.top, feedProgress)
             drawRect(
@@ -339,7 +332,21 @@ fun HomePagerScreen(
                 ),
                 size = androidx.compose.ui.geometry.Size(size.width, fadeHeight)
             )
-            clipRect(top = size.height - footer) { paintChrome() }
+            val bottomFadeHeight = (footer + 24.dp.toPx()).coerceAtMost(size.height)
+            val bottomStart = size.height - bottomFadeHeight
+            val bottomTint = androidx.compose.ui.graphics.lerp(LocketBlack, palette.bottom, feedProgress)
+            drawRect(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to bottomTint.copy(alpha = 0f),
+                    0.30f to bottomTint.copy(alpha = 0.18f),
+                    0.65f to bottomTint.copy(alpha = 0.48f),
+                    1f to bottomTint.copy(alpha = 0.86f),
+                    startY = bottomStart,
+                    endY = size.height
+                ),
+                topLeft = androidx.compose.ui.geometry.Offset(0f, bottomStart),
+                size = androidx.compose.ui.geometry.Size(size.width, bottomFadeHeight)
+            )
         }
     }
 
