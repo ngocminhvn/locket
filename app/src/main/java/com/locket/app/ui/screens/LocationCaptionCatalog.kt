@@ -52,6 +52,8 @@ internal object LocationCaptionCatalog {
         while (cache.size > 48) cache.remove(cache.keys.first())
     }
 
+    private class PhotonHttpError(val code: Int, message: String) : java.io.IOException(message)
+
     private suspend fun fetch(url: HttpUrl): JSONObject = requestMutex.withLock {
         delay((1_100L - (now() - lastRequestAt)).coerceAtLeast(0L))
         lastRequestAt = now()
@@ -62,11 +64,11 @@ internal object LocationCaptionCatalog {
                     .header("Accept", "application/geo+json, application/json")
                     .build()
             ).execute().use { response ->
-                check(response.isSuccessful) {
-                    when (response.code) {
+                if (!response.isSuccessful) {
+                    throw PhotonHttpError(response.code, when (response.code) {
                         429, 503 -> "Dịch vụ địa điểm đang bận. Hãy thử lại sau."
                         else -> "Không tìm được địa điểm (HTTP ${response.code})."
-                    }
+                    })
                 }
                 JSONObject(response.body?.string() ?: error("Không có dữ liệu địa điểm"))
             }
@@ -82,17 +84,24 @@ internal object LocationCaptionCatalog {
             .addQueryParameter("lat", lat)
             .addQueryParameter("lon", lon)
             .addQueryParameter("radius", "3")
-            .addQueryParameter("limit", "25")
-            .addQueryParameter("lang", "vi")
+            .addQueryParameter("limit", "10")
             .apply {
                 // Ask Photon for nearby named points of interest, not just the nearest street address.
                 listOf("amenity", "shop", "tourism", "leisure", "office").forEach {
                     addQueryParameter("osm_tag", it)
                 }
             }.build()
-        val places = parse(fetch(url), location)
-        remember(key, places)
-        return places
+        val filtered = try { parse(fetch(url), location) }
+        catch (e: PhotonHttpError) { if (e.code != 400) throw e else emptyList() }
+        // Older/demo instances may reject optional filters; use the documented
+        // minimal reverse request before concluding there are no nearby results.
+        val places = if (filtered.isNotEmpty()) filtered else {
+            val simple = url.newBuilder().removeAllQueryParameters("osm_tag").build()
+            parse(fetch(simple), location)
+        }
+        val nearby = places.filter { (it.distanceMeters ?: Float.MAX_VALUE) <= 3100f }
+        if (nearby.isNotEmpty()) remember(key, nearby)
+        return nearby
     }
 
     suspend fun search(query: String, location: Location): List<CaptionPlace> {
@@ -108,8 +117,7 @@ internal object LocationCaptionCatalog {
             .addQueryParameter("lon", lon)
             .addQueryParameter("zoom", "16")
             .addQueryParameter("location_bias_scale", "0.15")
-            .addQueryParameter("limit", "15")
-            .addQueryParameter("lang", "vi")
+            .addQueryParameter("limit", "10")
             .build()
         val places = parse(fetch(url), location)
         remember(key, places)
