@@ -21,6 +21,11 @@ widgets, APK certificate checks and installation.
 - Feed merge, tombstones/hidden-owner filtering, timezone-aware streak, token
   refresh decisions, polling overlap and update-manifest validation are Rust
   policies invoked in batches.
+- Outgoing chat payloads are built and serialized by Rust into UTF-8 bytes.
+  Ordinary chat always includes explicit `moment_uid: null`; replies retain
+  the canonical moment UID. Kotlin sends those bytes directly with OkHttp
+  and retains the original client token. Developer builds without native
+  libraries use a contract-compatible Kotlin fallback.
 - Native failures become Java `IllegalArgumentException`; Rust release builds
   use `panic=abort`, and network/JNI input paths do not use `unwrap`.
 

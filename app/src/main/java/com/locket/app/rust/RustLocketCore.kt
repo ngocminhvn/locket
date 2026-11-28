@@ -17,6 +17,7 @@ object RustLocketCore {
     private external fun parseFeedNative(responseBody: ByteArray): ByteArray
     private external fun parseHistoryNative(responseBody: ByteArray, ownUid: String, ownOnly: Boolean, limit: Int): ByteArray
     private external fun parseChatNative(responseBody: ByteArray): ByteArray
+    private external fun buildSendChatMessagePayloadNative(receiverUid: String, message: String, momentUid: String, clientToken: String): ByteArray
     private external fun mergeMomentOrderNative(ids: Array<String>, owners: Array<String>, timestamps: LongArray, deleted: Array<String>, hidden: Array<String>): IntArray
     private external fun calculateStreakNative(timestamps: LongArray, nowMillis: Long, timezone: String): Int
     private external fun tokenActionNative(hasToken: Boolean, stale: Boolean, hasRefresh: Boolean): Int
@@ -45,6 +46,24 @@ object RustLocketCore {
     fun parseChat(responseBody: ByteArray, conversationId: String, myUid: String): ChatPage {
         check(isAvailable)
         return FeedWireDecoder.decodeChat(parseChatNative(responseBody), conversationId, myUid)
+    }
+
+    fun buildSendChatMessagePayload(receiverUid: String, message: String, momentUid: String?, clientToken: String): ByteArray {
+        if (isAvailable) return buildSendChatMessagePayloadNative(receiverUid, message, momentUid.orEmpty(), clientToken)
+        return buildSendChatMessagePayloadFallback(receiverUid, message, momentUid, clientToken)
+    }
+
+    // Developer builds without native libraries must preserve the same callable contract.
+    internal fun buildSendChatMessagePayloadFallback(receiverUid: String, message: String, momentUid: String?, clientToken: String): ByteArray {
+        require(receiverUid.isNotBlank() && message.isNotBlank()) { "Thiếu người nhận hoặc nội dung" }
+        require(clientToken.isNotBlank()) { "Thiếu client token" }
+        val data = com.google.gson.JsonObject().apply {
+            addProperty("msg", message)
+            addProperty("receiver_uid", receiverUid)
+            addProperty("client_token", clientToken)
+            add("moment_uid", momentUid?.takeIf { it.isNotBlank() }?.let { com.google.gson.JsonPrimitive(it) } ?: com.google.gson.JsonNull.INSTANCE)
+        }
+        return com.google.gson.JsonObject().apply { add("data", data) }.toString().toByteArray(Charsets.UTF_8)
     }
 
     fun mergeMoments(existing: List<Moment>, incoming: List<Moment>, deleted: Set<String>, hiddenOwners: Set<String>): List<Moment> {

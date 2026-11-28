@@ -2187,16 +2187,8 @@ class LocketApiClient(
 
     suspend fun sendChatMessage(receiverUid: String, message: String, momentUid: String? = null, clientToken: String = UUID.randomUUID().toString()): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (receiverUid.isBlank() || message.isBlank()) error("Thiếu người nhận hoặc nội dung")
+            val payload = RustLocketCore.buildSendChatMessagePayload(receiverUid, message, momentUid, clientToken)
             if (!ensureFreshToken()) error("Phiên đăng nhập hết hạn hoặc không thể làm mới")
-            val payload = JsonObject().apply {
-                add("data", JsonObject().apply {
-                    addProperty("msg", message)
-                    addProperty("receiver_uid", receiverUid)
-                    addProperty("client_token", clientToken)
-                    if (!momentUid.isNullOrBlank()) addProperty("moment_uid", momentUid)
-                })
-            }
             // Preserve the actual callable error instead of masking every
             // network/server failure behind the same generic toast.
             val bytes = callEndpointBytes("sendChatMessageV2", payload, propagateFailure = true)
@@ -2423,9 +2415,12 @@ class LocketApiClient(
     }
 
     /** Transport only: keep callable response bytes intact for one Rust parse. */
-    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject, propagateFailure: Boolean = false, cancellable: Boolean = false): ByteArray? {
+    private suspend fun callEndpointBytes(endpoint: String, payload: JsonObject, propagateFailure: Boolean = false, cancellable: Boolean = false): ByteArray? =
+        callEndpointBytes(endpoint, payload.toString().toByteArray(Charsets.UTF_8), propagateFailure, cancellable)
+
+    private suspend fun callEndpointBytes(endpoint: String, payload: ByteArray, propagateFailure: Boolean = false, cancellable: Boolean = false): ByteArray? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
-        val body = payload.toString().toRequestBody("application/json".toMediaType())
+        val body = payload.toRequestBody("application/json".toMediaType())
         fun buildRequest(token: String?): Request {
             val builder = Request.Builder()
                 .url(url)

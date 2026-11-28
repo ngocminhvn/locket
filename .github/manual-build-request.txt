@@ -1,3 +1,2 @@
-Build requested: temporary Dev APK with caption weather/location, review stars and synchronized Home navigation/theme fixes.
-Source: c26a92f43e5bc35c28c3788c7152e1b54d4d75ad
-Previous marker: 8690df32a12defbf0199e501453eefac9741d8af
+Build requested: Dev APK with Rust-owned sendChatMessageV2 payload and explicit moment_uid null regression fix.
+Source parent: bb8b3238d3b0ba85797788b3e4084381d7889a0a

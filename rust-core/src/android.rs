@@ -109,6 +109,25 @@ pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_parseChatNative(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_buildSendChatMessagePayloadNative(
+    mut env: JNIEnv<'_>,
+    _this: JObject<'_>,
+    receiver_uid: JString<'_>,
+    message: JString<'_>,
+    moment_uid: JString<'_>,
+    client_token: JString<'_>,
+) -> jbyteArray {
+    let result = (|| {
+        let receiver = java_string(&mut env, &receiver_uid)?;
+        let text = java_string(&mut env, &message)?;
+        let moment = java_string(&mut env, &moment_uid)?;
+        let token = java_string(&mut env, &client_token)?;
+        crate::chat::build_send_chat_message_payload(&receiver, &text, Some(&moment), &token)
+    })();
+    return_bytes(&mut env, result)
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_locket_app_rust_RustLocketCore_mergeMomentOrderNative(
     mut env: JNIEnv<'_>,
     _this: JObject<'_>,
