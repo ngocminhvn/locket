@@ -63,14 +63,15 @@ internal object AppearancePrefs {
     fun setBadge(c: Context, v: Boolean) { prefs(c).edit().putBoolean("badge", v).apply() }
     fun setFrame(c: Context, v: Int) { prefs(c).edit().putInt("frame", v).apply(); LocketWidgetUpdater.updateAll(c) }
     fun setCameraTheme(c: Context, v: Int) { prefs(c).edit().putInt("camera", v).apply() }
-    fun cameraBrush(index: Int): Brush = Brush.verticalGradient(when(index) {
+    fun cameraColors(index: Int): List<Color> = when(index) {
         1 -> listOf(Color(0xFF100E05), Color(0xFF594300))
         2 -> listOf(Color(0xFFDA075C), Color(0xFFFF491F))
         3 -> listOf(Color(0xFF061C3F), Color(0xFF167DC5))
         4 -> listOf(Color(0xFF25113C), Color(0xFF781BB0))
         5 -> listOf(Color(0xFF072E22), Color(0xFF13734C))
         else -> listOf(LocketBlack, LocketBlack)
-    })
+    }
+    fun cameraBrush(index: Int): Brush = Brush.verticalGradient(cameraColors(index))
     fun setIcon(c: Context, index: Int) {
         require(index in icons.indices)
         val pm = c.packageManager
