@@ -1,6 +1,11 @@
 package com.locket.app
 
 import android.os.Bundle
+import android.Manifest
+import android.content.pm.PackageManager
+import android.util.Log
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -48,11 +53,23 @@ import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
 
 class MainActivity : ComponentActivity() {
+    // Start only provider initialization, not a hardware camera session.
+    // CameraScreen still binds/unbinds use cases according to its lifecycle.
+    private fun prewarmCameraProvider() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
+        try {
+            ProcessCameraProvider.getInstance(applicationContext)
+        } catch (e: Exception) {
+            Log.w("LocketCamera", "Camera provider warm-up unavailable", e)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         val sessionManager = (application as LocketApplication).sessionManager
+        if (sessionManager.isLoggedIn) prewarmCameraProvider()
         val apiClient = LocketApiClient(
             getToken = { sessionManager.idToken },
             getUid = { sessionManager.currentUser.uid },
@@ -102,7 +119,7 @@ class MainActivity : ComponentActivity() {
                         currentScreen = "welcome"
                         tabStateHolder.removeState("history")
                         tabStateHolder.removeState("chat")
-                    }
+                    } else prewarmCameraProvider()
                 }
 
                 // Android Back (button or system edge gesture): secondary screens
