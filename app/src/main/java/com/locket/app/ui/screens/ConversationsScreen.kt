@@ -31,13 +31,15 @@ import com.locket.app.model.Conversation
 import com.locket.app.model.Friend
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.theme.*
+import com.locket.app.ui.components.LocketProfileAvatar
 
 @Composable
 fun ConversationsScreen(
     viewModel: LocketViewModel,
     onNavigate: (String) -> Unit,
     onOpenChatDetail: (Friend) -> Unit,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    sharedProfileAvatar: Boolean = false
 ) {
     val context = LocalContext.current
     val liveConversations by viewModel.conversations.collectAsState()
@@ -78,48 +80,12 @@ fun ConversationsScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Header: "Trò chuyện" + Avatar (Matches 03-tro-chuyen.jpg)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.size(40.dp))
-
-                Text(
-                    text = "Trò chuyện",
-                    color = Color.White,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(LocketAvatarBg)
-                        .clickable(onClick = onOpenProfile),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (currentUser.profilePictureUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = currentUser.profilePictureUrl,
-                            contentDescription = "Profile",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "Profile",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
+            Box(Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
+                Text("Trò chuyện", color = Color.White, fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
+                if (!sharedProfileAvatar) LocketProfileAvatar(currentUser.profilePictureUrl, onOpenProfile,
+                    Modifier.align(Alignment.CenterEnd))
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -222,8 +188,8 @@ fun ConversationsScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(end = 20.dp, bottom = 16.dp)
-                .size(56.dp)
+                .navigationBarsPadding().padding(end = 20.dp, bottom = 11.dp)
+                .size(54.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Edit,
