@@ -49,6 +49,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += setOf("META-INF/INDEX.LIST", "META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt")
         }
     }
 }
@@ -91,6 +92,9 @@ dependencies {
     // Network & JSON
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
     implementation("com.google.code.gson:gson:2.15.0")
+    // Authenticated Firestore Listen (existing REST session; no second sign-in).
+    implementation("com.google.api.grpc:grpc-google-cloud-firestore-v1:3.44.0")
+    implementation("io.grpc:grpc-okhttp:1.81.0")
 
     // QR that cho link moi (ZXing core — chi core, khong them lib thua)
     implementation("com.google.zxing:core:3.5.4")

@@ -82,6 +82,17 @@ class LocketViewModel(
     private val conversationSyncLock = Mutex()
     private val chatSyncLock = Mutex()
     private var syncJob: Job? = null
+    private var feedListenJob: Job? = null
+    private var chatListenJob: Job? = null
+    private var foreground = false
+    private val _feedLoading = MutableStateFlow(false)
+    val feedLoading = _feedLoading.asStateFlow()
+    private val _feedError = MutableStateFlow<String?>(null)
+    val feedError = _feedError.asStateFlow()
+    private val _feedRealtime = MutableStateFlow(false)
+    val feedRealtime = _feedRealtime.asStateFlow()
+    private val _chatRealtime = MutableStateFlow(false)
+    val chatRealtime = _chatRealtime.asStateFlow()
     private var syncAgain = false
     private var chatOpenJob: Job? = null
     private var chatPollJob: Job? = null
@@ -497,6 +508,112 @@ class LocketViewModel(
         return streak
     }
 
+    fun setForeground(active: Boolean) {
+        if (foreground == active) return
+        foreground = active
+        if (active) {
+            startFeedListener()
+            _activeConversationId.value?.let { startChatListener(it) }
+        } else {
+            feedListenJob?.cancel(); feedListenJob = null
+            chatListenJob?.cancel(); chatListenJob = null
+            _feedRealtime.value = false
+            _chatRealtime.value = false
+        }
+    }
+
+    private suspend fun applyFeed(account: String, records: List<Moment>) {
+        if (!activeAccount(account) || records.isEmpty()) return
+        val resolved = knownMomentNames(records)
+        mergeMoments(resolved)
+        prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
+        enrichMomentNames(account, resolved)
+        if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
+    }
+
+    private suspend fun refreshFeedNow(account: String) = feedSyncLock.withLock {
+        if (!activeAccount(account)) return@withLock
+        _feedLoading.value = true
+        _feedError.value = null
+        try {
+            // Read the same history collection as Listen, not the widget endpoint.
+            val page = apiClient.fetchHistoryPage().getOrThrow()
+            if (activeAccount(account)) applyFeed(account, page.moments)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { if (activeAccount(account)) _feedError.value = e.message ?: "Không tải được khoảnh khắc" }
+        finally { if (activeAccount(account)) _feedLoading.value = false }
+    }
+
+    fun refreshFeed() {
+        val account = sessionManager.currentUser.uid
+        if (account.isNotBlank() && activeAccount(account)) viewModelScope.launch { refreshFeedNow(account) }
+    }
+
+    private fun startFeedListener() {
+        val account = sessionManager.currentUser.uid
+        if (!foreground || !activeAccount(account) || account.isBlank() || feedListenJob?.isActive == true) return
+        feedListenJob = viewModelScope.launch {
+            var retry = 1_000L
+            while (foreground && activeAccount(account)) {
+                try {
+                    apiClient.listenFeed(account).collect { delta ->
+                        if (!activeAccount(account)) return@collect
+                        if (delta.deletedIds.isNotEmpty()) {
+                            deletedMomentIds.addAll(delta.deletedIds)
+                            removeMomentsFromCache { it.id in delta.deletedIds }
+                        }
+                        applyFeed(account, delta.upserts)
+                        if (delta.ready) {
+                            retry = 1_000L
+                            _feedRealtime.value = true
+                            _feedError.value = null
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    android.util.Log.w("LocketListen", "Feed Listen disconnected: " + e.javaClass.simpleName)
+                } finally { _feedRealtime.value = false }
+                if (foreground && activeAccount(account)) {
+                    refreshFeedNow(account)
+                    kotlinx.coroutines.delay(retry)
+                    retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+    }
+
+    private fun startChatListener(convId: String) {
+        val account = sessionManager.currentUser.uid
+        if (!foreground || !activeAccount(account)) return
+        chatListenJob?.cancel()
+        chatListenJob = viewModelScope.launch {
+            var retry = 1_000L
+            while (foreground && activeAccount(account) && _activeConversationId.value == convId) {
+                try {
+                    apiClient.listenChat(account, convId).collect { delta ->
+                        if (!activeAccount(account) || _activeConversationId.value != convId) return@collect
+                        chatSyncLock.withLock {
+                            delta.deletedIds.forEach { cache.deleteChatMessage(it) }
+                            if (delta.upserts.isNotEmpty()) cache.saveChatMessages(delta.upserts)
+                        }
+                        if (delta.ready) { retry = 1_000L; _chatRealtime.value = true }
+                        val newest = delta.upserts.maxByOrNull { it.createdAtMs }?.id
+                        if (newest != null && chatMarkedThrough[convId] != newest) {
+                            apiClient.markConversationAsRead(convId).onSuccess { chatMarkedThrough[convId] = newest }
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { android.util.Log.w("LocketListen", "Chat Listen disconnected: " + e.javaClass.simpleName) }
+                finally { _chatRealtime.value = false }
+                if (foreground && activeAccount(account) && _activeConversationId.value == convId) {
+                    fetchChatMessagesAndMarkRead(convId, incremental = true)
+                    kotlinx.coroutines.delay(retry)
+                    retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+    }
+
     fun syncAllData() {
         if (syncJob?.isActive == true) {
             syncAgain = true
@@ -504,6 +621,7 @@ class LocketViewModel(
         }
         val account = sessionManager.currentUser.uid
         if (account.isBlank() || !_isLoggedIn.value) return
+        startFeedListener()
         syncJob = viewModelScope.launch {
             _isSyncing.value = true
             try {
@@ -513,19 +631,7 @@ class LocketViewModel(
                     // Start the feed immediately. History starts only once feed
                     // has been delivered, not after unrelated profile/chat requests.
                     launch {
-                        feedSyncLock.withLock {
-                            val feed = apiClient.fetchMomentsFeed(sessionManager.feedSyncToken).getOrNull()
-                            if (feed != null && activeAccount(account)) {
-                                if (feed.moments.isNotEmpty()) {
-                                    val resolved = knownMomentNames(feed.moments)
-                                    mergeMoments(resolved)
-                                    prefetchThumbnails(resolved.take(8).map { it.thumbnailUrl })
-                                    enrichMomentNames(account, resolved)
-                                    if (activeAccount(account)) LocketWidgetUpdater.updateAll(LocketApplication.instance)
-                                }
-                                if (activeAccount(account)) sessionManager.feedSyncToken = feed.syncToken
-                            }
-                        }
+                        refreshFeedNow(account)
                         if (activeAccount(account) && historyCursor == null && _historyHasMore.value && _historyError.value == null) loadOlderMoments()
                     }
                     launch {
@@ -640,6 +746,8 @@ class LocketViewModel(
      */
     fun closeChat() {
         chatOpenJob?.cancel()
+        chatListenJob?.cancel(); chatListenJob = null
+        _chatRealtime.value = false
         chatPollJob?.cancel()
         chatMessagesJob?.cancel()
         chatOlderJob?.cancel()
@@ -686,6 +794,7 @@ class LocketViewModel(
                 if (!initialized || !recentlyRefreshed || unread || saved.isEmpty()) {
                     fetchChatMessagesAndMarkRead(id, resetPagination = !initialized, incremental = initialized)
                 }
+                if (activeAccount(account) && activeFriendUid == friendUid) startChatListener(id)
             } finally {
                 if (activeFriendUid == friendUid) _isChatLoading.value = false
             }
@@ -815,7 +924,7 @@ class LocketViewModel(
                     check(activeAccount(item.owner)) { "Phiên đăng nhập đã thay đổi" }
                     uploadQueuedMoment(item)
                     releaseUpload(item)
-                    if (activeAccount(item.owner)) syncAllData()
+                    if (activeAccount(item.owner)) refreshFeed()
                 } catch (e: CancellationException) {
                     releaseUpload(item)
                     throw e
@@ -1179,7 +1288,7 @@ class LocketViewModel(
                 _momentViewErrors.update { it - moment.id }
                 deletedMomentIds.add(moment.id)
                 removeMomentsFromCache { it.id == moment.id }
-                syncAllData()
+                refreshFeed()
                 onSuccess()
             } else {
                 onError(res.exceptionOrNull()?.message ?: "Lỗi xóa khoảnh khắc")
@@ -1442,6 +1551,10 @@ class LocketViewModel(
         clearMomentUploads()
         syncAgain = false
         syncJob?.cancel()
+        feedListenJob?.cancel(); feedListenJob = null
+        _feedRealtime.value = false
+        _feedLoading.value = false
+        _feedError.value = null
         closeChat()
         apiClient.clearUserNameCache()
         prefetchedThumbnails.clear()

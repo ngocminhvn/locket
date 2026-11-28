@@ -50,16 +50,18 @@ fun HomePagerScreen(
     val selectedFriend by viewModel.selectedFriend.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val feedLoading by viewModel.historyLoading.collectAsState()
+    val feedLoading by viewModel.feedLoading.collectAsState()
+    val historyLoading by viewModel.historyLoading.collectAsState()
+    val latestError by viewModel.feedError.collectAsState()
     val feedHasMore by viewModel.historyHasMore.collectAsState()
     val feedError by viewModel.historyError.collectAsState()
     val ownLoading by viewModel.ownHistoryLoading.collectAsState()
     val ownHasMore by viewModel.ownHistoryHasMore.collectAsState()
     val ownError by viewModel.ownHistoryError.collectAsState()
     val ownSelected = currentUser.uid.isNotBlank() && selectedFriend?.uid == currentUser.uid
-    val loading = if (ownSelected) ownLoading else feedLoading
+    val loading = if (ownSelected) ownLoading || (allMoments.none { it.userUid == currentUser.uid } && feedLoading) else historyLoading || feedLoading
     val hasMore = if (ownSelected) ownHasMore else feedHasMore
-    val error = if (ownSelected) ownError else feedError
+    val error = if (ownSelected) ownError else if (allMoments.isEmpty()) latestError ?: feedError else feedError
     val filterFriends = remember(friends, currentUser) {
         val own = currentUser.takeIf { it.uid.isNotBlank() }?.let {
             Friend(uid = it.uid, username = it.username, displayName = "Bạn", avatarUrl = it.profilePictureUrl)
@@ -241,9 +243,11 @@ fun HomePagerScreen(
         } else if (page > moments.size) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (loading) CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
-                    Text(error ?: if (hasMore) "Đang tải ảnh cũ..." else "Chưa có khoảnh khắc nào", color = Color.White)
-                    if (error != null) TextButton(onClick = { loadFilteredHistory() }) { Text("Thử lại") }
+                    if (loading) {
+                        CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
+                        Text(if (moments.isEmpty()) "Đang tải khoảnh khắc..." else "Đang tải ảnh cũ...", color = Color.White)
+                    } else Text(error ?: if (hasMore) "Vuốt để tải ảnh cũ" else "Chưa có khoảnh khắc nào", color = Color.White)
+                    if (error != null) TextButton(onClick = { if (moments.isEmpty() && !ownSelected) viewModel.refreshFeed() else loadFilteredHistory() }) { Text("Thử lại") }
                     TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) { Text("Về camera") }
                 }
             }

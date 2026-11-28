@@ -60,6 +60,13 @@ class MainActivity : ComponentActivity() {
                 LocketViewModel(sessionManager, apiClient, (application as LocketApplication).cache) as T
         })[LocketViewModel::class.java]
 
+        lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.setForeground(true)
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.setForeground(false)
+                else -> Unit
+            }
+        })
         setContent {
             LocketTheme {
                 val isLoggedIn by viewModel.isLoggedInFlow.collectAsState()

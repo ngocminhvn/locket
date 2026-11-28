@@ -15,6 +15,7 @@ import com.locket.app.model.Moment
 import com.locket.app.model.User
 import com.locket.app.rust.RustLocketCore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 import okhttp3.FormBody
@@ -45,6 +46,36 @@ class LocketApiClient(
         .build()
 
     private val gson = Gson()
+    private val realtime by lazy { FirestoreListen() }
+
+    data class LiveDelta<T>(val upserts: List<T> = emptyList(), val deletedIds: Set<String> = emptySet(), val ready: Boolean = false)
+
+    fun listenFeed(account: String): kotlinx.coroutines.flow.Flow<LiveDelta<Moment>> = kotlinx.coroutines.flow.flow {
+        check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
+        val db = "projects/locket-4252a/databases/locket"
+        realtime.listen(db, "$db/documents/history/$account", "entries", "date", 24, checkNotNull(getToken())).collect { event ->
+            val records = event.documents.mapNotNull { doc ->
+                val fields = doc.getAsJsonObject("fields") ?: return@mapNotNull null
+                val id = extractString(fields, "canonical_uid").ifBlank { optString(doc, "name").substringAfterLast('/') }
+                val owner = extractString(fields, "user")
+                val thumb = extractString(fields, "thumbnail_url")
+                val time = extractTimestampMs(fields, "date")?.div(1000) ?: return@mapNotNull null
+                if (id.isBlank() || owner.isBlank() || thumb.isBlank()) return@mapNotNull null
+                Moment(id = id, userUid = owner, userName = "", thumbnailUrl = thumb,
+                    videoUrl = extractString(fields, "video_url").ifBlank { null }, caption = extractString(fields, "caption"),
+                    timestampSeconds = time, timeAgo = formatMomentAge(time), md5 = extractString(fields, "md5"))
+            }
+            emit(LiveDelta(records, event.deletedIds, event.ready))
+        }
+    }
+
+    fun listenChat(account: String, conversationId: String): kotlinx.coroutines.flow.Flow<LiveDelta<ChatMessage>> = kotlinx.coroutines.flow.flow {
+        check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
+        val db = "projects/locket-4252a/databases/(default)"
+        realtime.listen(db, "$db/documents/conversations/$conversationId", "messages", "created_at", 100, checkNotNull(getToken())).collect { event ->
+            emit(LiveDelta(event.documents.mapNotNull { parseChatMessageJson(it, conversationId, account) }, event.deletedIds, event.ready))
+        }
+    }
     private data class CachedName(val value: Pair<String, String>, val expiresAt: Long)
     private val nameCache = java.util.concurrent.ConcurrentHashMap<String, CachedName>()
     private val nameResolveLock = kotlinx.coroutines.sync.Mutex()
