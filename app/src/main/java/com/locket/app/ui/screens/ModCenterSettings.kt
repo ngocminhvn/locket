@@ -244,7 +244,7 @@ fun ModCenterSettings(viewModel: LocketViewModel) {
     ProfileSettingsRow(
         icon = { Icon(Icons.Default.Info, null, tint = Color.White) },
         title = "Phiên bản ứng dụng",
-        subtitle = if (busy) "$version · Đang kiểm tra..." else "$version · Nhấn giữ để kiểm tra Dev",
+        subtitle = version,
         enabled = !busy && progress == null,
         onLongClick = { checkChannel("dev") },
         onClick = { checkChannel("release") }
