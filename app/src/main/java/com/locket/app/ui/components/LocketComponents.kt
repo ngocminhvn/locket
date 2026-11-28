@@ -28,6 +28,11 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.ui.theme.*
 import com.wexpa.liquidglass.Glass
+import com.wexpa.liquidglass.GlassTabBar
+import com.wexpa.liquidglass.GlassTabBarStyle
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.wexpa.liquidglass.glassEffect
 
 @Composable
@@ -201,6 +206,10 @@ fun LocketBottomBar(
     }
 }
 
+private object SilentNavigationHaptics : HapticFeedback {
+    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
+}
+
 @Composable
 fun FeedBottomBar(
     onGridClick: () -> Unit,
@@ -212,13 +221,11 @@ fun FeedBottomBar(
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
     unreadConversations: Int = 0,
-    pagePosition: Float? = null,
     feedMode: Boolean = showSideActions
 ) {
     if (separated) {
         // Use the unmodified Calm optical material from TKB SV. Its native
         // tint is translucent; do not cover the backdrop with LocketPillBg.
-        val barGlass = Glass.TabBar
         // Match the central bar's translucent color response without adding
         // its refractive rim or motion to the two auxiliary buttons.
         val sideGlass = remember {
@@ -246,43 +253,38 @@ fun FeedBottomBar(
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
-            BoxWithConstraints(
-                Modifier.weight(1f).height(54.dp)
-                    .glassEffect(barGlass, CircleShape).padding(horizontal = 4.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                val selected = when (currentScreen) { "history" -> 0; "chat" -> 2; else -> 1 }
-                val position = (pagePosition ?: selected.toFloat()).coerceIn(0f, 2f)
-                val cell = maxWidth / 3
-                val highlightWidth = (cell - 4.dp).coerceAtLeast(1.dp)
-                val highlightAlpha = if (feedMode) kotlin.math.abs(position - 1f).coerceIn(0f, 1f) else 1f
-                Box(Modifier.offset(x = cell * position + (cell - highlightWidth) / 2)
-                    .width(highlightWidth).height(46.dp).clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.16f * highlightAlpha)))
-                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        IconButton(onClick = onHistoryClick, modifier = Modifier.size(44.dp)) {
-                            Icon(Icons.Default.Apps, "Kỷ niệm", tint = if (selected == 0) Color.White else inactive, modifier = Modifier.size(23.dp))
+            // Same Calm selector/held lens and release-to-select gesture as TKB SV.
+            // The upstream bar owns touch dispatch; its items must not add IconButtons.
+            val selected = when (currentScreen) { "history" -> 0; "chat" -> 2; else -> 1 }
+            val style = remember { GlassTabBarStyle.Calm(true).copy(height = 54.dp, contentPadding = 4.dp, pillInset = 4.dp) }
+            CompositionLocalProvider(LocalHapticFeedback provides SilentNavigationHaptics) {
+                GlassTabBar(
+                    itemCount = 3,
+                    selectedIndex = selected,
+                    onSelected = { index ->
+                        when (index) {
+                            0 -> onHistoryClick()
+                            1 -> onShutterClick()
+                            2 -> onChatClick()
                         }
-                    }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        IconButton(onClick = onShutterClick, modifier = Modifier.size(44.dp)) {
-                            if (feedMode) {
-                                Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape), contentAlignment = Alignment.Center) {
-                                    Box(Modifier.size(29.dp).background(Color.White, CircleShape))
-                                }
-                            } else {
-                                Icon(Icons.Default.Home, "Camera", tint = if (selected == 1) Color.White else inactive, modifier = Modifier.size(24.dp))
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = style
+                ) { index, isSelected ->
+                    val tint = if (isSelected) Color.White else inactive
+                    when (index) {
+                        0 -> Icon(Icons.Default.Apps, "Kỷ niệm", tint = tint, modifier = Modifier.size(23.dp))
+                        1 -> if (feedMode) {
+                            Box(Modifier.size(38.dp).border(3.dp, LocketYellow, CircleShape), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(29.dp).background(Color.White, CircleShape))
                             }
+                        } else {
+                            Icon(Icons.Default.Home, "Camera", tint = tint, modifier = Modifier.size(24.dp))
                         }
-                    }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                            IconButton(onClick = onChatClick, modifier = Modifier.fillMaxSize()) {
-                                Icon(Icons.Default.ChatBubble,
-                                    if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
-                                    tint = if (selected == 2) Color.White else inactive, modifier = Modifier.size(24.dp))
-                            }
+                        2 -> Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChatBubble,
+                                if (unreadConversations > 0) "Trò chuyện, $unreadConversations cuộc trò chuyện chưa đọc" else "Trò chuyện",
+                                tint = tint, modifier = Modifier.size(24.dp))
                             UnreadConversationBadge(unreadConversations, Modifier.align(Alignment.TopEnd))
                         }
                     }
