@@ -97,18 +97,18 @@ fun ChatDetailScreen(
     val conversationUrl = remember(messages, activeConversationId) {
         messages.asReversed().firstOrNull { it.conversationId == activeConversationId && !it.thumbnailUrl.isNullOrBlank() }?.thumbnailUrl
     }
-    val conversationTint = key(friend.uid) { rememberMomentColor(conversationUrl, 300) }
-    val chatColor = backdropColor(conversationTint, CONVERSATION_SCRIM)
+    val ambient = key(friend.uid) { rememberAmbientPalette(conversationUrl, AmbientMode.CONVERSATION) }
+    val chatColor = LocketBlack
     val bubbleColor = LocketChatReceived
     val composerColor = LocketSearchBg
     val chromeStops = floatArrayOf(0f, 0.2667f, 0.4667f, 0.6667f, 0.8667f, 1f)
-    val topChrome = remember(chatColor) {
+    val topChrome = remember(ambient.top) {
         val alpha = floatArrayOf(1f, 0.823f, 0.676f, 0.52f, 0.18f, 0f)
-        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to chatColor.copy(alpha = alpha[it]) })
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to ambient.top.copy(alpha = alpha[it]) })
     }
-    val bottomChrome = remember(chatColor) {
+    val bottomChrome = remember(ambient.bottom) {
         val alpha = floatArrayOf(0f, 0.111f, 0.332f, 0.576f, 0.723f, 1f)
-        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to chatColor.copy(alpha = alpha[it]) })
+        Brush.verticalGradient(*Array(chromeStops.size) { chromeStops[it] to ambient.bottom.copy(alpha = alpha[it]) })
     }
 
     fun sendText(text: String, clearInput: Boolean = false) {
@@ -168,7 +168,7 @@ fun ChatDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(chatColor)
+            .background(ambient.brush())
             // Apply the larger bottom inset exactly once. The window resizes rather than pans.
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
     ) {
