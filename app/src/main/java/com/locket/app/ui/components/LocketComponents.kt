@@ -27,9 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.locket.app.ui.theme.*
-import com.wexpa.liquidglass.Glass
 import com.wexpa.liquidglass.glassEffect
 import com.locket.app.ui.glass.LocketGlassTabBar
+import com.locket.app.ui.glass.LocketSideNavigationGlass
 
 @Composable
 fun ShutterButton(
@@ -216,24 +216,6 @@ fun FeedBottomBar(
     feedMode: Boolean = showSideActions
 ) {
     if (separated) {
-        // Use the unmodified Calm optical material from TKB SV. Its native
-        // tint is translucent; do not cover the backdrop with LocketPillBg.
-        // Match the central bar's translucent color response without adding
-        // its refractive rim or motion to the two auxiliary buttons.
-        val sideGlass = remember {
-            Glass(
-                style = requireNotNull(Glass.TabBar.style(dark = true)).copy(
-                    refractionDepth = 0.dp,
-                    dispersion = 0f,
-                    capFold = 0f,
-                    mirror = 0f,
-                    specular = 0f,
-                    counterLight = 0f,
-                    edgeShadow = 0f
-                ),
-                light = Glass.TabBar.light(dark = true)
-            )
-        }
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
@@ -241,7 +223,7 @@ fun FeedBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showSideActions) {
-                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).glassEffect(sideGlass, CircleShape)) {
+                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).glassEffect(LocketSideNavigationGlass, CircleShape)) {
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
@@ -279,7 +261,7 @@ fun FeedBottomBar(
                     }
                 }
             if (showSideActions) {
-                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(sideGlass, CircleShape)) {
+                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(LocketSideNavigationGlass, CircleShape)) {
                     Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
