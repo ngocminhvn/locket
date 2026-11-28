@@ -58,6 +58,7 @@ import com.locket.app.model.Moment
 import com.locket.app.ui.LocketViewModel
 import com.locket.app.ui.MomentVideo
 import com.locket.app.ui.components.liquidGlassEffect
+import com.locket.app.ui.components.LocketProfileAvatar
 import com.locket.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -66,7 +67,8 @@ import java.util.*
 fun HistoryScreen(
     viewModel: LocketViewModel,
     onNavigate: (String) -> Unit,
-    onOpenProfile: () -> Unit
+    onOpenProfile: () -> Unit,
+    sharedProfileAvatar: Boolean = false
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val baseColor = LocalMomentColor.current
@@ -211,16 +213,11 @@ fun HistoryScreen(
         // Fixed header stays visible while the months scroll underneath.
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
             .background(Brush.verticalGradient(listOf(momentEdge(baseColor), momentEdge(baseColor).copy(alpha = 0.88f), Color.Transparent)))
-            .statusBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp).height(48.dp)) {
-            Text("Kỷ niệm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            .statusBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
+            Text("Kỷ niệm", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
-            Box(Modifier.align(Alignment.CenterEnd).size(46.dp).clip(CircleShape)
-                .background(LocketAvatarBg).clickable(onClick = onOpenProfile),
-                contentAlignment = Alignment.Center) {
-                if (currentUser.profilePictureUrl.isNotBlank()) {
-                    AsyncImage(currentUser.profilePictureUrl, "Hồ sơ", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else Icon(Icons.Default.Person, "Hồ sơ", tint = Color.White)
-            }
+            if (!sharedProfileAvatar) LocketProfileAvatar(currentUser.profilePictureUrl, onOpenProfile,
+                Modifier.align(Alignment.CenterEnd))
         }
 
         // Memory Full-Screen Viewer Dialog
