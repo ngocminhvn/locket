@@ -15,6 +15,7 @@ import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
@@ -34,11 +35,18 @@ internal fun rememberMomentColor(url: String?): Color? {
             // Retain the previous tone while the new thumbnail is decoded. A
             // cancelled effect cannot publish a stale result after a newer page.
             target = colorCache.get(url) ?: withContext(Dispatchers.IO) {
-                val request = ImageRequest.Builder(context).data(url)
-                    .size(64).allowHardware(false).crossfade(false).build()
-                val result = context.imageLoader.execute(request) as? SuccessResult
-                result?.drawable?.toBitmap(64, 64, Bitmap.Config.ARGB_8888)
-                    ?.let(::extractMomentColor)?.also { colorCache.put(url, it) }
+                try {
+                    val request = ImageRequest.Builder(context).data(url)
+                        .size(64).allowHardware(false).crossfade(false).build()
+                    val result = context.imageLoader.execute(request) as? SuccessResult
+                    result?.drawable?.toBitmap(64, 64, Bitmap.Config.ARGB_8888)
+                        ?.let(::extractMomentColor)?.also { colorCache.put(url, it) }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // An invalid or unavailable thumbnail must not crash the feed.
+                    null
+                }
             }
         }
     }
