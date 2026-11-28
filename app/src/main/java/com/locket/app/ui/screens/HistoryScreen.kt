@@ -223,7 +223,7 @@ fun HistoryScreen(
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)
             .background(Brush.verticalGradient(listOf(topRampColor, topRampColor.copy(alpha = 0.88f), Color.Transparent)))
             .statusBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp).height(46.dp)) {
-            Text("Kỷ niệm", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
+            if (!sharedProfileAvatar) Text("Kỷ niệm", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
             if (!sharedProfileAvatar) LocketProfileAvatar(currentUser.profilePictureUrl, onOpenProfile,
                 Modifier.align(Alignment.CenterEnd))
