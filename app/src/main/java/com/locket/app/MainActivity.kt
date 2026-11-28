@@ -53,6 +53,27 @@ import com.locket.app.ui.theme.LocketBlack
 import com.locket.app.ui.theme.LocketTheme
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermission = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
+
+    private val chatNotificationRequest = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("open_chat", false)) chatNotificationRequest.value++
+    }
+
+    private fun requestNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getSharedPreferences("notification_permissions", MODE_PRIVATE)
+        if (prefs.getBoolean("requested", false)) return
+        prefs.edit().putBoolean("requested", true).apply()
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     // Start only provider initialization, not a hardware camera session.
     // CameraScreen still binds/unbinds use cases according to its lifecycle.
     private fun prewarmCameraProvider() {
@@ -109,7 +130,7 @@ class MainActivity : ComponentActivity() {
                 val uploadFailures by viewModel.momentUploadFailures.collectAsState()
                 // Widget mo app dung man Home: intent extra "open_home" (LocketWidgetUpdater).
                 val openHome = intent.getBooleanExtra("open_home", false)
-                var currentScreen by remember { mutableStateOf(if (isLoggedIn) (if (openHome) "feed" else "camera") else "welcome") }
+                var currentScreen by remember { mutableStateOf(if (isLoggedIn) (if (intent.getBooleanExtra("open_chat", false)) "chat" else if (openHome) "feed" else "camera") else "welcome") }
                 var showFriendsModal by remember { mutableStateOf(false) }
                 var showProfileScreen by remember { mutableStateOf(false) }
                 var selectedGridIndex by remember { mutableStateOf(0) }
@@ -129,7 +150,21 @@ class MainActivity : ComponentActivity() {
                         currentScreen = "welcome"
                         tabStateHolder.removeState("history")
                         tabStateHolder.removeState("chat")
-                    } else prewarmCameraProvider()
+                    } else {
+                        prewarmCameraProvider()
+                        requestNotificationPermission()
+                    }
+                }
+
+                val notificationRequest by chatNotificationRequest.collectAsState()
+                LaunchedEffect(notificationRequest) {
+                    if (notificationRequest > 0 && isLoggedIn) {
+                        showProfileScreen = false
+                        showFriendsModal = false
+                        activeChatFriend = null
+                        viewModel.closeChat()
+                        currentScreen = "chat"
+                    }
                 }
 
                 // Android Back (button or system edge gesture): secondary screens
