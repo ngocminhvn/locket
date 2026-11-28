@@ -718,6 +718,17 @@ fun CameraScreen(
             }
         }
         val moments by viewModel.moments.collectAsState()
+        // Fetch the real personal history once if initial sync has not covered it.
+        // Never synthesize a streak when no moment data is available.
+        LaunchedEffect(currentUser.uid) {
+            if (currentUser.uid.isNotBlank() &&
+                viewModel.ownHistoryCoveredThrough.value == null &&
+                viewModel.ownHistoryHasMore.value &&
+                !viewModel.ownHistoryLoading.value &&
+                moments.none { it.userUid == currentUser.uid }) {
+                viewModel.loadOwnHistory()
+            }
+        }
         val ownStreak = remember(moments, currentUser.uid) {
             viewModel.calculateStreak(moments.filter { it.userUid == currentUser.uid })
         }
