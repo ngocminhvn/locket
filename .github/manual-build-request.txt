@@ -1,2 +1,2 @@
-Build requested: Dev APK with Rust-owned sendChatMessageV2 payload and explicit moment_uid null regression fix.
-Source parent: bb8b3238d3b0ba85797788b3e4084381d7889a0a
+Build requested: Dev APK with duplicate moment reply prevention and keyboard Send action.
+Source parent: 41265cfb4f1afa2f0da139e7411915ce380bfa6b
