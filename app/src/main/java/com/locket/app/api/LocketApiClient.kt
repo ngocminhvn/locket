@@ -1817,6 +1817,74 @@ class LocketApiClient(
      * khi khong co bang chung).
      * timeAgo tinh tu latest_message.created_at that (truoc day hardcode "1d").
      */
+    private fun parseConversationDocument(doc: JsonObject, userUid: String): Conversation? {
+        val fields = doc.getAsJsonObject("fields")
+        val convId = extractString(fields, "uid")
+            .ifBlank { doc.get("name")?.asString?.substringAfterLast("/") ?: "" }
+        if (convId.isBlank()) return null
+
+        // Nguoi doi dien: members[] tru myUid (fallback: field user_id/other_user_id cu)
+        val members = extractStringList(fields, "members")
+        val otherUid = members.firstOrNull { it != userUid }
+            ?: extractString(fields, "user_id").ifBlank { extractString(fields, "other_user_id") }
+
+        // Tin cuoi: latest_message that; fallback field cu neu server con ghi
+        val latestMsg = fields?.getAsJsonObject("latest_message")
+            ?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
+        val lastMsg = if (latestMsg != null) extractString(latestMsg, "body") else ""
+        val lastMsgAtMs = if (latestMsg != null) {
+            extractTimestampMs(latestMsg, "created_at")
+        } else null
+        val latestSender = if (latestMsg != null) extractString(latestMsg, "sender") else ""
+        val latestThumb = if (latestMsg != null) extractString(latestMsg, "thumbnail_url") else ""
+        val fallbackMsg = extractString(fields, "last_message")
+        val fallbackAtMs = extractTimestampMs(fields, "last_message_date")
+
+        // Preview that, theo thu tu uu tien:
+        // 1. body that cua tin cuoi; 2. "Da gui khoanh khac" CHI khi tin cuoi
+        // that su la 1 moment (co thumbnail, khong body) do chinh minh gui;
+        // 3. field last_message cu (neu server con ghi); 4. de trong.
+        // Khong bia chuoi chung cho moi hang khi khong co du lieu that.
+        val finalMsg = when {
+            lastMsg.isNotBlank() -> lastMsg
+            latestThumb.isNotBlank() && latestSender == userUid -> "Đã gửi khoảnh khắc"
+            fallbackMsg.isNotBlank() -> fallbackMsg
+            else -> ""
+        }
+        val lastMessageAtMs = lastMsgAtMs ?: fallbackAtMs
+        val timeAgo = lastMessageAtMs?.let { formatTimeAgo(it / 1000) } ?: ""
+
+        // Chua doc: chi khi is_read == false ro rang
+        val isRead = extractBool(fields, "is_read")
+        val unread = if (isRead == false) 1 else 0
+
+
+        return Conversation(
+                        id = convId,
+                        friend = Friend(uid = otherUid, username = otherUid, displayName = ""),
+                        lastMessage = finalMsg,
+                        timeAgo = timeAgo,
+                        unreadCount = unread,
+                        lastMessageAtMs = lastMessageAtMs
+                    )
+    }
+
+    fun listenConversations(account: String): kotlinx.coroutines.flow.Flow<LiveDelta<Conversation>> = kotlinx.coroutines.flow.flow {
+        check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
+        val db = "projects/locket-4252a/databases/(default)"
+        realtime.listen(db, "$db/documents/users/$account", "conversations", "__name__", null, checkNotNull(getToken())).collect { event ->
+            emit(LiveDelta(event.documents.mapNotNull { parseConversationDocument(it, account) }, event.deletedIds, event.ready))
+        }
+    }
+
+    fun listenFriends(account: String): kotlinx.coroutines.flow.Flow<LiveDelta<String>> = kotlinx.coroutines.flow.flow {
+        check(account == getUid() && ensureFreshToken()) { "Phiên đăng nhập không hợp lệ" }
+        val db = "projects/locket-4252a/databases/(default)"
+        realtime.listen(db, "$db/documents/users/$account", "friends", "__name__", null, checkNotNull(getToken())).collect { event ->
+            emit(LiveDelta(event.documents.map { optString(it, "name").substringAfterLast('/') }.filter { it.isNotBlank() }, event.deletedIds, event.ready))
+        }
+    }
+
     suspend fun fetchConversations(userUid: String, resolveNames: Boolean = true): Result<List<Conversation>> = withContext(Dispatchers.IO) {
         val token = getToken()
         if (token.isNullOrBlank()) {
@@ -1839,61 +1907,7 @@ class LocketApiClient(
             val json = gson.fromJson(resp.body?.string(), JsonObject::class.java)
             val documents = json.getAsJsonArray("documents") ?: JsonArray()
 
-            val convList = mutableListOf<Conversation>()
-            for (docElem in documents) {
-                val doc = docElem.asJsonObject
-                val fields = doc.getAsJsonObject("fields")
-                val convId = extractString(fields, "uid")
-                    .ifBlank { doc.get("name")?.asString?.substringAfterLast("/") ?: "" }
-                if (convId.isBlank()) continue
-
-                // Nguoi doi dien: members[] tru myUid (fallback: field user_id/other_user_id cu)
-                val members = extractStringList(fields, "members")
-                val otherUid = members.firstOrNull { it != userUid }
-                    ?: extractString(fields, "user_id").ifBlank { extractString(fields, "other_user_id") }
-
-                // Tin cuoi: latest_message that; fallback field cu neu server con ghi
-                val latestMsg = fields?.getAsJsonObject("latest_message")
-                    ?.getAsJsonObject("mapValue")?.getAsJsonObject("fields")
-                val lastMsg = if (latestMsg != null) extractString(latestMsg, "body") else ""
-                val lastMsgAtMs = if (latestMsg != null) {
-                    extractTimestampMs(latestMsg, "created_at")
-                } else null
-                val latestSender = if (latestMsg != null) extractString(latestMsg, "sender") else ""
-                val latestThumb = if (latestMsg != null) extractString(latestMsg, "thumbnail_url") else ""
-                val fallbackMsg = extractString(fields, "last_message")
-                val fallbackAtMs = extractTimestampMs(fields, "last_message_date")
-
-                // Preview that, theo thu tu uu tien:
-                // 1. body that cua tin cuoi; 2. "Da gui khoanh khac" CHI khi tin cuoi
-                // that su la 1 moment (co thumbnail, khong body) do chinh minh gui;
-                // 3. field last_message cu (neu server con ghi); 4. de trong.
-                // Khong bia chuoi chung cho moi hang khi khong co du lieu that.
-                val finalMsg = when {
-                    lastMsg.isNotBlank() -> lastMsg
-                    latestThumb.isNotBlank() && latestSender == userUid -> "Đã gửi khoảnh khắc"
-                    fallbackMsg.isNotBlank() -> fallbackMsg
-                    else -> ""
-                }
-                val lastMessageAtMs = lastMsgAtMs ?: fallbackAtMs
-                val timeAgo = lastMessageAtMs?.let { formatTimeAgo(it / 1000) } ?: ""
-
-                // Chua doc: chi khi is_read == false ro rang
-                val isRead = extractBool(fields, "is_read")
-                val unread = if (isRead == false) 1 else 0
-
-                convList.add(
-                    Conversation(
-                        id = convId,
-                        friend = Friend(uid = otherUid, username = otherUid, displayName = ""),
-                        lastMessage = finalMsg,
-                        timeAgo = timeAgo,
-                        unreadCount = unread,
-                        lastMessageAtMs = lastMessageAtMs
-                    )
-                )
-            }
-
+            val convList = documents.mapNotNull { it.takeIf { it.isJsonObject }?.asJsonObject?.let { doc -> parseConversationDocument(doc, userUid) } }
             // Resolve ten that — khong gan uid lam ten nua.
             // Chuoi fallback: (b) fetchUsers (batch 10) -> (c) Firestore
             // users/{uid} doc (xem fetchUserProfileFromDoc) -> (d) UID that.

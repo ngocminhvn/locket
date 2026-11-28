@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.buffer
 internal class FirestoreListen {
     data class Delta(val documents: List<JsonObject> = emptyList(), val deletedIds: Set<String> = emptySet(), val ready: Boolean = false)
 
-    fun listen(database: String, parent: String, collection: String, orderField: String, limit: Int, token: String) = callbackFlow {
+    fun listen(database: String, parent: String, collection: String, orderField: String, limit: Int?, token: String) = callbackFlow {
         val channel = OkHttpChannelBuilder.forAddress("firestore.googleapis.com", 443).useTransportSecurity().build()
         val rpcContext = Context.current().withCancellation()
         val headers = Metadata().apply {
@@ -34,6 +34,7 @@ internal class FirestoreListen {
         val initial = linkedMapOf<String, JsonObject>()
         val canonicalIds = mutableMapOf<String, String>()
         var current = false
+        val activeNames = mutableSetOf<String>()
         fun offer(delta: Delta) {
             if (trySend(delta).isFailure) close(IllegalStateException("Firestore listener buffer closed"))
         }
@@ -43,6 +44,7 @@ internal class FirestoreListen {
                     when (value.responseTypeCase) {
                         ListenResponse.ResponseTypeCase.DOCUMENT_CHANGE -> {
                             val doc = value.documentChange.document
+                            activeNames.add(doc.name)
                             val json = documentJson(doc)
                             canonicalIds[doc.name] = doc.fieldsMap["canonical_uid"]?.stringValue?.takeIf { it.isNotBlank() }
                                 ?: doc.name.substringAfterLast('/')
@@ -51,10 +53,14 @@ internal class FirestoreListen {
                         ListenResponse.ResponseTypeCase.DOCUMENT_DELETE -> {
                             val name = value.documentDelete.document
                             initial.remove(name)
+                            activeNames.remove(name)
                             offer(Delta(deletedIds = setOf(canonicalIds.remove(name) ?: name.substringAfterLast('/'))))
                         }
                         ListenResponse.ResponseTypeCase.DOCUMENT_REMOVE -> {
-                            initial.remove(value.documentRemove.document)
+                            val name = value.documentRemove.document
+                            initial.remove(name)
+                            activeNames.remove(name)
+                            if (limit == null) offer(Delta(deletedIds = setOf(canonicalIds.remove(name) ?: name.substringAfterLast('/'))))
                         }
                         ListenResponse.ResponseTypeCase.TARGET_CHANGE -> {
                             val change = value.targetChange
@@ -64,14 +70,15 @@ internal class FirestoreListen {
                                     offer(Delta(documents = initial.values.toList(), ready = true))
                                     initial.clear()
                                 }
-                                TargetChange.TargetChangeType.RESET -> { current = false; initial.clear() }
+                                TargetChange.TargetChangeType.RESET -> { current = false; initial.clear(); activeNames.clear() }
                                 TargetChange.TargetChangeType.REMOVE -> close(IllegalStateException("Firestore Listen: " + change.cause.message))
                                 else -> Unit
                             }
                         }
                         ListenResponse.ResponseTypeCase.FILTER -> {
                             // Re-open to recover existence-filter mismatches.
-                            close(IllegalStateException("Firestore requested target reconciliation"))
+                            if (value.filter.count != activeNames.size)
+                                close(IllegalStateException("Firestore requested target reconciliation"))
                         }
                         else -> Unit
                     }
@@ -84,14 +91,17 @@ internal class FirestoreListen {
             .addFrom(StructuredQuery.CollectionSelector.newBuilder().setCollectionId(collection))
             .addOrderBy(StructuredQuery.Order.newBuilder().setField(StructuredQuery.FieldReference.newBuilder().setFieldPath(orderField))
                 .setDirection(StructuredQuery.Direction.DESCENDING))
-            .addOrderBy(StructuredQuery.Order.newBuilder().setField(StructuredQuery.FieldReference.newBuilder().setFieldPath("__name__"))
-                .setDirection(StructuredQuery.Direction.DESCENDING))
-            .setLimit(com.google.protobuf.Int32Value.of(limit))
-            .build()
+            .apply {
+                if (orderField != "__name__") addOrderBy(StructuredQuery.Order.newBuilder()
+                    .setField(StructuredQuery.FieldReference.newBuilder().setFieldPath("__name__"))
+                    .setDirection(StructuredQuery.Direction.DESCENDING))
+                if (limit != null) setLimit(com.google.protobuf.Int32Value.of(limit))
+            }.build()
         try {
             rpcContext.run {
                 val stream = FirestoreGrpc.newStub(channel)
-                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers)).listen(observer)
+                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
+                    .withDeadlineAfter(50, java.util.concurrent.TimeUnit.MINUTES).listen(observer)
                 stream.onNext(ListenRequest.newBuilder().setDatabase(database)
                     .setAddTarget(Target.newBuilder().setTargetId(1)
                         .setQuery(Target.QueryTarget.newBuilder().setParent(parent).setStructuredQuery(query))).build())

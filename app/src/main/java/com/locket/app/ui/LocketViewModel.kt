@@ -85,6 +85,12 @@ class LocketViewModel(
     private var feedListenJob: Job? = null
     private var chatListenJob: Job? = null
     private var foreground = false
+    private var cacheHydrated = false
+    private var friendsListenJob: Job? = null
+    private var conversationsListenJob: Job? = null
+    private val friendsSyncLock = Mutex()
+    private var friendsLive = false
+    private var conversationsLive = false
     private val _feedLoading = MutableStateFlow(false)
     val feedLoading = _feedLoading.asStateFlow()
     private val _feedError = MutableStateFlow<String?>(null)
@@ -483,9 +489,10 @@ class LocketViewModel(
                 _conversations.value = savedConversations
                 apiClient.seedUserNames(_friends.value)
                 apiClient.seedUserNames(_moments.value.map { Friend(it.userUid, "", it.userName, it.userAvatarUrl) })
+                cacheHydrated = true
                 prefetchUpcomingMoments(_moments.value, -1)
                 syncAllData()
-            }
+            } else { cacheHydrated = true; if (_isLoggedIn.value) syncAllData() }
         }
     }
 
@@ -534,10 +541,14 @@ class LocketViewModel(
         foreground = active
         if (active) {
             startFeedListener()
+            startSocialListeners()
             _activeConversationId.value?.let { startChatListener(it) }
         } else {
             feedListenJob?.cancel(); feedListenJob = null
             chatListenJob?.cancel(); chatListenJob = null
+            friendsListenJob?.cancel(); friendsListenJob = null
+            conversationsListenJob?.cancel(); conversationsListenJob = null
+            friendsLive = false; conversationsLive = false
             _feedRealtime.value = false
             _chatRealtime.value = false
             videoPrefetchJobs.values.toList().forEach { it.cancel() }
@@ -574,7 +585,7 @@ class LocketViewModel(
 
     private fun startFeedListener() {
         val account = sessionManager.currentUser.uid
-        if (!foreground || !activeAccount(account) || account.isBlank() || feedListenJob?.isActive == true) return
+        if (!foreground || !cacheHydrated || !activeAccount(account) || account.isBlank() || feedListenJob?.isActive == true) return
         feedListenJob = viewModelScope.launch {
             var retry = 1_000L
             while (foreground && activeAccount(account)) {
@@ -637,6 +648,96 @@ class LocketViewModel(
         }
     }
 
+    private suspend fun publishFriends(account: String, friends: List<Friend>) {
+        if (!activeAccount(account)) return
+        apiClient.seedUserNames(friends)
+        if (friends != _friends.value) {
+            cache.saveFriends(friends)
+            if (!activeAccount(account)) return
+            _friends.value = friends
+        }
+        momentWriteLock.withLock {
+            if (!activeAccount(account)) return@withLock
+            val updated = knownMomentNames(_moments.value)
+            if (updated != _moments.value) {
+                cache.saveMoments(updated)
+                if (activeAccount(account)) _moments.value = updated
+            }
+        }
+    }
+
+    private suspend fun refreshFriendsNow(account: String) = friendsSyncLock.withLock {
+        if (!activeAccount(account) || friendsLive) return@withLock
+        apiClient.fetchFriends(account, _friends.value).onSuccess { publishFriends(account, it) }
+    }
+
+    private fun startSocialListeners() {
+        val account = sessionManager.currentUser.uid
+        if (!foreground || !cacheHydrated || account.isBlank() || !activeAccount(account)) return
+        if (friendsListenJob?.isActive != true) friendsListenJob = viewModelScope.launch {
+            var retry = 1_000L
+            while (foreground && activeAccount(account)) {
+                try {
+                    apiClient.listenFriends(account).collect { delta ->
+                        if (!activeAccount(account)) return@collect
+                        friendsSyncLock.withLock {
+                            if (!activeAccount(account)) return@withLock
+                            val existing = _friends.value.associateBy { it.uid }
+                            val updated = if (delta.ready) linkedMapOf<String, Friend>() else LinkedHashMap(existing)
+                            delta.deletedIds.forEach { updated.remove(it) }
+                            val missing = delta.upserts.filter { it !in existing }
+                            val names = if (missing.isEmpty()) emptyMap() else apiClient.resolveUserNames(missing)
+                            delta.upserts.forEach { uid ->
+                                updated[uid] = existing[uid] ?: names[uid]?.let { Friend(uid, uid, it.first, it.second) }
+                                    ?: Friend(uid, uid, uid)
+                            }
+                            publishFriends(account, updated.values.toList())
+                            if (delta.ready) { retry = 1_000L; friendsLive = true }
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { android.util.Log.w("LocketListen", "Friends disconnected: " + e.javaClass.simpleName) }
+                finally { friendsLive = false }
+                if (foreground && activeAccount(account)) {
+                    refreshFriendsNow(account)
+                    kotlinx.coroutines.delay(retry); retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+        if (conversationsListenJob?.isActive != true) conversationsListenJob = viewModelScope.launch {
+            var retry = 1_000L
+            while (foreground && activeAccount(account)) {
+                try {
+                    apiClient.listenConversations(account).collect { delta ->
+                        if (!activeAccount(account)) return@collect
+                        conversationSyncLock.withLock {
+                            if (!activeAccount(account)) return@withLock
+                            val old = _conversations.value
+                            val known = (old.map { it.friend } + _friends.value).associateBy { it.uid }
+                            val updated = if (delta.ready) linkedMapOf<String, Conversation>() else LinkedHashMap(old.associateBy { it.id })
+                            delta.deletedIds.forEach { updated.remove(it) }
+                            delta.upserts.forEach { conv ->
+                                updated[conv.id] = conv.copy(friend = mergeConversationFriend(conv.friend, known[conv.friend.uid]))
+                            }
+                            val resolved = updated.values.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id })
+                            if (resolved != old) {
+                                cache.saveConversations(resolved)
+                                if (activeAccount(account)) _conversations.value = resolved
+                            }
+                            if (delta.ready) { retry = 1_000L; conversationsLive = true }
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { android.util.Log.w("LocketListen", "Conversations disconnected: " + e.javaClass.simpleName) }
+                finally { conversationsLive = false }
+                if (foreground && activeAccount(account)) {
+                    refreshConversations(force = true)
+                    kotlinx.coroutines.delay(retry); retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+    }
+
     fun syncAllData() {
         if (syncJob?.isActive == true) {
             syncAgain = true
@@ -645,6 +746,8 @@ class LocketViewModel(
         val account = sessionManager.currentUser.uid
         if (account.isBlank() || !_isLoggedIn.value) return
         startFeedListener()
+        startSocialListeners()
+        _feedLoading.value = true
         syncJob = viewModelScope.launch {
             _isSyncing.value = true
             try {
@@ -665,29 +768,12 @@ class LocketViewModel(
                             }
                         }
                     }
-                    launch {
-                        apiClient.fetchFriends(account, _friends.value).onSuccess { live ->
-                            if (activeAccount(account)) {
-                                apiClient.seedUserNames(live)
-                                if (live != _friends.value) {
-                                    cache.saveFriends(live)
-                                    if (activeAccount(account)) _friends.value = live
-                                }
-                                momentWriteLock.withLock {
-                                    if (!activeAccount(account)) return@withLock
-                                    val updated = knownMomentNames(_moments.value)
-                                    if (updated != _moments.value) {
-                                        cache.saveMoments(updated)
-                                        if (activeAccount(account)) _moments.value = updated
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    launch { refreshFriendsNow(account) }
                     launch { refreshConversations(force = false) }
                 }
             } finally {
                 _isSyncing.value = false
+                if (activeAccount(account)) _feedLoading.value = false
                 syncJob = null
                 if (syncAgain && activeAccount(account)) {
                     syncAgain = false
@@ -703,6 +789,7 @@ class LocketViewModel(
         if (account.isBlank() || !_isLoggedIn.value) return
         conversationSyncLock.withLock {
             if (!activeAccount(account)) return@withLock
+            if (!force && conversationsLive) return@withLock
             if (!force && lastConversationSync != 0L && now() - lastConversationSync < 30_000L) return@withLock
             apiClient.seedUserNames(_friends.value)
             val live = apiClient.fetchConversations(account, resolveNames = false).getOrNull() ?: return@withLock
@@ -814,10 +901,10 @@ class LocketViewModel(
                 if (_chatMessages.value.isNotEmpty()) _isChatLoading.value = false
                 val recentlyRefreshed = chatRefreshedAt[id]?.let { now() - it < 15_000L } == true
                 val unread = _conversations.value.any { it.id == id && it.unreadCount > 0 }
+                if (activeAccount(account) && activeFriendUid == friendUid) startChatListener(id)
                 if (!initialized || !recentlyRefreshed || unread || saved.isEmpty()) {
                     fetchChatMessagesAndMarkRead(id, resetPagination = !initialized, incremental = initialized)
                 }
-                if (activeAccount(account) && activeFriendUid == friendUid) startChatListener(id)
             } finally {
                 if (activeFriendUid == friendUid) _isChatLoading.value = false
             }
@@ -1582,6 +1669,9 @@ class LocketViewModel(
         syncAgain = false
         syncJob?.cancel()
         feedListenJob?.cancel(); feedListenJob = null
+        friendsListenJob?.cancel(); friendsListenJob = null
+        conversationsListenJob?.cancel(); conversationsListenJob = null
+        friendsLive = false; conversationsLive = false
         _feedRealtime.value = false
         _feedLoading.value = false
         _feedError.value = null

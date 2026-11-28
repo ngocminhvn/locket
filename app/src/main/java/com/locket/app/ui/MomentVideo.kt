@@ -22,6 +22,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cache.CacheDataSource
@@ -87,8 +88,8 @@ internal fun MomentVideo(url: String, modifier: Modifier = Modifier) {
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    val factory by produceState<CacheDataSource.Factory?>(null, url) {
-        value = withContext(Dispatchers.IO) { runCatching { MomentVideoCache.factory(context) }.getOrNull() }
+    val factory by produceState<DataSource.Factory?>(null, url) {
+        value = withContext(Dispatchers.IO) { runCatching { MomentVideoCache.factory(context) }.getOrElse { DefaultDataSource.Factory(context.applicationContext) } }
     }
     val cacheFactory = factory
     if (!foreground || cacheFactory == null) return
