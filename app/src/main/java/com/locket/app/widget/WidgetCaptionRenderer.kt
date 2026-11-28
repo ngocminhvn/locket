@@ -61,7 +61,7 @@ internal object WidgetCaptionRenderer {
         paint.textAlign = Paint.Align.CENTER
         if (review) {
             val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                this.color = 0xFFFDD835.toInt()
+                this.color = 0xFFFFC107.toInt()
                 strokeWidth = 1.2f
                 strokeJoin = Paint.Join.ROUND
             }
@@ -78,6 +78,10 @@ internal object WidgetCaptionRenderer {
                 }
                 path.close()
                 val filled = (rating - i).coerceIn(0f, 1f)
+                starPaint.style = Paint.Style.FILL
+                starPaint.alpha = 97
+                canvas.drawPath(path, starPaint)
+                starPaint.alpha = 255
                 if (filled > 0f) {
                     val save = canvas.save()
                     canvas.clipRect(cx - 8f, cy - 8f, cx - 8f + 16f * filled, cy + 8f)
@@ -85,8 +89,6 @@ internal object WidgetCaptionRenderer {
                     canvas.drawPath(path, starPaint)
                     canvas.restoreToCount(save)
                 }
-                starPaint.style = Paint.Style.STROKE
-                canvas.drawPath(path, starPaint)
             }
             if (comment.isNotBlank()) canvas.drawText(clipped, width / 2f, 37f, paint)
         } else {

@@ -28,6 +28,22 @@ class CaptionOverlaysTest {
     }
 
     @Test
+    fun uploadAcceptsHalfStarStepsOnly() {
+        fun validate(rating: Double): UploadCaption {
+            val raw = """[{"overlay_type":"caption","data":{"type":"review","payload":{"rating":$rating,"comment":""}}}]"""
+            return UploadCaption.validate("", raw)
+        }
+        for (step in 1..10) {
+            val rating = step / 2.0
+            val result = validate(rating)
+            assertEquals(rating.toFloat(), CaptionOverlays.fromRaw(result.overlays.toString())!!.rating, 0f)
+        }
+        for (invalid in listOf(0.0, 0.25, 1.25, 5.5)) {
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { validate(invalid) }
+        }
+    }
+
+    @Test
     fun malformedOrBlankOverlayJsonIsIgnored() {
         assertNull(CaptionOverlays.first(null))
         assertNull(CaptionOverlays.first(""))

@@ -47,6 +47,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -112,7 +116,7 @@ internal fun rememberMomentReviewSlots(
     var weather by remember(bitmap) { mutableStateOf(CaptionLocationData.recentWeather()?.label.orEmpty()) }
     var fetchingCaption by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
     var permissionTarget by remember(bitmap) { mutableStateOf<CaptionKind?>(null) }
-    var rating by remember(bitmap) { mutableIntStateOf(0) }
+    var rating by remember(bitmap) { mutableFloatStateOf(0f) }
     var reviewComment by remember(bitmap) { mutableStateOf("") }
     var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
     var musicPicker by remember(bitmap) { mutableStateOf(false) }
@@ -152,7 +156,7 @@ internal fun rememberMomentReviewSlots(
 
     fun value(k: CaptionKind): String = when (k) {
         CaptionKind.TEXT -> text.trim()
-        CaptionKind.REVIEW -> if (rating == 0) "" else "★".repeat(rating) + "☆".repeat(5 - rating)
+        CaptionKind.REVIEW -> if (rating == 0f) "" else "★${formatReviewRating(rating)}"
         CaptionKind.LOCATION -> location.trim().let { if (it.isBlank()) "" else "📍 $it" }
         CaptionKind.WEATHER -> weather.trim()
         CaptionKind.TIME -> time
@@ -174,7 +178,7 @@ internal fun rememberMomentReviewSlots(
         val o = com.locket.app.model.CaptionOverlays
         return when (k) {
             CaptionKind.TEXT -> o.make("standard", text.trim(), blur = "ultra_thin", maxLines = 4)
-            CaptionKind.REVIEW -> o.make("review", "★$rating" + if (reviewComment.isBlank()) "" else " - $reviewComment",
+            CaptionKind.REVIEW -> o.make("review", "★${formatReviewRating(rating)}" + if (reviewComment.isBlank()) "" else " - $reviewComment",
                 payload = com.google.gson.JsonObject().apply { addProperty("rating", rating); addProperty("comment", reviewComment) })
             CaptionKind.LOCATION -> locationFix?.let { fix ->
                 o.make("location", location, payload = com.google.gson.JsonObject().apply {
@@ -413,23 +417,17 @@ internal fun rememberMomentReviewSlots(
                                 else -> "Thêm một tin nhắn"
                             }
                         }
-                        val shape = RoundedCornerShape(30.dp)
-                        val base = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).clip(shape)
                         if (item == CaptionKind.REVIEW) {
-                            Column(base.background(Color(0x99000000)).padding(horizontal = 12.dp, vertical = 10.dp),
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                                .clip(RoundedCornerShape(30.dp)).background(Color(0x99000000)),
                                 horizontalAlignment = Alignment.CenterHorizontally) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(1.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    repeat(5) { index ->
-                                        IconButton(onClick = { rating = index + 1 }, enabled = !isPosting, modifier = Modifier.size(28.dp)) {
-                                            OverlayReviewStar(fill = if (index < rating) 1f else 0f,
-                                                modifier = Modifier.size(21.dp).semantics { contentDescription = "Đánh giá ${index + 1} sao" })
-                                        }
-                                    }
-                                }
-                                if (rating > 0) {
-                                    Text(reviewComment.ifBlank { "Viết nhận xét…" }, color = Color.White.copy(alpha = if (reviewComment.isBlank()) 0.45f else 1f),
-                                        fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-                                        modifier = Modifier.clickable(enabled = !isPosting) { draft = reviewComment; editor = CaptionKind.REVIEW }.padding(top = 8.dp))
+                                ReviewRatingSelector(rating, enabled = !isPosting && !transforming && zoom <= 1f,
+                                    onRatingChange = { rating = it })
+                                if (rating > 0f && reviewComment.isNotBlank()) {
+                                    Text(reviewComment, color = Color.White, fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.clickable(enabled = !isPosting) { draft = reviewComment; editor = CaptionKind.REVIEW }
+                                            .padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
                                 }
                             }
                         } else {
@@ -545,6 +543,10 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("Aa Văn bản") { choose(CaptionKind.TEXT) }
                     CaptionChip("Review", icon = Icons.Default.Star, iconTint = LocketYellow) { choose(CaptionKind.REVIEW) }
                 }
+                if (kind == CaptionKind.REVIEW && rating > 0f) {
+                    Spacer(Modifier.height(8.dp))
+                    CaptionChip("Viết nhận xét") { sheet = false; draft = reviewComment; editor = CaptionKind.REVIEW }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CaptionChip("Music", icon = Icons.Default.MusicNote, iconTint = Color(0xFF1ED760)) { choose(CaptionKind.MUSIC) }
@@ -625,6 +627,47 @@ internal fun rememberMomentReviewSlots(
         )
     }
     return slots
+}
+
+private fun formatReviewRating(rating: Float): String =
+    if (rating % 1f == 0f) rating.toInt().toString() else rating.toString()
+
+/** Capture only gestures that begin on the star row; the rest of the photo still pages normally. */
+@Composable
+private fun ReviewRatingSelector(rating: Float, enabled: Boolean, onRatingChange: (Float) -> Unit) {
+    val update by rememberUpdatedState(onRatingChange)
+    val gesture = if (enabled) Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            fun updateAt(x: Float) {
+                val fraction = (x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                update((fraction * 10f).roundToInt() / 2f)
+            }
+            down.consume()
+            updateAt(down.position.x)
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.isConsumed || event.changes.count { it.pressed } > 1) break
+                updateAt(change.position.x)
+                change.consume()
+                if (!change.pressed) break
+            }
+        }
+    } else Modifier
+    Row(Modifier.semantics {
+        contentDescription = "Đánh giá sao"
+        progressBarRangeInfo = ProgressBarRangeInfo(rating, 0f..5f, 9)
+        if (enabled) setProgress { value ->
+            update((value.coerceIn(0f, 5f) * 2f).roundToInt() / 2f)
+            true
+        }
+    }.then(gesture).padding(horizontal = 7.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        repeat(5) { index ->
+            OverlayReviewStar((rating - index).coerceIn(0f, 1f), Modifier.size(25.dp))
+        }
+    }
 }
 
 @Composable

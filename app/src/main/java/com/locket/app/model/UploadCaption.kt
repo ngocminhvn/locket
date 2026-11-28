@@ -22,7 +22,7 @@ internal class UploadCaption private constructor(val caption: String, val overla
                 val rating = payload?.get("rating")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }
                     ?.asDouble
                 val comment = CaptionOverlays.string(payload, "comment")
-                require(rating != null && rating in 1.0..5.0 && rating % 1.0 == 0.0 &&
+                require(rating != null && rating in 0.5..5.0 && (rating * 2.0) % 1.0 == 0.0 &&
                     comment.codePointCount(0, comment.length) <= 36) { "Đánh giá không hợp lệ" }
             }
             return UploadCaption(caption.takeIf { type == "standard" }.orEmpty(), overlays)
