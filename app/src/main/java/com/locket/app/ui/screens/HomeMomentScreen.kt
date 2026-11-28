@@ -14,6 +14,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.draw.clipToBounds
 import coil.request.ImageRequest
 import androidx.compose.foundation.layout.*
@@ -472,8 +475,29 @@ internal fun MomentReactionBar(
     onReaction: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var messageText by remember(currentMoment?.id) { mutableStateOf("") }
+    val currentUser by viewModel.currentUser.collectAsState()
+    val sendingReplies by viewModel.sendingMomentReplies.collectAsState()
+    val replyKey = currentMoment?.id?.let { currentUser.uid to it }
+    val sending = replyKey != null && replyKey in sendingReplies
+    var messageText by remember(currentMoment?.id, currentUser.uid) { mutableStateOf("") }
     var showEmoji by remember(currentMoment?.id) { mutableStateOf(false) }
+    fun sendReply() {
+        val moment = currentMoment ?: return
+        val text = messageText
+        if (text.isBlank() || (currentUser.uid to moment.id) in viewModel.sendingMomentReplies.value) return
+        viewModel.sendChatMessage(
+            receiverUid = moment.userUid,
+            message = text,
+            momentUid = moment.id,
+            onSuccess = {
+                if (messageText == text) messageText = ""
+                Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
+            },
+            onError = { err ->
+                Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
+            }
+        )
+    }
     fun react(emoji: String) {
         currentMoment?.let {
             onReaction(emoji)
@@ -506,7 +530,9 @@ internal fun MomentReactionBar(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendReply() })
                 )
 
                 // Quick emoji buttons calling reactToMoment
@@ -536,26 +562,8 @@ internal fun MomentReactionBar(
                 // Send message button if text entered
                 if (messageText.isNotBlank()) {
                     IconButton(
-                        onClick = {
-                            if (currentMoment != null) {
-                                // Tra loi moment: gui kem moment_uid that (shape goc
-                                // sendChatMessageV2 co moment_uid); chi xoa o nhap
-                                // + toast khi server tra 200.
-                                val text = messageText
-                                viewModel.sendChatMessage(
-                                    receiverUid = currentMoment.userUid,
-                                    message = text,
-                                    momentUid = currentMoment.id,
-                                    onSuccess = {
-                                        Toast.makeText(context, "Đã gửi tin nhắn!", Toast.LENGTH_SHORT).show()
-                                        messageText = ""
-                                    },
-                                    onError = { err ->
-                                        Toast.makeText(context, "Lỗi: $err", Toast.LENGTH_LONG).show()
-                                    }
-                                )
-                            }
-                        },
+                        onClick = { sendReply() },
+                        enabled = currentMoment != null && !sending,
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(

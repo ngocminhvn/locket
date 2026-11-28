@@ -493,6 +493,18 @@ class LocketViewModel(
     data class PendingChat(val token: String, val receiver: String, val text: String, val createdAt: Long, val acknowledged: Boolean = false)
     private val _pendingChat = MutableStateFlow<List<PendingChat>>(emptyList())
     val pendingChat = _pendingChat.asStateFlow()
+    // Lock per account and moment, across Home recomposition/navigation.
+    private val _sendingMomentReplies = MutableStateFlow<Set<Pair<String, String>>>(emptySet())
+    val sendingMomentReplies = _sendingMomentReplies.asStateFlow()
+
+    private fun tryBeginMomentReply(key: Pair<String, String>): Boolean {
+        while (true) {
+            val current = _sendingMomentReplies.value
+            if (key in current) return false
+            if (_sendingMomentReplies.compareAndSet(current, current + key)) return true
+        }
+    }
+
     private fun reconcilePending(messages: List<ChatMessage>) {
         val tokens = messages.mapNotNull { it.clientToken }.toSet()
         if (tokens.isNotEmpty()) _pendingChat.update { rows -> rows.filterNot { it.token in tokens } }
@@ -1282,31 +1294,41 @@ class LocketViewModel(
         onError: (String) -> Unit = {}
     ) {
         val account = sessionManager.currentUser.uid
+        if (!activeAccount(account)) {
+            onError("Phiên đăng nhập không hợp lệ")
+            return
+        }
+        val replyKey = momentUid?.takeIf { it.isNotBlank() }?.let { account to it }
+        if (replyKey != null && !tryBeginMomentReply(replyKey)) return
         val token = java.util.UUID.randomUUID().toString()
         val pending = PendingChat(token, receiverUid, message, System.currentTimeMillis())
         if (activeFriendUid == receiverUid && momentUid == null && activeAccount(account)) _pendingChat.update { it + pending }
         viewModelScope.launch {
-            val res = apiClient.sendChatMessage(receiverUid, message, momentUid, token)
-            if (!activeAccount(account)) return@launch
-            if (res.isSuccess) {
-                _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(acknowledged = true) else it } }
-                onSuccess()
-                val current = _activeConversationId.value
-                if (activeFriendUid == receiverUid && current != null) {
-                    if (!_chatRealtime.value) launch { fetchChatMessagesAndMarkRead(current, incremental = true) }
-                    else launch {
-                        kotlinx.coroutines.delay(3_000L)
-                        if (activeAccount(account) && _activeConversationId.value == current && _pendingChat.value.any { it.token == token }) {
-                            fetchChatMessagesAndMarkRead(current, incremental = true)
+            try {
+                val res = apiClient.sendChatMessage(receiverUid, message, momentUid, token)
+                if (!activeAccount(account)) return@launch
+                if (res.isSuccess) {
+                    _pendingChat.update { rows -> rows.map { if (it.token == token) it.copy(acknowledged = true) else it } }
+                    onSuccess()
+                    val current = _activeConversationId.value
+                    if (activeFriendUid == receiverUid && current != null) {
+                        if (!_chatRealtime.value) launch { fetchChatMessagesAndMarkRead(current, incremental = true) }
+                        else launch {
+                            kotlinx.coroutines.delay(3_000L)
+                            if (activeAccount(account) && _activeConversationId.value == current && _pendingChat.value.any { it.token == token }) {
+                                fetchChatMessagesAndMarkRead(current, incremental = true)
+                            }
                         }
-                    }
-                    if (!conversationsLive) launch { refreshConversations(force = false) }
-                } else if (activeFriendUid == receiverUid) {
-                    openChat(receiverUid)
-                } else refreshConversations()
-            } else {
-                _pendingChat.update { rows -> rows.filterNot { it.token == token } }
-                onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
+                        if (!conversationsLive) launch { refreshConversations(force = false) }
+                    } else if (activeFriendUid == receiverUid) {
+                        openChat(receiverUid)
+                    } else refreshConversations()
+                } else {
+                    _pendingChat.update { rows -> rows.filterNot { it.token == token } }
+                    onError(res.exceptionOrNull()?.message ?: "Lỗi gửi tin nhắn")
+                }
+            } finally {
+                if (replyKey != null) _sendingMomentReplies.update { it - replyKey }
             }
         }
     }

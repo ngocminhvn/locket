@@ -46,6 +46,14 @@ class LocketApiClient(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    // A chat write must not be automatically replayed after an ambiguous network failure.
+    private val chatSendClient by lazy {
+        client.newBuilder()
+            .retryOnConnectionFailure(false)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
     private val gson = Gson()
     private val realtime by lazy { FirestoreListen() }
 
@@ -2420,7 +2428,15 @@ class LocketApiClient(
 
     private suspend fun callEndpointBytes(endpoint: String, payload: ByteArray, propagateFailure: Boolean = false, cancellable: Boolean = false): ByteArray? {
         val url = "$FUNCTIONS_BASE_URL/$endpoint"
-        val body = payload.toRequestBody("application/json".toMediaType())
+        val encoded = payload.toRequestBody("application/json".toMediaType())
+        val isChatSend = endpoint == "sendChatMessageV2"
+        val transport = if (isChatSend) chatSendClient else client
+        val body = if (isChatSend) object : okhttp3.RequestBody() {
+            override fun contentType() = encoded.contentType()
+            override fun contentLength() = encoded.contentLength()
+            override fun writeTo(sink: okio.BufferedSink) = encoded.writeTo(sink)
+            override fun isOneShot() = true
+        } else encoded
         fun buildRequest(token: String?): Request {
             val builder = Request.Builder()
                 .url(url)
@@ -2439,12 +2455,12 @@ class LocketApiClient(
             }
             withContext(Dispatchers.IO) {
                 val usedToken = getToken()
-                var resp = client.newCall(buildRequest(usedToken)).execute()
+                var resp = transport.newCall(buildRequest(usedToken)).execute()
                 if (resp.code == 401) {
                     resp.close()
                     // idToken het han (song 1 gio) -> refresh roi thu lai dung 1 lan
                     if (refreshIdToken(usedToken)) {
-                        resp = client.newCall(buildRequest(getToken())).execute()
+                        resp = transport.newCall(buildRequest(getToken())).execute()
                     } else {
                         if (propagateFailure) error("Phiên đăng nhập hết hạn (HTTP 401)")
                         return@withContext null

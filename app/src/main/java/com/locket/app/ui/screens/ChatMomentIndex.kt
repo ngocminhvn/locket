@@ -1,6 +1,7 @@
 package com.locket.app.ui.screens
 
 import com.locket.app.model.Moment
+import com.locket.app.model.ChatMessage
 import java.net.URI
 
 /** Identity of the stored thumbnail, independent of its download token. */
@@ -48,4 +49,37 @@ internal class ChatMomentIndex(moments: List<Moment>) {
             ?: key?.let { byObject[it] }?.takeIf { it.matchesOwner() }
         return ChatMomentAttachment(linked?.userUid ?: key?.owner, linked)
     }
+}
+
+/**
+ * Keep every real message, but render a consecutive run of replies to the same
+ * photo from the same sender with one attachment card. A standalone photo is
+ * never hidden, and different canonical IDs never collapse.
+ */
+internal fun repeatedChatMomentCards(messages: List<ChatMessage>): Set<String> {
+    val repeated = mutableSetOf<String>()
+    var previous: ChatMessage? = null
+    for (message in messages) {
+        val prior = previous
+        if (prior != null && message.text.isNotBlank() &&
+            prior.conversationId == message.conversationId &&
+            prior.senderUid == message.senderUid &&
+            sameChatMoment(prior, message)
+        ) {
+            repeated += message.id
+        }
+        previous = message
+    }
+    return repeated
+}
+
+private fun sameChatMoment(first: ChatMessage, second: ChatMessage): Boolean {
+    val aUrl = first.thumbnailUrl?.takeIf { it.isNotBlank() } ?: return false
+    val bUrl = second.thumbnailUrl?.takeIf { it.isNotBlank() } ?: return false
+    val aId = first.replyMomentUid?.takeIf { it.isNotBlank() }
+    val bId = second.replyMomentUid?.takeIf { it.isNotBlank() }
+    if (aId != null && bId != null) return aId == bId
+    if (aUrl == bUrl) return true
+    val key = chatThumbnailKey(aUrl) ?: return false
+    return key == chatThumbnailKey(bUrl)
 }

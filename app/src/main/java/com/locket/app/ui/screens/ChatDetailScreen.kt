@@ -148,6 +148,7 @@ fun ChatDetailScreen(
     }
     val listState = rememberLazyListState()
     val newestFirst = remember(messages) { messages.asReversed() }
+    val repeatedMomentCards = remember(messages) { repeatedChatMomentCards(messages) }
     val currentMessages by rememberUpdatedState(messages)
 
     val displayName = friend.displayName.ifBlank { friend.username.ifBlank { friend.uid } }
@@ -299,7 +300,7 @@ fun ChatDetailScreen(
                     }
                     items(newestFirst, key = { it.id }) { msg ->
                         val timeStr = formatTime(msg.createdAtMs)
-                        if (msg.thumbnailUrl != null) {
+                        if (!msg.thumbnailUrl.isNullOrBlank() && msg.id !in repeatedMomentCards) {
                             // Shared Moment Card in Chat (tin kem moment that)
                             Column(
                                 modifier = Modifier
