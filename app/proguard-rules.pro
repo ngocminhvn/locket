@@ -13,6 +13,7 @@
 # which crashes Firestore Listen during startup in minified Release builds.
 -keepclassmembers enum com.google.** {
     public static ** valueOf(com.google.protobuf.Descriptors$EnumValueDescriptor);
+    public com.google.protobuf.Descriptors$EnumValueDescriptor getValueDescriptor();
 }
 
 -dontwarn com.google.errorprone.annotations.**
