@@ -838,7 +838,25 @@ class LocketViewModel(
                             }.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id })
                             if (resolved != old) {
                                 cache.saveConversations(resolved)
-                                if (activeAccount(account)) _conversations.value = resolved
+                                if (activeAccount(account)) {
+                                    _conversations.value = resolved
+                                    // Initial Listen snapshots and reconnects establish a baseline,
+                                    // not new notifications. Only a newer incoming unread update
+                                    // in an established live stream can alert.
+                                    if (foreground && conversationsLive) {
+                                        val previous = old.associateBy { it.id }
+                                        resolved.forEach { conv ->
+                                            val before = previous[conv.id]
+                                            val timestamp = conv.lastMessageAtMs
+                                            if (conv.id != _activeConversationId.value &&
+                                                timestamp != null &&
+                                                timestamp > (before?.lastMessageAtMs ?: 0L) &&
+                                                conv.unreadCount > (before?.unreadCount ?: 0)) {
+                                                LocketApplication.instance.notifyNewMessage(conv)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             if (delta.ready) { retry = 1_000L; conversationsLive = true }
                         }
@@ -1967,6 +1985,7 @@ class LocketViewModel(
         _historyError.value = null
         _historyLoading.value = false
         sessionManager.logout()
+        LocketApplication.instance.clearMessageNotifications()
         LocketApplication.instance.ownAvatarStore.hide(oldOwner)
         viewModelScope.launch { LocketApplication.instance.ownAvatarStore.clear(oldOwner) }
         cacheClearJob = viewModelScope.launch { momentWriteLock.withLock { cache.clearAll() } }
