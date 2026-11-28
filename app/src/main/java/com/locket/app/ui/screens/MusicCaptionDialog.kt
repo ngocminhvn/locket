@@ -190,6 +190,12 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
         onSelect(music)
     }
 
+    fun openSpotifySearch(term: String) {
+        val uri = Uri.parse("https://open.spotify.com/search/" + Uri.encode(term))
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            .onFailure { searchError = "Không mở được Spotify. Hãy dùng liên kết bài hát." }
+    }
+
     fun pick(music: CaptionMusic) {
         if (selectedUrl != null) return
         if (music.artwork != null) { finish(music); return }
@@ -208,7 +214,10 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
     }
 
     LaunchedEffect(normalized, linkFallback, retrySearch) {
-        results = recent.filter { normalized.isNotBlank() && (it.title.contains(normalized, ignoreCase = true) || it.artist.contains(normalized, ignoreCase = true)) }.map { MusicSearchHit(it) }
+        val local = recent.filter {
+            normalized.isNotBlank() && (it.title.contains(normalized, ignoreCase = true) || it.artist.contains(normalized, ignoreCase = true))
+        }.map { MusicSearchHit(it) }
+        results = local
         searchError = null
         searching = false
         if (normalized.length < 2 || linkFallback) return@LaunchedEffect
@@ -216,8 +225,7 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
         try {
             delay(550L)
             MusicCaptionCatalog.search(normalized) { hits ->
-                val local = recent.filter { it.title.contains(normalized, ignoreCase = true) || it.artist.contains(normalized, ignoreCase = true) }.map { MusicSearchHit(it) }
-                results = (local + hits).distinctBy { it.music.spotifyUrl }
+                results = (local + hits).distinctBy { it.spotifyUrl ?: it.key }
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { searchError = e.message ?: "Không tìm được bài hát" }
@@ -265,8 +273,15 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
                     if (initial != null) item { TextButton(enabled = !isBusy, onClick = { finish(null) }) { Text("Bỏ bài hát") } }
                 } else {
                     item { Text("Kết quả tìm kiếm", color = Color.White.copy(alpha = 0.55f), fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp)) }
-                    items(results, key = { it.music.spotifyUrl }) { hit ->
-                        MusicPickerRow(hit.music, hit.coverHint, selectedUrl, !isBusy, onClick = { pick(hit.music) })
+                    items(results, key = { it.key }) { hit ->
+                        val music = hit.linkedMusic()
+                        if (music != null) {
+                            MusicPickerRow(music, hit.coverHint, selectedUrl, !isBusy, onClick = { pick(music) })
+                        } else {
+                            MusicPickerRow(hit.title, hit.artist, null, false, !isBusy,
+                                subtitle = "Tìm bài này trên Spotify",
+                                onClick = { openSpotifySearch("${hit.title} ${hit.artist}") })
+                        }
                     }
                     if (searching) item {
                         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -276,24 +291,20 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
                         }
                     }
                     if (!searching && results.isEmpty() && searchError == null) item {
-                        Text("Không tìm thấy bài có liên kết Spotify trong MusicBrainz. Thử tên khác hoặc tìm trên Spotify.",
-                            color = Color.White.copy(alpha = 0.65f), modifier = Modifier.padding(8.dp), fontSize = 14.sp)
-                        TextButton(enabled = !isBusy, onClick = {
-                            val uri = Uri.parse("https://open.spotify.com/search/" + Uri.encode(normalized))
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                                .onFailure { searchError = "Không mở được Spotify." }
-                        }) { Text("Tìm trên Spotify", color = green) }
+                        Text("Không tìm thấy bài hát trong MusicBrainz.", color = Color.White.copy(alpha = 0.65f),
+                            modifier = Modifier.padding(8.dp), fontSize = 14.sp)
+                        TextButton(enabled = !isBusy, onClick = { openSpotifySearch(normalized) }) {
+                            Text("Tìm trên Spotify", color = green)
+                        }
                     }
                     searchError?.let { message ->
                         item {
                             Text(message, color = Color.White.copy(alpha = 0.75f), modifier = Modifier.padding(8.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(enabled = !isBusy && !searching, onClick = { retrySearch++ }) { Text("Thử lại", color = green) }
-                                TextButton(enabled = !isBusy, onClick = {
-                                    val uri = Uri.parse("https://open.spotify.com/search/" + Uri.encode(normalized))
-                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                                        .onFailure { searchError = "Không mở được Spotify. Hãy dùng liên kết bài hát." }
-                                }) { Text("Tìm trên Spotify", color = green) }
+                                TextButton(enabled = !isBusy, onClick = { openSpotifySearch(normalized) }) {
+                                    Text("Tìm trên Spotify", color = green)
+                                }
                             }
                         }
                     }
@@ -312,20 +323,28 @@ internal fun MusicCaptionDialog(initial: CaptionMusic?, onDismiss: () -> Unit, o
 @Composable
 private fun MusicPickerRow(music: CaptionMusic, coverHint: String?, selectedUrl: String?, enabled: Boolean,
     subtitle: String? = null, onClick: () -> Unit) {
+    MusicPickerRow(music.title, music.artist, music.artwork ?: coverHint,
+        selectedUrl == music.spotifyUrl, enabled, subtitle, canSelect = true, onClick = onClick)
+}
+
+@Composable
+private fun MusicPickerRow(title: String, artist: String, artwork: String?, pending: Boolean, enabled: Boolean,
+    subtitle: String?, canSelect: Boolean = false, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 6.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF383838)), contentAlignment = Alignment.Center) {
             Icon(Icons.Default.MusicNote, null, tint = Color(0xFF1ED760), modifier = Modifier.size(24.dp))
-            (music.artwork ?: coverHint)?.let { AsyncImage(it, null, Modifier.fillMaxSize(),
+            artwork?.let { AsyncImage(it, null, Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop) }
         }
         Column(Modifier.weight(1f)) {
-            Text(music.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(music.artist, color = Color.White.copy(alpha = 0.60f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(artist, color = Color.White.copy(alpha = 0.60f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.let { Text(it, color = Color(0xFF1ED760), fontSize = 12.sp) }
         }
-        if (selectedUrl == music.spotifyUrl) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color(0xFF1ED760))
-        else Icon(Icons.Default.AddCircleOutline, "Chọn bài hát", tint = Color.White.copy(alpha = 0.75f))
+        if (pending) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Color(0xFF1ED760))
+        else Icon(if (canSelect) Icons.Default.AddCircleOutline else Icons.Default.Search,
+            if (canSelect) "Chọn bài hát" else "Tìm trên Spotify", tint = Color.White.copy(alpha = 0.75f))
     }
 }

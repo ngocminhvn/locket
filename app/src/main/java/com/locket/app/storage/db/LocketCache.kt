@@ -42,7 +42,7 @@ class LocketCache(
 
     suspend fun saveMomentChanges(account: String, before: List<Moment>, after: List<Moment>, tombstones: Set<String>) {
         val delta = withContext(Dispatchers.Default) {
-            val old = before.associateBy { it.id }
+            val old = before.associateByTo(HashMap()) { it.id }
             val deleted = HashSet(tombstones)
             val upserts = after.mapNotNull { next ->
                 val previous = old.remove(next.id)

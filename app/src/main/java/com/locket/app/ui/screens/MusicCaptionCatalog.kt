@@ -15,7 +15,18 @@ import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-internal data class MusicSearchHit(val music: CaptionMusic, val coverHint: String? = null)
+internal data class MusicSearchHit(
+    val key: String,
+    val title: String,
+    val artist: String,
+    val spotifyUrl: String? = null,
+    val artwork: String? = null,
+    val coverHint: String? = null
+) {
+    constructor(music: CaptionMusic) : this(music.spotifyUrl, music.title, music.artist, music.spotifyUrl, music.artwork)
+
+    fun linkedMusic(): CaptionMusic? = spotifyUrl?.let { CaptionMusic(it, title, artist, artwork) }
+}
 
 internal object MusicCaptionCatalog {
     private val client = OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).build()
@@ -82,7 +93,9 @@ internal object MusicCaptionCatalog {
         if (relations != null) for (i in 0 until relations.length()) {
             val rel = relations.optJSONObject(i) ?: continue
             val raw = rel.optJSONObject("url")?.optString("resource").orEmpty()
-            link = SpotifyCaptionSource.canonicalTrack(raw)
+            link = SpotifyCaptionSource.canonicalTrack(
+                if (raw.startsWith("http://", ignoreCase = true)) "https://" + raw.substring(7) else raw
+            )
             if (link != null) break
         }
         synchronized(cacheLock) {
@@ -158,40 +171,46 @@ internal object MusicCaptionCatalog {
             throw e
         }
         val rows = result.optJSONArray("recordings") ?: error("Phản hồi MusicBrainz không hợp lệ")
-        val candidates = (0 until minOf(rows.length(), 25)).mapNotNull { rows.optJSONObject(it) }
-            .filter { mbid.matches(it.optString("id")) && it.optString("title").isNotBlank() && artists(it).isNotBlank() }
-            .distinctBy { it.optString("id") }
-        val ids = candidates.map { it.optString("id") }
-        var mappingError: Exception? = null
-        val mapped = try { spotifyBatch(ids) }
-        catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (e: Exception) { mappingError = e; emptyMap() }
-        val matches = mutableListOf<MusicSearchHit>()
-        val seen = mutableSetOf<String>()
-        fun add(row: JSONObject, link: String) {
-            if (!seen.add(link) || matches.size >= 15) return
+        val candidates = (0 until minOf(rows.length(), 25)).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            val id = row.optString("id").takeIf { mbid.matches(it) } ?: return@mapNotNull null
+            val title = row.optString("title").trim()
+            val artist = artists(row)
+            if (title.isBlank() || artist.isBlank()) return@mapNotNull null
             val release = row.optJSONArray("releases")?.optJSONObject(0)?.optString("id")
                 ?.takeIf { mbid.matches(it) }
-            matches += MusicSearchHit(CaptionMusic(link, row.optString("title").trim(), artists(row), null),
-                release?.let { "https://coverartarchive.org/release/$it/front-250" })
+            MusicSearchHit(id, title, artist, coverHint = release?.let { "https://coverartarchive.org/release/$it/front-250" })
+        }.distinctBy { it.key }
+        val links = mutableMapOf<String, String>()
+        fun visible(): List<MusicSearchHit> {
+            val (linked, unlinked) = candidates.partition { it.key in links }
+            val enriched = linked.map { it.copy(spotifyUrl = links[it.key]) }.distinctBy { it.spotifyUrl }
+            return (enriched + unlinked.distinctBy { it.title to it.artist }).take(15)
         }
-        candidates.forEach { row -> mapped[row.optString("id")]?.let { add(row, it) } }
-        onResults(matches.toList())
-        // Keep direct URL relations as a bounded fallback, never N requests
-        // for every candidate. Preserve valid batch hits even when this fails.
-        if (matches.size < 5) {
-            for (row in candidates.filterNot { mapped.containsKey(it.optString("id")) }.take(3)) {
-                val link = try { spotifyUrl(row.optString("id")) }
+        onResults(visible())
+
+        var mappingAvailable = true
+        try {
+            links.putAll(spotifyBatch(candidates.map { it.key }))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { mappingAvailable = false }
+        if (links.isNotEmpty()) onResults(visible())
+
+        // At most three direct MusicBrainz lookups when the batch leaves few matches.
+        if (links.values.toSet().size < 5) {
+            for (candidate in candidates.filterNot { it.key in links }.take(3)) {
+                val link = try { spotifyUrl(candidate.key) }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                catch (e: Exception) { mappingError = e; break }
-                if (link != null) { add(row, link); onResults(matches.toList()) }
+                catch (_: Exception) { mappingAvailable = false; break }
+                if (link != null) {
+                    links[candidate.key] = link
+                    onResults(visible())
+                }
             }
         }
-        if (matches.isEmpty() && mappingError != null) throw mappingError!!
-        if (matches.isNotEmpty()) synchronized(cacheLock) {
-            queryCache[key] = now() to matches.toList()
+        if (mappingAvailable) synchronized(cacheLock) {
+            queryCache[key] = now() to visible()
             while (queryCache.size > 24) queryCache.remove(queryCache.keys.first())
         }
-        onResults(matches.toList())
     }
 }

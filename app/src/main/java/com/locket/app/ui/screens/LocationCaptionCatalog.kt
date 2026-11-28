@@ -125,7 +125,7 @@ internal object LocationCaptionCatalog {
     }
 
     private fun parse(json: JSONObject, origin: Location): List<CaptionPlace> {
-        val features = json.optJSONArray("features") ?: return emptyList()
+        val features = json.optJSONArray("features") ?: error("Phản hồi địa điểm không hợp lệ")
         val result = LinkedHashMap<String, CaptionPlace>()
         for (index in 0 until features.length()) {
             val feature = features.optJSONObject(index) ?: continue
