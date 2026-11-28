@@ -116,6 +116,8 @@ internal fun rememberMomentReviewSlots(
     var reviewComment by remember(bitmap) { mutableStateOf("") }
     var music by remember(bitmap) { mutableStateOf<CaptionMusic?>(null) }
     var musicPicker by remember(bitmap) { mutableStateOf(false) }
+    var locationPicker by remember(bitmap) { mutableStateOf(false) }
+    var locationPickerFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
     var locationFix by remember(bitmap) { mutableStateOf<android.location.Location?>(null) }
     var weatherData by remember(bitmap) { mutableStateOf<CaptionWeather?>(CaptionLocationData.recentWeather()) }
     var sheet by remember { mutableStateOf(false) }
@@ -222,18 +224,39 @@ internal fun rememberMomentReviewSlots(
         }
     }
 
+    fun openLocationPicker() {
+        if (fetchingCaption != null) return
+        fetchingCaption = CaptionKind.LOCATION
+        scope.launch {
+            try {
+                locationPickerFix = CaptionLocationData.currentLocation(context)
+                locationPicker = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Không lấy được vị trí. Hãy bấm lại.", Toast.LENGTH_LONG).show()
+            } finally {
+                fetchingCaption = null
+            }
+        }
+    }
+
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val target = permissionTarget
         permissionTarget = null
         if (target != null) {
-            if (CaptionLocationData.hasPermission(context)) refreshCaption(target)
+            if (CaptionLocationData.hasPermission(context)) {
+                if (target == CaptionKind.LOCATION) openLocationPicker() else refreshCaption(target)
+            }
             else Toast.makeText(context, "Cần quyền vị trí để lấy địa danh hoặc thời tiết. Có thể cấp trong Cài đặt.", Toast.LENGTH_LONG).show()
         }
     }
 
     fun requestCaption(k: CaptionKind) {
         if (fetchingCaption != null || permissionTarget != null) return
-        if (CaptionLocationData.hasPermission(context)) refreshCaption(k)
+        if (CaptionLocationData.hasPermission(context)) {
+            if (k == CaptionKind.LOCATION) openLocationPicker() else refreshCaption(k)
+        }
         else {
             permissionTarget = k
             locationPermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
@@ -284,6 +307,7 @@ internal fun rememberMomentReviewSlots(
 
     BackHandler(enabled = true) {
         when {
+            locationPicker -> locationPicker = false
             musicPicker -> musicPicker = false
             infoOpen -> infoOpen = false
             editor != null -> editor = null
@@ -560,7 +584,7 @@ internal fun rememberMomentReviewSlots(
                     CaptionChip("🌙 Goodnight", gradient = Brush.verticalGradient(listOf(Color(0xFF370C6F), Color(0xFF575CD4)))) { choose(CaptionKind.NIGHT) }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text("Thời tiết: Open-Meteo · Địa danh: Android / BigDataCloud. Tọa độ chỉ được tra cứu khi bạn chọn.",
+                Text("Thời tiết: Open-Meteo · Địa điểm: OpenStreetMap / Photon. Tọa độ chỉ được tra cứu khi bạn chọn.",
                     color = Color.White.copy(alpha = 0.46f), fontSize = 11.sp)
                 Spacer(Modifier.height(20.dp))
             }
@@ -568,6 +592,20 @@ internal fun rememberMomentReviewSlots(
     }
 
     if (musicPicker) MusicCaptionDialog(initial = music, onDismiss = { musicPicker = false }, onSelect = { music = it; musicPicker = false })
+
+    if (locationPicker) {
+        locationPickerFix?.let { fix ->
+            LocationCaptionDialog(
+                currentLocation = fix,
+                onDismiss = { locationPicker = false },
+                onSelect = { place ->
+                    location = place.name
+                    locationFix = place.toLocation()
+                    locationPicker = false
+                }
+            )
+        }
+    }
 
     editor?.let {
         AlertDialog(
