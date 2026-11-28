@@ -314,7 +314,8 @@ fun HomePagerScreen(
                 dropdownExpanded = showFriendFilter,
                 adaptiveBackground = !cameraSelected,
                 onAvatarClick = onOpenProfile,
-                showAvatar = !sharedProfileAvatar
+                showAvatar = !sharedProfileAvatar,
+                useNavigationGlass = sharedProfileAvatar
             )
         }
 
