@@ -79,11 +79,8 @@ fun LocketTopBar(
     onAvatarClick: () -> Unit = {},
     dropdownExpanded: Boolean = false,
     adaptiveBackground: Boolean = false,
-    showAvatar: Boolean = true,
-    useNavigationGlass: Boolean = false
+    showAvatar: Boolean = true
 ) {
-    val ambient = if (adaptiveBackground) LocalMomentColor.current else null
-    val glass = if (ambient != null) Glass.Regular.tint(ambient.copy(alpha = 0.25f)) else Glass.Regular
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -96,8 +93,7 @@ fun LocketTopBar(
         Box(
             modifier = Modifier
                 .size(46.dp)
-                .then(if (useNavigationGlass) Modifier.glassEffect(glass, CircleShape)
-                    else if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
                     else Modifier.liquidGlassEffect(CircleShape))
                 .clickable(onClick = onSpeakerClick),
             contentAlignment = Alignment.Center
@@ -114,8 +110,7 @@ fun LocketTopBar(
         Box(Modifier.weight(1f).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .then(if (useNavigationGlass) Modifier.glassEffect(glass, if (adaptiveBackground) CircleShape else RoundedCornerShape(24.dp))
-                    else if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
+                .then(if (adaptiveBackground) Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.075f))
                     else Modifier.liquidGlassEffect(RoundedCornerShape(24.dp)))
                 .clickable(onClick = onTitleClick)
                 .padding(horizontal = if (adaptiveBackground) 20.dp else 18.dp, vertical = if (adaptiveBackground) 12.dp else 10.dp),
@@ -226,7 +221,7 @@ fun FeedBottomBar(
         // Same optical material as TKB's Calm tab bar. Do not replace the
         // pager-driven selector or introduce the library's independent gestures.
         val barGlass = if (base != null) Glass.TabBar.tint(base.copy(alpha = 0.35f)) else Glass.TabBar
-        val buttonGlass = if (base != null) Glass.Regular.tint(base.copy(alpha = 0.25f)) else Glass.Regular
+        val surface = momentSurface(base, LocketPillBg, 0.075f)
         val inactive = Color.White.copy(alpha = 0.52f)
         Row(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 11.dp),
@@ -234,7 +229,7 @@ fun FeedBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showSideActions) {
-                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).glassEffect(buttonGlass, CircleShape)) {
+                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
@@ -281,7 +276,7 @@ fun FeedBottomBar(
                 }
             }
             if (showSideActions) {
-                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(buttonGlass, CircleShape)) {
+                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).clip(CircleShape).background(surface)) {
                     Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
