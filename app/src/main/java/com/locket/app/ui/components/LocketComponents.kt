@@ -224,7 +224,11 @@ fun FeedBottomBar(
     separated: Boolean = false,
     currentScreen: String = "camera",
     showSideActions: Boolean = true,
-    unreadConversations: Int = 0
+    unreadConversations: Int = 0,
+    showNewChatAction: Boolean = false,
+    onNewChatClick: () -> Unit = {},
+    sideTransitionProgress: () -> Float = { 1f },
+    sideActionsEnabled: Boolean = true
 ) {
     if (separated) {
         val inactive = Color.White.copy(alpha = 0.52f)
@@ -234,7 +238,8 @@ fun FeedBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (showSideActions) {
-                IconButton(onClick = onGridClick, modifier = Modifier.size(54.dp).glassEffect(LocketSideNavigationGlass, CircleShape)) {
+                IconButton(onClick = onGridClick, enabled = sideActionsEnabled,
+                    modifier = Modifier.size(54.dp).locketHeaderTransition(sideTransitionProgress).glassEffect(LocketSideNavigationGlass, CircleShape)) {
                     Icon(Icons.Outlined.GridView, "Lưới", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
             } else Spacer(Modifier.size(54.dp))
@@ -265,11 +270,23 @@ fun FeedBottomBar(
                         }
                     }
                 }
-            if (showSideActions) {
-                IconButton(onClick = onShareClick, modifier = Modifier.size(54.dp).glassEffect(LocketSideNavigationGlass, CircleShape)) {
+            // One fixed trailing slot: Share on Home, yellow pen on Chat.
+            when {
+                showSideActions -> IconButton(onClick = onShareClick, enabled = sideActionsEnabled,
+                    modifier = Modifier.size(54.dp).locketHeaderTransition(sideTransitionProgress).glassEffect(LocketSideNavigationGlass, CircleShape)) {
                     Icon(Icons.Default.Share, "Chia sẻ", tint = Color.White, modifier = Modifier.size(25.dp))
                 }
-            } else Spacer(Modifier.size(54.dp))
+                showNewChatAction -> FloatingActionButton(
+                    onClick = { if (sideActionsEnabled) onNewChatClick() },
+                    containerColor = LocketYellow,
+                    contentColor = LocketOnYellow,
+                    shape = CircleShape,
+                    modifier = Modifier.size(54.dp).locketHeaderTransition(sideTransitionProgress)
+                ) {
+                    Icon(Icons.Default.Edit, "Tin nhắn mới", tint = Color.Black, modifier = Modifier.size(24.dp))
+                }
+                else -> Spacer(Modifier.size(54.dp))
+            }
         }
         return
     }
