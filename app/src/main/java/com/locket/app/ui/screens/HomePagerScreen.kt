@@ -47,7 +47,9 @@ fun HomePagerScreen(
     onNavigationState: (Boolean, Boolean) -> Unit = { _, _ -> },
     cameraRequest: Int = 0,
     shareRequest: Int = 0,
-    sharedProfileAvatar: Boolean = false
+    sharedProfileAvatar: Boolean = false,
+    sharedFriendFilterOpen: Boolean? = null,
+    onSharedFriendFilterChange: (Boolean) -> Unit = {}
 ) {
     val allMoments by viewModel.moments.collectAsState()
     val selectedFriend by viewModel.selectedFriend.collectAsState()
@@ -87,7 +89,11 @@ fun HomePagerScreen(
     var cameraSwipeEnabled by remember { mutableStateOf(true) }
     var previousFilter by remember { mutableStateOf(selectedFriend?.uid) }
     var cameraReviewVisible by remember { mutableStateOf(false) }
-    var showFriendFilter by remember { mutableStateOf(false) }
+    var localFriendFilter by remember { mutableStateOf(false) }
+    val showFriendFilter = sharedFriendFilterOpen ?: localFriendFilter
+    fun setFriendFilter(open: Boolean) {
+        if (sharedFriendFilterOpen != null) onSharedFriendFilterChange(open) else localFriendFilter = open
+    }
     var showShare by remember { mutableStateOf(false) }
     var zoomLocked by remember { mutableStateOf(false) }
     var reactionEvent by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -124,7 +130,7 @@ fun HomePagerScreen(
         }
     }
     LaunchedEffect(pagerState.settledPage) { zoomLocked = false; showShare = false }
-    BackHandler(enabled = showFriendFilter) { showFriendFilter = false }
+    BackHandler(enabled = showFriendFilter) { setFriendFilter(false) }
     SideEffect {
         if (tabActive) onNavigationState(showChrome && !showFriendFilter, !cameraSelected)
         onTabSwipeEnabledChange(!showFriendFilter && !showShare && !zoomLocked && !pagerState.isScrollInProgress &&
@@ -295,7 +301,7 @@ fun HomePagerScreen(
 
     // One header and one footer for the entire pager, never duplicated.
     if (showChrome) {
-        Box(
+        if (!sharedProfileAvatar) Box(
             Modifier.align(Alignment.TopCenter).fillMaxWidth()
                 .onSizeChanged { measuredHeader = with(density) { it.height.toDp() } }
         ) {
@@ -306,7 +312,7 @@ fun HomePagerScreen(
                 showDropdownArrow = !cameraSelected,
                 avatarUrl = currentUser.profilePictureUrl,
                 onSpeakerClick = { viewModel.syncAllData() },
-                onTitleClick = { if (cameraSelected) onOpenFriends() else showFriendFilter = !showFriendFilter },
+                onTitleClick = { if (cameraSelected) onOpenFriends() else setFriendFilter(!showFriendFilter) },
                 dropdownExpanded = showFriendFilter,
                 adaptiveBackground = !cameraSelected,
                 onAvatarClick = onOpenProfile,
@@ -335,13 +341,13 @@ fun HomePagerScreen(
             }
         }
     }
-    if (showFriendFilter) {
+    if (showFriendFilter && sharedFriendFilterOpen == null) {
         FeedFriendPopup(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = headerHeight + 8.dp),
             friends = filterFriends,
             selectedFriend = selectedFriend,
-            onSelectFriend = { viewModel.selectFriend(it); showFriendFilter = false },
-            onDismiss = { showFriendFilter = false }
+            onSelectFriend = { viewModel.selectFriend(it); setFriendFilter(false) },
+            onDismiss = { setFriendFilter(false) }
         )
     }
     }
