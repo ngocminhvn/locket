@@ -48,6 +48,11 @@ class LocketApplication : Application(), ImageLoaderFactory {
             .fallbackToDestructiveMigration()
             .build()
         cache = LocketCache(database, sessionManager)
+        val widgetManager = android.appwidget.AppWidgetManager.getInstance(this)
+        if (widgetManager.getAppWidgetIds(android.content.ComponentName(this,
+                com.locket.app.widget.LocketWidgetProvider::class.java)).isNotEmpty()) {
+            com.locket.app.widget.WidgetRefreshJob.schedule(this)
+        }
     }
 
     /**

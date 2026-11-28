@@ -23,6 +23,10 @@ class CaptionSymbolTest {
         assertEquals(CaptionSymbol.CLOUD, captionSymbol("weather", "sf_symbol", "cloud.fill"))
         assertEquals(CaptionSymbol.SUN, captionSymbol("weather", "sf_symbol", "sun.max.fill"))
         assertEquals(CaptionSymbol.RAIN, captionSymbol("weather", "sf_symbol", "cloud.rain.fill"))
+        assertEquals(CaptionSymbol.WIND, captionSymbol("weather", "sf_symbol", "wind"))
+        assertEquals(CaptionSymbol.FOG, captionSymbol("weather", "sf_symbol", "cloud.fog.fill"))
+        assertEquals(CaptionSymbol.SLEET, captionSymbol("weather", "sf_symbol", "cloud.sleet.fill"))
+        assertEquals(CaptionSymbol.SNOW, captionSymbol("weather", "sf_symbol", "cloud.snow.fill"))
         assertNull(captionSymbol("standard", "sf_symbol", "unknown.symbol"))
         assertNull(captionSymbol("weather", "sf_symbol", "unknown.symbol"))
     }

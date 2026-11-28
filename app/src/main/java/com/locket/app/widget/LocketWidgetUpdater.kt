@@ -31,7 +31,8 @@ object LocketWidgetUpdater {
     fun updateAll(context: Context): kotlinx.coroutines.Job =
         CoroutineScope(Dispatchers.IO).launch { renderAll(context.applicationContext, false) }
 
-    internal suspend fun refreshAll(context: Context): Boolean = renderAll(context.applicationContext, true)
+    internal suspend fun refreshAll(context: Context): Boolean =
+        kotlinx.coroutines.withContext(Dispatchers.IO) { renderAll(context.applicationContext, true) }
 
     private suspend fun renderAll(context: Context, network: Boolean): Boolean = renderLock.withLock {
         val app = context.applicationContext as com.locket.app.LocketApplication

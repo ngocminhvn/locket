@@ -7,9 +7,9 @@ import com.locket.app.storage.SessionManager
 
 class LocketWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val pending = goAsync()
-        LocketWidgetUpdater.updateAll(context).invokeOnCompletion { pending.finish() }
+        // Schedule first so the OS can complete the refresh even if it stops the receiver process.
         WidgetRefreshJob.schedule(context, immediate = true)
+        LocketWidgetUpdater.updateAll(context)
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
