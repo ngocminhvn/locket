@@ -11,18 +11,18 @@ build = int(os.environ["GITHUB_RUN_NUMBER"])
 version = f"1.0.{build}" + ("R" if channel == "release" else "dev")
 apk = Path("output") / f"Locket-{version}.apk"
 package = Path(str(apk) + ".xz")
-base = "https://ngocminhvn.github.io/locket/" + channel + "/"
+
 
 def digest(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 manifest = {
-    "channel": channel,
+    "status": channel,
     "versionCode": build,
     "versionName": version,
-    "apkUrl": base + "Locket.apk",
-    "packageUrl": base + "Locket.apk.xz",
+    "apkFile": apk.name,
+    "xzFile": package.name,
     "compression": "xz",
     "sha256": digest(apk),
     "sizeBytes": apk.stat().st_size,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Preserve both channels across full-site Pages deployments.
-Use the last successfully deployed workflow snapshot as authoritative prior state;
-recover from public Pages if the artifact expired. Never silently drop a known channel.
+"""Publish one flat Pages directory with one shared, two-channel manifest.
+Recover the prior successful deployment from its snapshot or the live site.
+Only the replaced channel's old APK/XZ files are removed.
 """
 import hashlib
 import json
@@ -15,12 +15,14 @@ import time
 
 repo = os.environ["GITHUB_REPOSITORY"]
 channel = os.environ["LOCKET_CHANNEL"]
+assert channel in ("release", "dev")
 base = "https://ngocminhvn.github.io/locket/"
 pages = Path("pages")
 pages.mkdir(exist_ok=True)
 current = json.loads(Path("output/update.json").read_text())
 cert = os.environ["LOCKET_CERT_SHA256"].lower()
 run = int(os.environ["GITHUB_RUN_ID"])
+names = ("release", "dev")
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True)
@@ -43,27 +45,42 @@ def fetch(url, target, optional=False):
         time.sleep(2 ** attempt)
     raise RuntimeError("Download failed: " + url)
 
-def verify(name, folder):
-    manifest = json.loads((folder / "update.json").read_text())
-    build = int(manifest["versionCode"])
+def filenames(name, manifest):
+    build = manifest["versionCode"]
+    assert isinstance(build, int) and not isinstance(build, bool) and build > 0
     suffix = "R" if name == "release" else "dev"
-    assert manifest["channel"] == name and manifest["versionName"] == f"1.0.{build}{suffix}"
+    version = f"1.0.{build}{suffix}"
+    assert manifest["status"] == name and manifest["versionName"] == version
     assert manifest["certificateSha256"].lower() == cert
-    assert manifest["apkUrl"] == base + name + "/Locket.apk"
-    assert manifest["packageUrl"] == base + name + "/Locket.apk.xz"
     assert manifest["compression"] == "xz"
+    apk = f"Locket-{version}.apk"
+    assert manifest["apkFile"] == apk and manifest["xzFile"] == apk + ".xz"
+    return apk, apk + ".xz"
+
+def verify(name, manifest, folder):
+    apk, xz = filenames(name, manifest)
     for filename, size_key, hash_key in [
-        ("Locket.apk", "sizeBytes", "sha256"),
-        ("Locket.apk.xz", "packageSizeBytes", "packageSha256"),
+        (apk, "sizeBytes", "sha256"),
+        (xz, "packageSizeBytes", "packageSha256"),
     ]:
         path = folder / filename
-        assert path.stat().st_size == manifest[size_key]
+        assert 0 < path.stat().st_size == manifest[size_key]
         with path.open("rb") as source:
             assert hashlib.file_digest(source, "sha256").hexdigest() == manifest[hash_key].lower()
-    return manifest
 
-# Workflow history is serialized; an earlier successful workflow with a deploy
-# job is authoritative. Ignore legacy runs that never deployed Pages.
+def read_index(path):
+    data = json.loads(path.read_text())
+    assert data["schemaVersion"] == 1
+    result = {name: data[name] for name in names}
+    available = [name for name in names if result[name] is not None]
+    assert available
+    assert data["latestStatus"] == max(available, key=lambda name: result[name]["versionCode"])
+    for name in available:
+        filenames(name, result[name])
+    return result
+
+# A successful deploy job identifies an authoritative snapshot. Legacy build
+# runs never had this job and do not represent Pages publication.
 runs = json.loads(gh("api", f"repos/{repo}/actions/workflows/build.yml/runs?status=success&branch=main&per_page=100"))["workflow_runs"]
 previous = None
 for item in runs:
@@ -81,44 +98,51 @@ if previous:
         subprocess.run(["gh", "run", "download", str(previous), "--repo", repo, "--name", "locket-pages-snapshot", "--dir", str(pages)], check=True)
         restored = True
 
-if not restored:
-    index = pages / "channels.json"
-    has_index = fetch(base + "channels.json", index, optional=previous is None)
-    expected = set(json.loads(index.read_text())["channels"]) if has_index else set()
-    if previous and not has_index:
-        raise RuntimeError("Missing previously deployed Pages index")
-    for name in ("release", "dev"):
-        folder = pages / name
-        folder.mkdir(exist_ok=True)
-        exists = fetch(base + name + "/update.json", folder / "update.json", optional=name not in expected)
-        if exists:
-            for filename in ("Locket.apk", "Locket.apk.xz"):
-                fetch(base + name + "/" + filename, folder / filename)
-            verify(name, folder)
-        else:
-            folder.rmdir()
-if (pages / "channels.json").exists():
-    for name in json.loads((pages / "channels.json").read_text())["channels"]:
-        assert name in ("release", "dev") and (pages / name / "update.json").is_file()
+index = pages / "update.json"
+if restored:
+    channels = read_index(index)
+elif fetch(base + "update.json", index, optional=previous is None):
+    channels = read_index(index)
+    for name in names:
+        if channels[name] is not None:
+            for filename in filenames(name, channels[name]):
+                fetch(base + filename, pages / filename)
+else:
+    # No prior successful Pages deployment; both channels start empty.
+    channels = dict.fromkeys(names)
 
-for name in ("release", "dev"):
-    if (pages / name / "update.json").exists():
-        prior = verify(name, pages / name)
-        if name == channel and prior["versionCode"] >= current["versionCode"]:
-            # Re-running the same run is permitted only for identical bytes.
-            if prior["versionCode"] != current["versionCode"] or prior["sha256"] != current["sha256"]:
-                raise RuntimeError("Refusing to overwrite channel with same/older incompatible build")
+for name in names:
+    if channels[name] is not None:
+        verify(name, channels[name], pages)
+verify(channel, current, Path("output"))
+prior = channels[channel]
+if prior is not None and prior["versionCode"] >= current["versionCode"]:
+    if prior["versionCode"] != current["versionCode"] or prior["sha256"] != current["sha256"]:
+        raise RuntimeError("Refusing to overwrite channel with same/older incompatible build")
 
-folder = pages / channel
-folder.mkdir(exist_ok=True)
-version = current["versionName"]
-for source, dest in [(f"Locket-{version}.apk", "Locket.apk"), (f"Locket-{version}.apk.xz", "Locket.apk.xz"), ("update.json", "update.json")]:
-    shutil.copyfile(Path("output") / source, folder / dest)
-channels = {}
-for name in ("release", "dev"):
-    if (pages / name / "update.json").exists():
-        channels[name] = verify(name, pages / name)["versionName"]
-(pages / "channels.json").write_text(json.dumps({"channels": channels}, indent=2) + "\n")
+channels[channel] = current
+keep = set()
+for name in names:
+    if channels[name] is not None:
+        keep.update(filenames(name, channels[name]))
+for filename in filenames(channel, current):
+    shutil.copyfile(Path("output") / filename, pages / filename)
+# Only remove known old payloads belonging to the replaced channel.
+if prior is not None:
+    for filename in filenames(channel, prior):
+        if filename not in keep:
+            (pages / filename).unlink(missing_ok=True)
+for name in names:
+    if channels[name] is not None:
+        verify(name, channels[name], pages)
+
+latest = max((name for name in names if channels[name] is not None),
+             key=lambda name: channels[name]["versionCode"])
+data = {"schemaVersion": 1, "latestStatus": latest, **channels}
+index.write_text(json.dumps(data, indent=2) + "\n")
 (pages / ".nojekyll").touch()
-(pages / "index.html").write_text('<!doctype html><meta charset="utf-8"><title>Locket downloads</title><h1>Locket</h1>' + "".join(f'<p><a href="{name}/Locket.apk">{name}: {version}</a></p>' for name, version in channels.items()))
-print(channels)
+(pages / "index.html").write_text(
+    '<!doctype html><meta charset="utf-8"><title>Locket downloads</title><h1>Locket</h1>'
+    + "".join(f'<p><a href="{entry["apkFile"]}">{name}: {entry["versionName"]}</a></p>'
+              for name, entry in channels.items() if entry is not None))
+print(json.dumps(data, indent=2))

@@ -68,28 +68,39 @@ private fun installedBuild(context: Context): Long {
 
 private suspend fun latestRelease(channel: String): UpdateRelease? = withContext(Dispatchers.IO) {
     require(channel == "release" || channel == "dev")
-    val prefix = "$PAGES/$channel/"
+    val prefix = "$PAGES/"
     val request = Request.Builder().url(prefix + "update.json?t=" + System.currentTimeMillis())
         .header("Cache-Control", "no-cache").build()
     updateClient.newCall(request).execute().use { response ->
         if (response.code == 404) return@withContext null
         check(response.isSuccessful) { "GitHub Pages HTTP ${response.code}" }
         val bytes = response.body?.bytes() ?: error("Thiếu update.json")
-        val manifest = JsonParser.parseString(bytes.toString(Charsets.UTF_8)).asJsonObject
+        val index = JsonParser.parseString(bytes.toString(Charsets.UTF_8)).asJsonObject
+        check(index.get("schemaVersion").asInt == 1) { "Định dạng update.json không được hỗ trợ" }
+        val entry = index.get(channel) ?: error("Thiếu trạng thái kênh cập nhật")
+        if (entry.isJsonNull) return@withContext null
+        val manifest = entry.asJsonObject
         val build = manifest.get("versionCode").asLong
         val version = manifest.get("versionName").asString
         val suffix = if (channel == "release") "R" else "dev"
-        check(build > 0 && version == "1.0.$build$suffix" && manifest.get("channel").asString == channel) { "Sai kênh hoặc phiên bản cập nhật" }
-        val url = manifest.get("apkUrl").asString
-        val packageUrl = manifest.get("packageUrl").asString
-        check(url == prefix + "Locket.apk" && packageUrl == prefix + "Locket.apk.xz") { "Nguồn cập nhật không hợp lệ" }
+        check(build > 0 && version == "1.0.$build$suffix" && manifest.get("status").asString == channel) { "Sai kênh hoặc phiên bản cập nhật" }
+        val apkFile = manifest.get("apkFile").asString
+        val xzFile = manifest.get("xzFile").asString
+        check(apkFile == "Locket-$version.apk" && xzFile == "$apkFile.xz") { "Tên tệp cập nhật không hợp lệ" }
+        val url = prefix + apkFile
+        val packageUrl = prefix + xzFile
         val size = manifest.get("sizeBytes").asLong
         val packageSize = manifest.get("packageSizeBytes").asLong
         check(size in 1L..200_000_000L && packageSize in 1L..200_000_000L && manifest.get("compression").asString == "xz") { "Kích thước hoặc định dạng không hợp lệ" }
         val hash = manifest.get("sha256").asString
         val packageHash = manifest.get("packageSha256").asString
         check(hash.matches(Regex("[0-9a-fA-F]{64}")) && packageHash.matches(Regex("[0-9a-fA-F]{64}"))) { "SHA-256 không hợp lệ" }
-        if (RustLocketCore.isAvailable) RustLocketCore.verifyUpdateManifest(bytes, build, version, url, size, null)
+        if (RustLocketCore.isAvailable) {
+            // Existing Rust verifier validates a single entry with an absolute URL.
+            val normalized = manifest.deepCopy().apply { addProperty("apkUrl", url) }
+            val verified = RustLocketCore.verifyUpdateManifest(normalized.toString().toByteArray(Charsets.UTF_8), build, version, url, size, null)
+            check(verified.equals(hash, ignoreCase = true)) { "SHA-256 manifest không khớp" }
+        }
         UpdateRelease(version, build, url, size, hash, packageUrl, packageSize, packageHash, true)
     }
 }

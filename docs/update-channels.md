@@ -1,8 +1,9 @@
 # Locket update channels
 
-- Run workflow: checkbox Release off (default) => 1.0.<run>dev; on => 1.0.<run>R. Both are signed Android release builds with R8 and the same package/certificate. A marker-triggered explicit build defaults to Dev unless its commit contains [release build].
-- Source: GitHub Pages (Settings > Pages > Build and deployment > Source > GitHub Actions). Deploy the complete site each time, preserving the other channel using the latest successful Pages snapshot or verified public files. No new GitHub Release or tag.
-- Tap version: Release. Hold version: Dev. Explicit channel only, no fallback to another channel. Monotonic versionCode: no downgrade to an older Release after installing a newer Dev.
-- APK and XZ payload checks include length, SHA-256, expected URL, channel/version, APK package and signature (Android installer final verification).
-- Older APKs still check GitHub Releases. Existing historical releases are untouched; installing a new Pages APK manually once is required for those versions. Do not create a bridge tag automatically without owner approval.
-- CI not triggered by ordinary source commits. First Pages deployment requires repository Pages source to be enabled. No build/device check was run in this change.
+- Run workflow: checkbox Release off (default) => 1.0.<run>dev; on => 1.0.<run>R. Both are signed Android release builds with R8 and the same package/certificate. An explicit marker-triggered build defaults to Dev unless its commit contains [release build].
+- GitHub Pages (Settings > Pages > Source > GitHub Actions). One flat folder, one update.json with schemaVersion, latestStatus (highest versionCode), and independent release/dev entries (null until published). Entries contain status, versionCode/versionName, apkFile/xzFile, compressed/uncompressed lengths and SHA-256, certificate and commit. The APK names contain the actual version; no URL or folder is duplicated per entry.
+- The updater reads the same manifest for either gesture. Tap version: Release. Hold version: Dev. No automatic cross-channel fallback. Monotonic versionCode prevents installing older Release over newer Dev.
+- Preserve only the latest APK and XZ for each channel using prior successful Pages snapshot or verified live files. Remove only the superseded files of the channel being updated. No extra tag, release, branch, or duplicated payload in the published site. Snapshot artifacts are retained for recovery.
+- APK and XZ payload checks include length, SHA-256, strict file names, channel/version, APK package and signature (Android installer final verification).
+- The earlier two-directory scheme was never deployed (Pages disabled when changed). Existing GitHub Releases untouched; old APKs need a one-time manual install of a Pages-capable build.
+- CI not triggered by ordinary source commits. Pages must be enabled before deployment. No build/device check was run in this change.
