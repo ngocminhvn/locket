@@ -242,13 +242,19 @@ fun HomePagerScreen(
             )
         } else if (page > moments.size) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (loading && moments.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(horizontal = 1.dp)
+                        .clipToBounds()) {
+                        MomentLoadingSkeleton(Modifier.fillMaxSize())
+                    }
+                }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (loading) {
                         CircularProgressIndicator(color = com.locket.app.ui.theme.LocketYellow)
                         Text(if (moments.isEmpty()) "Đang tải khoảnh khắc..." else "Đang tải ảnh cũ...", color = Color.White)
                     } else Text(error ?: if (hasMore) "Vuốt để tải ảnh cũ" else "Chưa có khoảnh khắc nào", color = Color.White)
                     if (error != null) TextButton(onClick = { if (moments.isEmpty() && !ownSelected) viewModel.refreshFeed() else loadFilteredHistory() }) { Text("Thử lại") }
-                    TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) { Text("Về camera") }
+                    if (!loading) TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(0) } }) { Text("Về camera") }
                 }
             }
         } else {

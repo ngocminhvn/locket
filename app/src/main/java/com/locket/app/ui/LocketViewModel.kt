@@ -302,7 +302,9 @@ class LocketViewModel(
                     MomentVideoCache.prefetch(LocketApplication.instance, url)
                     videoPrefetched.add(url)
                     while (videoPrefetched.size > 48) videoPrefetched.remove(videoPrefetched.first())
-                } finally { videoPrefetchJobs.remove(url) }
+                } finally {
+                    if (videoPrefetchJobs[url] == kotlin.coroutines.coroutineContext[Job]) videoPrefetchJobs.remove(url)
+                }
             }
         }
     }
@@ -572,7 +574,15 @@ class LocketViewModel(
         try {
             // Read the same history collection as Listen, not the widget endpoint.
             val page = apiClient.fetchHistoryPage().getOrThrow()
-            if (activeAccount(account)) applyFeed(account, page.moments)
+            if (activeAccount(account)) {
+                applyFeed(account, page.moments)
+                // Initialize pagination once from the same query; don't fetch page 1 twice.
+                if (historyCursor == null && _historyHasMore.value && historyJob?.isActive != true) {
+                    historyCursor = page.nextPageToken
+                    _historyHasMore.value = page.nextPageToken != null
+                    _historyError.value = null
+                }
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { if (activeAccount(account)) _feedError.value = e.message ?: "Không tải được khoảnh khắc" }
         finally { if (activeAccount(account)) _feedLoading.value = false }
@@ -719,7 +729,13 @@ class LocketViewModel(
                             delta.upserts.forEach { conv ->
                                 updated[conv.id] = conv.copy(friend = mergeConversationFriend(conv.friend, known[conv.friend.uid]))
                             }
-                            val resolved = updated.values.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id })
+                            val missing = updated.values.map { it.friend }.filter { it.uid.isNotBlank() && (it.displayName.isBlank() || it.displayName == it.uid) }.map { it.uid }.distinct()
+                            val names = if (missing.isEmpty()) emptyMap() else apiClient.resolveUserNames(missing)
+                            val resolved = updated.values.map { conv ->
+                                names[conv.friend.uid]?.let { name ->
+                                    conv.copy(friend = conv.friend.copy(displayName = name.first, avatarUrl = name.second.ifBlank { conv.friend.avatarUrl }))
+                                } ?: conv
+                            }.sortedWith(compareByDescending<Conversation> { it.lastMessageAtMs }.thenBy { it.id })
                             if (resolved != old) {
                                 cache.saveConversations(resolved)
                                 if (activeAccount(account)) _conversations.value = resolved
@@ -1145,7 +1161,13 @@ class LocketViewModel(
                 val current = _activeConversationId.value
                 if (activeFriendUid == receiverUid && current != null) {
                     if (!_chatRealtime.value) launch { fetchChatMessagesAndMarkRead(current, incremental = true) }
-                    launch { refreshConversations(force = false) }
+                    else launch {
+                        kotlinx.coroutines.delay(3_000L)
+                        if (activeAccount(account) && _activeConversationId.value == current && _pendingChat.value.any { it.token == token }) {
+                            fetchChatMessagesAndMarkRead(current, incremental = true)
+                        }
+                    }
+                    if (!conversationsLive) launch { refreshConversations(force = false) }
                 } else if (activeFriendUid == receiverUid) {
                     openChat(receiverUid)
                 } else refreshConversations()

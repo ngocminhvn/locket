@@ -603,7 +603,7 @@ internal fun MomentReactionBar(
 
 
 @Composable
-private fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
+internal fun MomentLoadingSkeleton(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "moment-loading")
     val alpha by transition.animateFloat(
         initialValue = 0.25f, targetValue = 0.65f,
