@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -39,7 +40,7 @@ internal object CaptionLocationData {
             .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
         check(providers.isNotEmpty()) { "Hãy bật vị trí trên điện thoại" }
         for (provider in providers) {
-            val location = withTimeoutOrNull(8_000L) {
+            val location = try { withTimeoutOrNull(8_000L) {
                 suspendCancellableCoroutine<Location?> { continuation ->
                     val signal = CancellationSignal()
                     continuation.invokeOnCancellation { signal.cancel() }
@@ -53,23 +54,70 @@ internal object CaptionLocationData {
                         if (continuation.isActive) continuation.resumeWithException(e)
                     }
                 }
-            }
+            } } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { null }
             if (location != null) return location
         }
         error("Chưa lấy được vị trí. Hãy bấm lại để thử.")
     }
 
-    @Suppress("DEPRECATION")
-    suspend fun placeName(context: Context, location: Location): String = withContext(Dispatchers.IO) {
-        check(Geocoder.isPresent()) { "Thiết bị không có dịch vụ tra cứu địa danh" }
-        val address = Geocoder(context, Locale.forLanguageTag("vi-VN"))
-            .getFromLocation(location.latitude, location.longitude, 1)?.firstOrNull()
-            ?: error("Không tìm thấy tên khu vực")
-        // Show only a locality/administrative area, never a house number or street address.
-        listOfNotNull(address.locality, address.subAdminArea, address.adminArea, address.countryName)
+    private fun area(address: android.location.Address): String? =
+        listOfNotNull(address.locality, address.subLocality, address.subAdminArea, address.adminArea)
             .map { it.trim() }.firstOrNull { it.isNotBlank() }
-            ?: error("Không tìm thấy tên khu vực")
+
+    @Suppress("DEPRECATION")
+    private suspend fun platformArea(context: Context, location: Location): String? {
+        if (!Geocoder.isPresent()) return null
+        val geocoder = Geocoder(context, Locale.forLanguageTag("vi-VN"))
+        val addresses = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            withTimeoutOrNull(3_000L) {
+                suspendCancellableCoroutine<List<android.location.Address>> { continuation ->
+                    try {
+                        geocoder.getFromLocation(location.latitude, location.longitude, 3,
+                            object : Geocoder.GeocodeListener {
+                                override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                                    if (continuation.isActive) continuation.resume(addresses)
+                                }
+                                override fun onError(errorMessage: String?) {
+                                    if (continuation.isActive) continuation.resume(emptyList())
+                                }
+                            })
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                }
+            }.orEmpty()
+        } else withContext(Dispatchers.IO) {
+            geocoder.getFromLocation(location.latitude, location.longitude, 3).orEmpty()
+        }
+        return addresses.firstNotNullOfOrNull(::area)
     }
+
+    /** Resolve only the current device location, on the device, after an explicit Location action. */
+    suspend fun placeName(context: Context, location: Location): String {
+        val local = try { platformArea(context, location) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { null }
+        if (!local.isNullOrBlank()) return local
+
+        return withContext(Dispatchers.IO) {
+            val url = "https://api.bigdatacloud.net/data/reverse-geocode-client".toHttpUrl().newBuilder()
+                .addQueryParameter("latitude", location.latitude.toString())
+                .addQueryParameter("longitude", location.longitude.toString())
+                .addQueryParameter("localityLanguage", "vi").build()
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                check(response.isSuccessful) { "Dịch vụ tra cứu địa danh tạm thời không khả dụng. Hãy thử lại." }
+                val json = JSONObject(response.body?.string() ?: error("Thiếu dữ liệu địa danh"))
+                readAreaName(json) ?: error("Không tìm thấy tên khu vực. Hãy thử lại ở nơi có tín hiệu vị trí tốt hơn.")
+            }
+        }
+    }
+
+    internal fun readAreaName(json: JSONObject): String? =
+        listOf("locality", "city", "principalSubdivision")
+            .asSequence().filter { !json.isNull(it) }
+            .map { json.optString(it).trim() }
+            .firstOrNull { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
